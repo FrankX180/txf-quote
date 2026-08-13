@@ -295,44 +295,36 @@
 
     function sessKey() { return session === "night" ? "night" : "day"; }
 
-    function resample(bars, minutes) {
-      if (!bars || minutes <= 1) return bars || [];
-      const ms = minutes * 60 * 1000;
-      const out = [];
-      let cur = null;
-      bars.forEach((b) => {
-        const t = Math.floor(b.timestamp / ms) * ms;
-        if (!cur || cur.timestamp !== t) {
-          if (cur) out.push(cur);
-          cur = {
-            timestamp: t,
-            open: b.open, high: b.high, low: b.low, close: b.close,
-            volume: b.volume || 0, date: b.date, session: b.session,
-          };
-        } else {
-          cur.high = Math.max(cur.high, b.high);
-          cur.low = Math.min(cur.low, b.low);
-          cur.close = b.close;
-          cur.volume += (b.volume || 0);
-        }
-      });
-      if (cur) out.push(cur);
-      return out;
-    }
-
-    function minuteSeries() {
-      const m1 = minutePack[sessKey() + "_1m"] || [];
-      return resample(m1, daySpan);
+    function packBars() {
+      const k = sessKey();
+      return {
+        m1: minutePack[k + "_1m"] || [],
+        m5: minutePack[k + "_5m"] || [],
+        m15: minutePack[k + "_15m"] || [],
+      };
     }
 
     function lastDates(nDays) {
-      const bars = (minutePack[sessKey() + "_1m"] || []).concat(dailyPack[sessKey()] || []);
+      const { m1, m5, m15 } = packBars();
+      const bars = m15.concat(m5, m1);
       const dates = [];
       for (let i = bars.length - 1; i >= 0 && dates.length < nDays; i--) {
         const d = bars[i].date;
         if (d && dates.indexOf(d) < 0) dates.push(d);
       }
       return dates;
+    }
+
+    function minuteSeries() {
+      const { m1, m5, m15 } = packBars();
+      if (daySpan === 1 && m1.length >= 2) return m1;
+      const keep = lastDates(daySpan);
+      const take = (rows) => rows.filter((b) => keep.indexOf(b.date) >= 0);
+      const have5 = new Set(m5.map((b) => b.date));
+      if (keep.length && keep.every((d) => have5.has(d)) && take(m5).length >= 2) return take(m5);
+      if (take(m15).length >= 2) return take(m15);
+      if (take(m5).length >= 2) return take(m5);
+      return take(m1);
     }
 
     function linePoints() {
