@@ -14,12 +14,21 @@
       --card: #fff;
     }
     * { box-sizing: border-box; }
-    html, body { overflow-x: hidden; }
+    html {
+      background: var(--bg);
+      overflow-x: hidden;
+    }
     body {
-      margin: 0;
+      width: 1060px;
+      max-width: 1060px;
+      margin: 0 auto;
+      overflow-x: hidden;
       font-family: "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
       background: var(--bg);
       color: #111827;
+    }
+    @media (max-width: 1060px) {
+      body { width: 100%; max-width: 100%; }
     }
     .wrap {
       width: 100%;
