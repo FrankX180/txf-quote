@@ -110,7 +110,7 @@
     .oi td:first-child, .oi th:first-child { text-align: left; color: #6b7280; }
     table.q td.lab { color: #6b7280; }
     .ob { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 0; table-layout: fixed; }
-    .ob col.c-qty { width: 28px; }
+    .ob col.c-qty { width: 18px; }
     .ob col.c-bar { width: auto; }
     .ob col.c-px { width: 58px; }
     .ob td { padding: 2px 3px; font-variant-numeric: tabular-nums; }
@@ -345,9 +345,8 @@
       levels.forEach((i) => {
         maxSz = Math.max(maxSz, n(x["CBidSize" + i]) || 0, n(x["CAskSize" + i]) || 0);
       });
-      maxSz += 2;
       let ob = `<colgroup><col class="c-qty"><col class="c-bar"><col class="c-px"><col class="c-px"><col class="c-bar"><col class="c-qty"></colgroup>`;
-      ob += `<tr><td class="lab bid">買量</td><td></td><td class="pxb">買價</td><td class="pxa">賣價</td><td></td><td class="lab ask">賣量</td></tr>`;
+      ob += `<tr><td class="lab bid">口</td><td></td><td class="pxb">買價</td><td class="pxa">賣價</td><td></td><td class="lab ask">口</td></tr>`;
       levels.forEach((i) => {
         const bs = n(x["CBidSize" + i]) || 0;
         const asz = n(x["CAskSize" + i]) || 0;
