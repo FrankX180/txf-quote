@@ -28,8 +28,8 @@
       padding: 18px 20px;
       margin-bottom: 12px;
     }
-    #daychips { display: none; align-items: center; gap: 8px; flex-wrap: wrap; }
-    #daychips.show { display: flex; }
+    .chipline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 0; }
+    .rowlab { font-size: 13px; font-weight: 800; color: #111; min-width: 2.4em; }
     .hero { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
     .title-row { display: flex; align-items: center; gap: 8px; }
     .title { font-size: 22px; font-weight: 800; }
@@ -75,7 +75,7 @@
     }
     .meta { font-size: 13px; line-height: 1.7; color: #374151; }
     canvas { width: 100%; height: 280px; display: block; }
-    .chips { display: flex; gap: 8px; margin: 6px 0 10px; flex-wrap: wrap; }
+    .chips { margin: 4px 0 8px; }
     .chip, .mode {
       background: #f3f4f6; border: 0; border-radius: 4px; padding: 4px 10px;
       font-size: 13px; cursor: pointer; font-weight: 600; color: #374151;
@@ -130,15 +130,25 @@
       <div class="grid">
         <div>
           <div class="chips">
-            <button class="mode on" id="mode-k" type="button">K線</button>
-            <button class="mode" id="mode-line" type="button">走勢</button>
-            <span id="daychips">
-              <button class="chip on" data-days="1" type="button">當日</button>
-              <button class="chip" data-days="2" type="button">二日</button>
-              <button class="chip" data-days="3" type="button">三日</button>
-              <button class="chip" data-days="4" type="button">四日</button>
-              <button class="chip" data-days="5" type="button">五日</button>
-            </span>
+            <div class="chipline">
+              <span class="rowlab">Ｋ線</span>
+              <button class="chip" data-k="1" type="button">１分</button>
+              <button class="chip" data-k="5" type="button">５分</button>
+              <button class="chip" data-k="15" type="button">１５</button>
+              <button class="chip" data-k="30" type="button">３０</button>
+              <button class="chip" data-k="d" type="button">日Ｋ</button>
+              <button class="chip" data-k="w" type="button">週Ｋ</button>
+              <button class="chip" data-k="m" type="button">月Ｋ</button>
+            </div>
+            <div class="chipline">
+              <span class="rowlab">走勢</span>
+              <button class="chip" data-line="0" type="button">當日</button>
+              <button class="chip on" data-line="1" type="button">１日</button>
+              <button class="chip" data-line="2" type="button">２日</button>
+              <button class="chip" data-line="3" type="button">３日</button>
+              <button class="chip" data-line="4" type="button">４日</button>
+              <button class="chip" data-line="5" type="button">５日</button>
+            </div>
           </div>
           <div class="meta" id="sumline"></div>
           <canvas id="chart" width="720" height="280"></canvas>
@@ -165,7 +175,8 @@
     let hist = { night: [], day: [] };
     let live = false;
     let daySpan = 1;
-    let chartMode = "k";
+    let chartMode = "line";
+    let kInt = "1";
     let dailyPack = { night: [], day: [] };
     let minutePack = {
       night_1m: [], day_1m: [],
@@ -352,18 +363,18 @@
 
     function minuteSeries() {
       const { m1, m5, m15 } = packBars();
-      if (daySpan === 1 && m1.length >= 2) return m1;
-      const keep = lastDates(daySpan);
+      const n = daySpan < 1 ? 1 : daySpan;
+      const keep = lastDates(n);
       const take = (rows) => rows.filter((b) => keep.indexOf(b.date) >= 0);
-      const have5 = new Set(m5.map((b) => b.date));
-      if (keep.length && keep.every((d) => have5.has(d)) && take(m5).length >= 2) return take(m5);
-      if (take(m15).length >= 2) return take(m15);
+      if (daySpan < 1 && take(m1).length >= 2) return take(m1);
+      if (n === 1 && take(m1).length >= 2) return take(m1);
       if (take(m5).length >= 2) return take(m5);
+      if (take(m15).length >= 2) return take(m15);
       return take(m1);
     }
 
     function linePoints() {
-      const keep = lastDates(daySpan);
+      const keep = lastDates(daySpan < 1 ? 1 : daySpan);
       const mins = minuteSeries().filter((b) => keep.indexOf(b.date) >= 0);
       const pts = mins.map((b) => ({ px: b.close, vol: b.volume, time: b.timestamp }));
       const livePts = session === "day" ? (hist.day || []) : (hist.night || []);
@@ -393,27 +404,79 @@
       return Object.keys(by).sort().map((k) => by[k]);
     }
 
+    function dailyBars() {
+      if (session === "merge") return mergeDaily();
+      return dailyPack[sessKey()] || [];
+    }
+
+    function resample(bars, ms) {
+      const out = [];
+      let cur = null;
+      (bars || []).forEach((b) => {
+        const slot = Math.floor(b.timestamp / ms) * ms;
+        if (!cur || cur.timestamp !== slot) {
+          if (cur) out.push(cur);
+          cur = {
+            timestamp: slot,
+            open: b.open, high: b.high, low: b.low, close: b.close,
+            volume: b.volume || 0, date: b.date,
+          };
+        } else {
+          cur.high = Math.max(cur.high, b.high);
+          cur.low = Math.min(cur.low, b.low);
+          cur.close = b.close;
+          cur.volume += b.volume || 0;
+        }
+      });
+      if (cur) out.push(cur);
+      return out;
+    }
+
+    function foldDaily(bars, keyFn) {
+      const by = {};
+      (bars || []).forEach((b) => {
+        const k = keyFn(b);
+        if (!by[k]) {
+          by[k] = {
+            timestamp: b.timestamp,
+            open: b.open, high: b.high, low: b.low, close: b.close,
+            volume: b.volume || 0, date: b.date,
+          };
+          return;
+        }
+        const o = by[k];
+        o.high = Math.max(o.high, b.high);
+        o.low = Math.min(o.low, b.low);
+        o.close = b.close;
+        o.volume += b.volume || 0;
+      });
+      return Object.keys(by).sort().map((k) => by[k]);
+    }
+
+    function weekKey(b) {
+      const d = new Date(b.timestamp);
+      const day = d.getDay();
+      const diff = day === 0 ? 6 : day - 1;
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - diff);
+      return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    }
+
+    function monthKey(b) {
+      const d = new Date(b.timestamp);
+      return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+    }
+
     function klineData() {
       const { m1, m5, m15 } = packBars();
-      const keep = lastDates(session === "merge" ? 2 : 1);
-      const take = (rows) => rows.filter((b) => keep.indexOf(b.date) >= 0);
-      if (session === "merge") {
-        const a = take(m1);
-        const b = take(m5);
-        const has = (rows, s) => rows.some((x) => x.session === s);
-        if (a.length && has(a, "day") && has(a, "night")) return a;
-        if (has(a, "night") && has(b, "day")) {
-          return joinBars(a.filter((x) => x.session === "night"), b.filter((x) => x.session === "day"));
-        }
-        if (b.length && has(b, "day") && has(b, "night")) return b;
-        if (a.length) return a;
-        if (b.length) return b;
-        const c = take(m15);
-        return c.length ? c : mergeDaily();
-      }
-      const mins = take(m1);
-      if (mins.length) return mins;
-      return dailyPack[sessKey()] || [];
+      if (kInt === "1") return m1.length ? m1 : m5;
+      if (kInt === "5") return m5.length ? m5 : resample(m1, 5 * 60 * 1000);
+      if (kInt === "15") return m15.length ? m15 : resample(m5.length ? m5 : m1, 15 * 60 * 1000);
+      if (kInt === "30") return resample(m15.length ? m15 : (m5.length ? m5 : m1), 30 * 60 * 1000);
+      const d = dailyBars();
+      if (kInt === "w") return foldDaily(d, weekKey);
+      if (kInt === "m") return foldDaily(d, monthKey);
+      return d;
     }
 
     function draw() {
@@ -611,32 +674,28 @@
     $("tab-merge").onclick = () => setSession("merge");
     $("tab-day").onclick = () => setSession("day");
     $("tab-night").onclick = () => setSession("night");
-    function syncDayChips() {
-      const el = $("daychips");
-      if (!el) return;
-      if (chartMode === "line") el.classList.add("show");
-      else el.classList.remove("show");
+    function markChips() {
+      document.querySelectorAll(".chip[data-k]").forEach((b) => {
+        b.classList.toggle("on", chartMode === "k" && b.getAttribute("data-k") === kInt);
+      });
+      document.querySelectorAll(".chip[data-line]").forEach((b) => {
+        b.classList.toggle("on", chartMode === "line" && Number(b.getAttribute("data-line")) === daySpan);
+      });
     }
 
-    $("mode-line").onclick = () => {
-      chartMode = "line";
-      $("mode-line").classList.add("on");
-      $("mode-k").classList.remove("on");
-      syncDayChips();
-      draw();
-    };
-    $("mode-k").onclick = () => {
-      chartMode = "k";
-      $("mode-k").classList.add("on");
-      $("mode-line").classList.remove("on");
-      syncDayChips();
-      draw();
-    };
-    document.querySelectorAll(".chip[data-days]").forEach((btn) => {
+    document.querySelectorAll(".chip[data-k]").forEach((btn) => {
       btn.onclick = () => {
-        document.querySelectorAll(".chip[data-days]").forEach((b) => b.classList.remove("on"));
-        btn.classList.add("on");
-        daySpan = Number(btn.getAttribute("data-days"));
+        chartMode = "k";
+        kInt = btn.getAttribute("data-k");
+        markChips();
+        draw();
+      };
+    });
+    document.querySelectorAll(".chip[data-line]").forEach((btn) => {
+      btn.onclick = () => {
+        chartMode = "line";
+        daySpan = Number(btn.getAttribute("data-line"));
+        markChips();
         draw();
       };
     });
@@ -660,7 +719,7 @@
       draw();
     }
 
-    syncDayChips();
+    markChips();
     load();
     loadKline();
     pollLive();
