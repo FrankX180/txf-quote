@@ -154,6 +154,7 @@
     .ob .bar-ask { text-align: left; }
     .ob .pxb { color: var(--up); text-align: right; white-space: nowrap; font-size: 14px; font-weight: 700; }
     .ob .pxa { color: var(--dn); text-align: left; white-space: nowrap; font-size: 14px; font-weight: 700; }
+    .ob .rng { text-align: right; font-size: 12px; font-weight: 800; color: #374151; white-space: nowrap; }
     .bar-wrap {
       position: relative;
       display: flex;
@@ -278,7 +279,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0060</div>
+    <div class="ver">v20260814-0062</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -433,7 +434,10 @@
         maxSz = Math.max(maxSz, n(x["CBidSize" + i]) || 0, n(x["CAskSize" + i]) || 0);
       });
       let ob = `<colgroup><col class="c-qty"><col class="c-bar"><col class="c-px"><col class="c-px"><col class="c-bar"><col class="c-qty"></colgroup>`;
-      ob += `<tr><td class="lab bid"></td><td></td><td class="pxb">買價</td><td class="pxa">賣價</td><td></td><td class="lab ask"></td></tr>`;
+      const amp = (highPx != null && lowPx != null) ? Math.abs(highPx - lowPx) : null;
+      const ampPct = (amp != null && openPx) ? (amp / openPx) * 100 : null;
+      const ampTxt = amp == null ? "" : ("震幅" + Math.round(amp) + "點(" + (ampPct == null ? "—" : ampPct.toFixed(1) + "%") + ")");
+      ob += `<tr><td class="lab bid"></td><td></td><td class="pxb">買價</td><td class="pxa">賣價</td><td colspan="2" class="rng">${ampTxt}</td></tr>`;
       levels.forEach((i) => {
         const bs = n(x["CBidSize" + i]) || 0;
         const asz = n(x["CAskSize" + i]) || 0;
