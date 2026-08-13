@@ -737,14 +737,15 @@
     function renderK() {
       if (typeof klinecharts === "undefined") return;
       const data = klineData();
-      if (!kchart) kchart = klinecharts.init("khost", { styles: twStyles() });
       const needVol = kInt !== "d" && kInt !== "w" && kInt !== "m";
-      if (needVol && !kVolOn) {
-        kchart.createIndicator("VOL", false, { id: "vol_pane" });
-        kVolOn = true;
-      } else if (!needVol && kVolOn) {
-        kchart.removeIndicator({ paneId: "vol_pane", name: "VOL" });
-        kVolOn = false;
+      if (!kchart || kVolOn !== needVol) {
+        if (kchart) {
+          klinecharts.dispose("khost");
+          kchart = null;
+        }
+        kchart = klinecharts.init("khost", { styles: twStyles() });
+        if (needVol) kchart.createIndicator("VOL", false, { id: "vol_pane" });
+        kVolOn = needVol;
       }
       kchart.applyNewData(data.length ? data : []);
     }
