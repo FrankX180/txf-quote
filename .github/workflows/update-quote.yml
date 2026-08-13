@@ -20,7 +20,7 @@ jobs:
           python-version: "3.12"
       - name: Fetch TAIFEX snapshot
         run: python scripts/fetch_quote.py
-      - name: Export 1-min from CyndiTD TXF_1m.db (local only)
+      - name: Fetch Yahoo WTX 1m/5m/15m
         run: python scripts/fetch_minute.py
         continue-on-error: true
       - name: Commit snapshot

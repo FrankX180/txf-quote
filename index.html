@@ -119,7 +119,7 @@
       </div>
       <div class="note">
         即時：API Manager <code>:8700</code>。K 線用 BLOK 同套 <code>klinecharts v9</code>（漲紅跌綠）。
-        1～5 日走勢／分 K 來自 CyndiTD <code>TXF_1m.db</code>；日 K 備援來自 <code>futures_daily</code>。
+        1～5 日走勢／分 K 來自奇摩期貨 <code>WTX&amp;</code>（當日 1 分、多日 5／15 分）；日 K 備援來自 <code>futures_daily</code>。
       </div>
     </div>
   </div>
@@ -135,7 +135,11 @@
     let daySpan = 1;
     let chartMode = "line";
     let dailyPack = { night: [], day: [] };
-    let minutePack = { night: [], day: [] };
+    let minutePack = {
+      night_1m: [], day_1m: [],
+      night_5m: [], day_5m: [],
+      night_15m: [], day_15m: [],
+    };
     let kchart = null;
 
     const $ = (id) => document.getElementById(id);
@@ -246,8 +250,20 @@
 
     function sessKey() { return session === "night" ? "night" : "day"; }
 
+    function minuteSeries() {
+      const k = sessKey();
+      const m1 = minutePack[k + "_1m"] || [];
+      const m5 = minutePack[k + "_5m"] || [];
+      const m15 = minutePack[k + "_15m"] || [];
+      if (daySpan === 1 && m1.length >= 2) return m1;
+      if (daySpan <= 3 && m5.length >= 2) return m5;
+      if (m15.length >= 2) return m15;
+      if (m5.length >= 2) return m5;
+      return m1;
+    }
+
     function lastDates(nDays) {
-      const bars = (minutePack[sessKey()] || []).concat(dailyPack[sessKey()] || []);
+      const bars = minuteSeries().concat(dailyPack[sessKey()] || []);
       const dates = [];
       for (let i = bars.length - 1; i >= 0 && dates.length < nDays; i--) {
         const d = bars[i].date;
@@ -258,7 +274,7 @@
 
     function linePoints() {
       const keep = lastDates(daySpan);
-      const mins = (minutePack[sessKey()] || []).filter((b) => keep.indexOf(b.date) >= 0);
+      const mins = minuteSeries().filter((b) => keep.indexOf(b.date) >= 0);
       const pts = mins.map((b) => ({ px: b.close, vol: b.volume, time: b.timestamp }));
       const livePts = hist[session] || [];
       const lastTs = pts.length ? pts[pts.length - 1].time : 0;
@@ -271,7 +287,7 @@
 
     function klineData() {
       const keep = lastDates(daySpan);
-      const mins = (minutePack[sessKey()] || []).filter((b) => keep.indexOf(b.date) >= 0);
+      const mins = minuteSeries().filter((b) => keep.indexOf(b.date) >= 0);
       if (mins.length) return mins;
       return (dailyPack[sessKey()] || []).filter((b) => keep.indexOf(b.date) >= 0);
     }
@@ -518,8 +534,13 @@
       } catch (e) {}
       try {
         const m = await fetch("data/kline-minute.json?t=" + Date.now()).then((r) => r.json());
-        minutePack.night = m.night || [];
-        minutePack.day = m.day || [];
+        ["night_1m","day_1m","night_5m","day_5m","night_15m","day_15m"].forEach((k) => {
+          minutePack[k] = m[k] || [];
+        });
+        if (!minutePack.night_1m.length && (m.night || []).length) {
+          minutePack.night_1m = m.night;
+          minutePack.day_1m = m.day || [];
+        }
       } catch (e) {}
       draw();
     }
