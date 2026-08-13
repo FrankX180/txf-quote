@@ -37,7 +37,14 @@
     .pxrow { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
     .pxmeta { padding-bottom: 6px; }
     .related { display: flex; gap: 6px; margin-top: 8px; }
-    #minik { width: 46%; max-width: 420px; height: 168px; flex-shrink: 0; }
+    #minik {
+      position: relative;
+      width: 46%;
+      max-width: 460px;
+      min-width: 220px;
+      height: 200px;
+      flex-shrink: 0;
+    }
     .rel {
       border: 1.5px solid #2563eb;
       border-radius: 6px;
@@ -664,18 +671,30 @@
       const bars = miniBars();
       if (bars.length < 2) return;
       if (!miniChart) {
-        miniChart = klinecharts.init("minik", { styles: twStyles() });
-        miniChart.setBarSpace(6);
+        if (el.clientWidth < 40 || el.clientHeight < 40) {
+          setTimeout(drawMiniK, 80);
+          return;
+        }
+        miniChart = klinecharts.init(el, { styles: twStyles() });
+        if (!miniChart) return;
+        miniChart.setBarSpace(8);
+        miniChart.setOffsetRightDistance(6);
         miniChart.applyNewData(bars);
+        if (miniChart.resize) miniChart.resize();
         return;
       }
       const have = miniChart.getDataList ? miniChart.getDataList().length : 0;
       if (have < bars.length - 1) {
         miniChart.applyNewData(bars);
+        if (miniChart.resize) miniChart.resize();
         return;
       }
       const liveBar = liveDayBar();
-      if (liveBar) miniChart.updateData(liveBar);
+      if (liveBar) {
+        const last = bars[bars.length - 1];
+        if (last) liveBar.timestamp = last.timestamp;
+        miniChart.updateData(liveBar);
+      }
     }
 
     function twStyles() {
@@ -875,6 +894,10 @@
       draw();
     }
 
+    window.addEventListener("resize", () => {
+      if (miniChart && miniChart.resize) miniChart.resize();
+      if (kchart && kchart.resize) kchart.resize();
+    });
     markChips();
     load();
     loadKline();
