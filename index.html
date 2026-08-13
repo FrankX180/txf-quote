@@ -88,7 +88,7 @@
 
     @media (max-width: 860px) {
       .grid { grid-template-columns: 1fr; }
-      .szbar { max-width: 18px; }
+      .side-top { grid-template-columns: 1fr; }
     }
     .meta { font-size: 13px; line-height: 1.7; color: #374151; }
     canvas { width: 100%; height: 280px; display: block; }
@@ -111,17 +111,20 @@
     .oi td:first-child, .oi th:first-child { text-align: left; color: #6b7280; }
     table.q td.lab { color: #6b7280; }
     .ob { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 0; table-layout: fixed; }
-    .ob td { padding: 2px 4px; font-variant-numeric: tabular-nums; }
+    .ob col.c-qty { width: 28px; }
+    .ob col.c-bar { width: auto; }
+    .ob col.c-px { width: 58px; }
+    .ob td { padding: 2px 3px; font-variant-numeric: tabular-nums; }
     .ob .bid { color: var(--up); }
     .ob .ask { color: var(--dn); }
     .ob .lab.bid { color: var(--up); text-align: left; }
     .ob .lab.ask { color: var(--dn); text-align: right; }
-    .ob .qty.bid { text-align: left; width: 8%; }
-    .ob .qty.ask { text-align: right; width: 8%; }
-    .ob .bar-bid { text-align: right; width: 32%; }
-    .ob .bar-ask { text-align: left; width: 32%; }
-    .ob .pxb { color: var(--up); text-align: right; width: 10%; white-space: nowrap; }
-    .ob .pxa { color: var(--dn); text-align: left; width: 10%; white-space: nowrap; }
+    .ob .qty.bid { text-align: left; }
+    .ob .qty.ask { text-align: right; }
+    .ob .bar-bid { text-align: right; }
+    .ob .bar-ask { text-align: left; }
+    .ob .pxb { color: var(--up); text-align: right; white-space: nowrap; font-size: 12px; }
+    .ob .pxa { color: var(--dn); text-align: left; white-space: nowrap; font-size: 12px; }
     .bar-wrap {
       position: relative;
       display: flex;
@@ -344,7 +347,8 @@
         maxSz = Math.max(maxSz, n(x["CBidSize" + i]) || 0, n(x["CAskSize" + i]) || 0);
       });
       maxSz += 2;
-      let ob = `<tr><td class="lab bid">買量</td><td></td><td class="pxb">買價</td><td class="pxa">賣價</td><td></td><td class="lab ask">賣量</td></tr>`;
+      let ob = `<colgroup><col class="c-qty"><col class="c-bar"><col class="c-px"><col class="c-px"><col class="c-bar"><col class="c-qty"></colgroup>`;
+      ob += `<tr><td class="lab bid">買量</td><td></td><td class="pxb">買價</td><td class="pxa">賣價</td><td></td><td class="lab ask">賣量</td></tr>`;
       levels.forEach((i) => {
         const bs = n(x["CBidSize" + i]) || 0;
         const asz = n(x["CAskSize" + i]) || 0;
@@ -479,37 +483,79 @@
       return take(m5).length ? take(m5) : take(m1);
     }
 
-    function ptTs(p) {
-      if (p.ts) return p.ts;
-      const t = Date.parse(String(p.t || "").replace(/-/g, "/"));
-      return t || 0;
+    function mergeBarLists(a, b) {
+      const by = {};
+      (a || []).concat(b || []).forEach((row) => {
+        if (row && row.timestamp) by[row.timestamp] = row;
+      });
+      return Object.keys(by).sort((x, y) => x - y).map((k) => by[k]);
+    }
+
+    function fillMinutes(bars) {
+      if (!bars || bars.length < 2) return bars || [];
+      const step = 60000;
+      const out = [bars[0]];
+      for (let i = 1; i < bars.length; i++) {
+        const prev = out[out.length - 1];
+        const b = bars[i];
+        const hole = b.timestamp - prev.timestamp;
+        if (hole > step * 1.5 && hole <= step * 4) {
+          for (let t = prev.timestamp + step; t < b.timestamp - 30000; t += step) {
+            out.push({
+              timestamp: t, open: prev.close, high: prev.close, low: prev.close, close: prev.close,
+              volume: 0, date: prev.date, session: prev.session,
+            });
+          }
+        }
+        out.push(b);
+      }
+      return out;
+    }
+
+    function save1m() {
+      try {
+        localStorage.setItem("txf1m", JSON.stringify({
+          night: minutePack.night_1m, day: minutePack.day_1m, t: Date.now(),
+        }));
+      } catch (e) {}
+    }
+
+    function loadLocal1m() {
+      try {
+        const j = JSON.parse(localStorage.getItem("txf1m") || "null");
+        if (!j) return;
+        minutePack.night_1m = mergeBarLists(minutePack.night_1m, j.night);
+        minutePack.day_1m = mergeBarLists(minutePack.day_1m, j.day);
+      } catch (e) {}
+    }
+
+    function bumpLiveBar() {
+      const px = n(q() && q().CLastPrice);
+      if (px == null) return;
+      const key = sessKey() + "_1m";
+      const rows = minutePack[key] || [];
+      if (!rows.length) return;
+      const slot = Math.floor(Date.now() / 60000) * 60000;
+      const last = rows[rows.length - 1];
+      if (last.timestamp === slot) {
+        last.close = px;
+        last.high = Math.max(last.high, px);
+        last.low = Math.min(last.low, px);
+      } else if (slot > last.timestamp && slot - last.timestamp <= 180000) {
+        rows.push({
+          timestamp: slot, open: last.close, high: Math.max(last.close, px),
+          low: Math.min(last.close, px), close: px, volume: 0,
+          date: last.date, session: sessKey(),
+        });
+        minutePack[key] = rows;
+      }
+      save1m();
     }
 
     function linePoints() {
       const keep = lastDates(daySpan < 1 ? 1 : daySpan);
-      const mins = minuteSeries().filter((b) => keep.indexOf(b.date) >= 0);
-      const pts = mins.map((b) => ({ px: b.close, vol: b.volume, time: b.timestamp }));
-      const lastBar = pts.length ? pts[pts.length - 1].time : 0;
-      const qx = q();
-      const lastPx = n(qx && qx.CLastPrice);
-      const now = Date.now();
-      if (mins.length < 2) {
-        const livePts = session === "day" ? (hist.day || []) : (hist.night || []);
-        livePts.forEach((p) => {
-          const ts = ptTs(p);
-          if (p.px && ts) pts.push({ px: p.px, vol: p.vol, time: ts });
-        });
-      } else if (lastPx != null && now > lastBar + 20000) {
-        pts.push({ px: lastPx, vol: n(qx.CTotalVolume) || 0, time: now });
-      }
-      pts.sort((a, b) => a.time - b.time);
-      const out = [];
-      pts.forEach((p) => {
-        if (!p.time || p.px == null) return;
-        if (out.length && p.time - out[out.length - 1].time < 5000) out[out.length - 1] = p;
-        else out.push(p);
-      });
-      return out;
+      const mins = fillMinutes(minuteSeries().filter((b) => keep.indexOf(b.date) >= 0));
+      return mins.map((b) => ({ px: b.close, vol: b.volume, time: b.timestamp }));
     }
 
     function sessRange(pts) {
@@ -954,6 +1000,7 @@
         }
       }
       live = true;
+      bumpLiveBar();
       render();
     }
 
@@ -1056,8 +1103,9 @@
         };
         (hit.sess === "night" ? night : day).push(row);
       });
-      if (night.length) minutePack.night_1m = night;
-      if (day.length) minutePack.day_1m = day;
+      if (night.length) minutePack.night_1m = mergeBarLists(minutePack.night_1m, night);
+      if (day.length) minutePack.day_1m = mergeBarLists(minutePack.day_1m, day);
+      save1m();
       draw();
     }
 
@@ -1080,8 +1128,10 @@
       try {
         const m = await fetch("data/kline-minute.json?t=" + Date.now()).then((r) => r.json());
         ["night_1m","day_1m","night_5m","day_5m","night_15m","day_15m"].forEach((k) => {
-          minutePack[k] = m[k] || [];
+          minutePack[k] = mergeBarLists(minutePack[k], m[k] || []);
         });
+        loadLocal1m();
+        save1m();
         if (!minutePack.night_1m.length && (m.night || []).length) {
           minutePack.night_1m = m.night;
           minutePack.day_1m = m.day || [];
@@ -1104,12 +1154,13 @@
       draw();
     });
     markChips();
+    loadLocal1m();
     load();
     loadKline();
     pollLive();
     poll1m();
     setInterval(pollLive, 5000);
-    setInterval(poll1m, 20000);
+    setInterval(poll1m, 10000);
     setInterval(loadKline, 60000);
   </script>
 </body>
