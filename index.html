@@ -16,7 +16,7 @@
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+      font-family: "Microsoft JhengHei", "微軟正黑體", "Noto Sans TC", sans-serif;
       background: var(--bg);
       color: #111827;
     }
@@ -61,6 +61,7 @@
     }
     .px { font-size: 40px; font-weight: 800; letter-spacing: -1px; margin: 8px 0 4px; }
     .sub { font-size: 13px; color: var(--muted); }
+    .board, .board button { font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif; }
     .tabs { display: flex; gap: 18px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
     .tab {
       background: none; border: 0; padding: 10px 2px 8px;
@@ -77,13 +78,7 @@
     }
     @media (max-width: 860px) {
       .grid { grid-template-columns: 1fr; }
-      table.q { font-size: 11px; }
-      table.q td { padding: 3px 2px; }
-      .ob { font-size: 11px; margin-top: 0; }
-      .ob td { padding: 2px 2px; }
       .szbar { max-width: 18px; }
-      .bar-wrap { margin: 6px 0 4px; }
-      .oi { font-size: 11px; }
     }
     .meta { font-size: 13px; line-height: 1.7; color: #374151; }
     canvas { width: 100%; height: 280px; display: block; }
@@ -99,14 +94,14 @@
     table.q td:nth-child(2), table.q td:nth-child(4) { text-align: right; font-variant-numeric: tabular-nums; }
     table.q td:nth-child(2) { padding-right: 22px; }
     table.q td:nth-child(3) { padding-left: 22px; }
-    .oi { margin-top: 0; font-size: 12px; }
-    .oi h4 { margin: 0 0 4px; font-size: 12px; }
+    .oi { margin-top: 0; font-size: 13px; }
+    .oi h4 { margin: 0 0 4px; font-size: 13px; }
     .oi table { width: 100%; border-collapse: collapse; }
     .oi td, .oi th { padding: 3px 2px; border-bottom: 1px solid #f3f4f6; text-align: right; font-variant-numeric: tabular-nums; }
     .oi td:first-child, .oi th:first-child { text-align: left; color: #6b7280; }
     table.q td.lab { color: #6b7280; }
-    .ob { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 0; }
-    .ob td { padding: 3px 4px; font-variant-numeric: tabular-nums; }
+    .ob { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 0; }
+    .ob td { padding: 0 4px; font-variant-numeric: tabular-nums; }
     .ob .bid { color: var(--up); text-align: right; }
     .ob .ask { color: var(--dn); }
     .ob .lab.bid { color: var(--up); }
@@ -147,7 +142,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card board">
       <div class="tabs">
         <button class="tab on" id="tab-merge" type="button">合併</button>
         <button class="tab" id="tab-day" type="button">日盤</button>
