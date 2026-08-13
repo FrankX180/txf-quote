@@ -118,20 +118,17 @@
         </div>
       </div>
       <div class="note">
-        即時：API Manager <code>:8700</code>。K 線用 BLOK 同套 <code>klinecharts v9</code>（漲紅跌綠）。
-        1～5 日走勢／分 K 來自奇摩期貨 <code>WTX&amp;</code>（當日 1 分、多日 5／15 分）；日 K 備援來自 <code>futures_daily</code>。
+        報價、五檔、走勢／分 K 全部來自奇摩期貨 <code>WTX&amp;</code>（<code>stockList</code> + <code>StockServices.chart</code>／<code>ApacLibra</code>）。
+        K 線用 BLOK 同套 <code>klinecharts v9</code>（漲紅跌綠）。日 K 備援來自 <code>futures_daily</code>。
       </div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
-    const AM_WS = "ws://127.0.0.1:8700/ws/quotes";
-    const FRONT = "TXFH6";
     let session = "night";
     let snap = null;
     let hist = { night: [], day: [] };
     let live = false;
-    let amCache = {};
     let daySpan = 1;
     let chartMode = "line";
     let dailyPack = { night: [], day: [] };
@@ -216,8 +213,17 @@
       const pin = tot ? (bidTot / tot) * 100 : 50;
       $("barIn").style.width = pin + "%";
       $("barOut").style.width = (100 - pin) + "%";
-      $("inoutlab").innerHTML =
-        `<span class="dn">委買 ${fmt(bidTot)}</span>　<span class="up">委賣 ${fmt(askTot)}</span>`;
+      const inn = n(x.inMarket), outv = n(x.outMarket);
+      if (inn != null && outv != null && inn + outv > 0) {
+        const pin2 = (inn / (inn + outv)) * 100;
+        $("barIn").style.width = pin2 + "%";
+        $("barOut").style.width = (100 - pin2) + "%";
+        $("inoutlab").innerHTML =
+          `<span class="dn">內盤 ${fmt(inn)}</span>　<span class="up">外盤 ${fmt(outv)}</span>`;
+      } else {
+        $("inoutlab").innerHTML =
+          `<span class="dn">委買 ${fmt(bidTot)}</span>　<span class="up">委賣 ${fmt(askTot)}</span>`;
+      }
 
       const maxSz = Math.max(bidTot, askTot, 1);
       let ob = `<tr><td class="lab">委買量</td><td></td><td>買價</td><td>賣價</td><td></td><td class="lab">委賣量</td></tr>`;
@@ -373,115 +379,7 @@
       kchart.applyNewData(data.length ? data : []);
     }
 
-    function isFront(sym) {
-      return String(sym || "") === FRONT;
-    }
-
-    function hasPx(q) {
-      const last = n(q && q.last);
-      return last != null && last > 1000;
-    }
-
-    function pickAm() {
-      const q0 = amCache[FRONT];
-      if (hasPx(q0)) return q0;
-      return null;
-    }
-
-    function fromAm(q) {
-      if (!q) return null;
-      const bids = q.bids || [];
-      const asks = q.asks || [];
-      const o = {
-        DispCName: q.name || "臺指期086",
-        DispEName: q.symbol,
-        SymbolID: q.symbol,
-        CLastPrice: q.last,
-        COpenPrice: q.open,
-        CHighPrice: q.high,
-        CLowPrice: q.low,
-        CRefPrice: q.prev_close,
-        CDiff: (q.last != null && q.prev_close != null) ? (q.last - q.prev_close) : q.diff,
-        CDiffRate: (q.last != null && q.prev_close) ? ((q.last - q.prev_close) / q.prev_close * 100) : null,
-        CTotalVolume: q.total_volume,
-        CDate: "",
-        CTime: (q.tick_time || q.timestamp || "").toString().replace(/[:.]/g, "").slice(0, 6),
-      };
-      for (let i = 0; i < 5; i++) {
-        if (bids[i]) {
-          o["CBidPrice" + (i + 1)] = bids[i].price;
-          o["CBidSize" + (i + 1)] = bids[i].size;
-        }
-        if (asks[i]) {
-          o["CAskPrice" + (i + 1)] = asks[i].price;
-          o["CAskSize" + (i + 1)] = asks[i].size;
-        }
-      }
-      o._in = q.in_vol;
-      o._out = q.out_vol;
-      return o;
-    }
-
-    function applyAm() {
-      const v = fromAm(pickAm());
-      if (!v) return;
-      snap = { fetchedAt: new Date().toLocaleString("zh-TW", { hour12: false }), night: v, day: v };
-      const px = Number(v.CLastPrice);
-      if (px) {
-        const pt = { t: snap.fetchedAt, time: v.CTime, px: px, vol: Number(v.CTotalVolume) || 0 };
-        const h = hist.night;
-        if (!h.length || h[h.length - 1].px !== px || h[h.length - 1].time !== pt.time) {
-          h.push(pt);
-          if (h.length > 800) h.splice(0, h.length - 800);
-          hist.day = h;
-        }
-      }
-      live = true;
-      render();
-      const inn = Number(v._in), out = Number(v._out);
-      if (inn + out > 0) {
-        const pin = (inn / (inn + out)) * 100;
-        $("barIn").style.width = pin + "%";
-        $("barOut").style.width = (100 - pin) + "%";
-        $("inoutlab").innerHTML =
-          `<span class="dn">內盤 ${fmt(inn)}</span>　<span class="up">外盤 ${fmt(out)}</span>`;
-      }
-    }
-
-    function ingestAm(msg) {
-      if (!msg) return;
-      if (msg.type === "snapshot_batch" && msg.data) {
-        if (msg.data[FRONT]) amCache[FRONT] = msg.data[FRONT];
-        applyAm();
-        return;
-      }
-      if (msg.type === "quote" && msg.data && msg.data.symbol) {
-        const s = msg.data.symbol;
-        if (!isFront(s)) return;
-        amCache[s] = Object.assign({}, amCache[s] || {}, msg.data);
-        applyAm();
-      }
-    }
-
-    function connectWs() {
-      const open = () => {
-        const ws = new WebSocket(AM_WS);
-        ws.onmessage = (ev) => {
-          try { ingestAm(JSON.parse(ev.data)); } catch (e) {}
-        };
-        ws.onclose = () => {
-          live = false;
-          $("live").className = "live";
-          $("live").textContent = "重連中";
-          setTimeout(open, 2000);
-        };
-        ws.onerror = () => { try { ws.close(); } catch (e) {} };
-      };
-      open();
-    }
-
     async function load() {
-      if (hasPx(amCache[FRONT])) return;
       const [s, hn, hd] = await Promise.all([
         fetch("data/snapshot.json?t=" + Date.now()).then((r) => r.json()),
         fetch("data/history-night.json?t=" + Date.now()).then((r) => (r.ok ? r.json() : [])).catch(() => []),
@@ -547,7 +445,6 @@
 
     load();
     loadKline();
-    connectWs();
     setInterval(load, 30000);
   </script>
 </body>

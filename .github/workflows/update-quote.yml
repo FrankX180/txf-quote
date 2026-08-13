@@ -18,7 +18,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Fetch TAIFEX snapshot
+      - name: Fetch Yahoo WTX quote and 5-level book
         run: python scripts/fetch_quote.py
       - name: Fetch Yahoo WTX 1m/5m/15m
         run: python scripts/fetch_minute.py
