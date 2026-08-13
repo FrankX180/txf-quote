@@ -716,10 +716,10 @@
       });
 
       const qx = q();
-      const o = n(qx && qx.COpenPrice), hi = n(qx && qx.CHighPrice), lo = n(qx && qx.CLowPrice), cl = n(qx && qx.CLastPrice);
-      if ([o, hi, lo, cl].every((v) => v != null)) {
+      const o = n(qx && qx.COpenPrice), barH = n(qx && qx.CHighPrice), barL = n(qx && qx.CLowPrice), cl = n(qx && qx.CLastPrice);
+      if ([o, barH, barL, cl].every((v) => v != null)) {
         const mid = Math.round(w - 14) + 0.5;
-        const yH = yAt(hi), yL = yAt(lo);
+        const yH = yAt(barH), yL = yAt(barL);
         const yTop = yAt(Math.max(o, cl));
         const yBot = yAt(Math.min(o, cl));
         const col = cl >= o ? "#d32f2f" : "#1b8a3e";
