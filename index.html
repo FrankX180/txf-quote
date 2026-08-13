@@ -250,7 +250,7 @@
       </div>
     </div>
   </div>
-  <div class="ver">v20260813-2359</div>
+  <div class="ver">v20260814-0008</div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
     let session = "night";
@@ -761,45 +761,78 @@
       ctx.stroke();
       ctx.setLineDash([]);
 
-      const fills = [];
-      const lines = [];
-      function paintSeg(x0, y0, p0, x1, y1, p1) {
-        if ((p0 - open) * (p1 - open) < 0 && p1 !== p0) {
-          const t = (open - p0) / (p1 - p0);
-          const xm = x0 + (x1 - x0) * t;
-          paintSeg(x0, y0, p0, xm, yOpen, open);
-          paintSeg(xm, yOpen, open, x1, y1, p1);
-          return;
-        }
-        const above = p0 > open || p1 > open || (p0 === open && p1 >= open);
-        fills.push({ x0, y0, x1, y1, above });
-        lines.push({ x0, y0, x1, y1, above });
-      }
       const gap = daySpan < 1 ? 150000 : 20 * 60 * 1000;
-      for (let i = 1; i < pts.length; i++) {
-        const tA = pts[i - 1].time, tB = pts[i].time;
-        if (!tA || !tB || tB - tA > gap) continue;
-        paintSeg(xAtT(tA), yAt(pts[i - 1].px), pts[i - 1].px, xAtT(tB), yAt(pts[i].px), pts[i].px);
+      const runs = [];
+      let run = [];
+      for (let i = 0; i < pts.length; i++) {
+        if (i && pts[i].time && pts[i - 1].time && pts[i].time - pts[i - 1].time > gap) {
+          if (run.length >= 2) runs.push(run);
+          run = [];
+        }
+        run.push({ x: xAtT(pts[i].time), y: yAt(pts[i].px), px: pts[i].px });
       }
-      fills.forEach((s) => {
+      if (run.length >= 2) runs.push(run);
+
+      const gUp = ctx.createLinearGradient(0, padT, 0, yOpen);
+      gUp.addColorStop(0, "rgba(211,47,47,0.32)");
+      gUp.addColorStop(1, "rgba(211,47,47,0.00)");
+      const gDn = ctx.createLinearGradient(0, yOpen, 0, padT + ch);
+      gDn.addColorStop(0, "rgba(27,138,62,0.00)");
+      gDn.addColorStop(1, "rgba(27,138,62,0.32)");
+
+      function areaPath(seg) {
         ctx.beginPath();
-        ctx.moveTo(s.x0, s.y0);
-        ctx.lineTo(s.x1, s.y1);
-        ctx.lineTo(s.x1, yOpen);
-        ctx.lineTo(s.x0, yOpen);
+        ctx.moveTo(seg[0].x, yOpen);
+        seg.forEach((p) => ctx.lineTo(p.x, p.y));
+        ctx.lineTo(seg[seg.length - 1].x, yOpen);
         ctx.closePath();
-        ctx.fillStyle = s.above ? "rgba(211,47,47,0.10)" : "rgba(27,138,62,0.10)";
+      }
+      runs.forEach((seg) => {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(padL, padT, w - padL - padR, Math.max(0, yOpen - padT));
+        ctx.clip();
+        areaPath(seg);
+        ctx.fillStyle = gUp;
         ctx.fill();
+        ctx.restore();
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(padL, yOpen, w - padL - padR, Math.max(0, padT + ch - yOpen));
+        ctx.clip();
+        areaPath(seg);
+        ctx.fillStyle = gDn;
+        ctx.fill();
+        ctx.restore();
       });
-      ctx.lineWidth = 1;
+
+      ctx.lineWidth = 1.5;
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
-      lines.forEach((s) => {
-        ctx.beginPath();
-        ctx.moveTo(s.x0, s.y0);
-        ctx.lineTo(s.x1, s.y1);
-        ctx.strokeStyle = s.above ? "#d32f2f" : "#1b8a3e";
-        ctx.stroke();
+      runs.forEach((seg) => {
+        for (let i = 1; i < seg.length; i++) {
+          const a = seg[i - 1], b = seg[i];
+          if ((a.px - open) * (b.px - open) < 0 && b.px !== a.px) {
+            const t = (open - a.px) / (b.px - a.px);
+            const xm = a.x + (b.x - a.x) * t;
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(xm, yOpen);
+            ctx.strokeStyle = a.px >= open ? "#d32f2f" : "#1b8a3e";
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(xm, yOpen);
+            ctx.lineTo(b.x, b.y);
+            ctx.strokeStyle = b.px >= open ? "#d32f2f" : "#1b8a3e";
+            ctx.stroke();
+          } else {
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.strokeStyle = (a.px >= open || b.px >= open) ? "#d32f2f" : "#1b8a3e";
+            ctx.stroke();
+          }
+        }
       });
 
       const qx = q();
