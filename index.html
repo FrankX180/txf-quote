@@ -62,12 +62,11 @@
     }
     .px { font-size: 40px; font-weight: 800; letter-spacing: -1px; margin: 8px 0 4px; }
     .sub { font-size: 13px; color: var(--muted); }
-    .tabs { display: flex; gap: 18px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
-    .tab {
-      background: none; border: 0; padding: 10px 2px 8px;
-      font-size: 15px; cursor: pointer; color: #374151; font-weight: 600;
+    .sessico {
+      display: inline-block; margin-left: 4px; padding: 0 3px;
+      cursor: pointer; font-size: 15px; line-height: 1; opacity: 0.35; user-select: none;
     }
-    .tab.on { color: #b91c1c; border-bottom: 2px solid #b91c1c; }
+    .sessico.on { opacity: 1; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .side, .side table, .side .sub, .side .oi, .side .bar-labs {
       font-family: "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
@@ -172,18 +171,12 @@
     </div>
 
     <div class="card board">
-      <div class="tabs">
-        <button class="tab on" id="tab-merge" type="button">合併</button>
-        <button class="tab" id="tab-day" type="button">日盤</button>
-        <button class="tab" id="tab-night" type="button">夜盤</button>
-      </div>
       <div class="grid">
         <div>
           <div class="chips">
             <div class="chipline">
               <span class="rowlab">Ｋ線</span>
               <button class="chip" data-k="1" type="button">１分</button>
-              <button class="chip" data-k="5" type="button">５分</button>
               <button class="chip" data-k="15" type="button">１５</button>
               <button class="chip" data-k="30" type="button">３０</button>
               <button class="chip" data-k="d" type="button">日Ｋ</button>
@@ -227,7 +220,7 @@
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
-    let session = "merge";
+    let session = "night";
     let snap = null;
     let hist = { night: [], day: [] };
     let live = false;
@@ -302,7 +295,9 @@
       $("sumline").innerHTML =
         `股價 <b>${fmt(last, 0)}</b> <span class="${cls(diff)}">${arrow(diff)} ${fmt(diff, 0)}(${fmt(rate, 2)}%)</span>` +
         `　總口數 ${fmt(x.CTotalVolume)}<br>` +
-        `昨收 ${fmt(x.CRefPrice)}　開盤 ${fmt(x.COpenPrice)}　最高 <span class="up">${fmt(x.CHighPrice)}</span>　最低 <span class="dn">${fmt(x.CLowPrice)}</span>`;
+        `昨收 ${fmt(x.CRefPrice)}　開盤 ${fmt(x.COpenPrice)}　最高 <span class="up">${fmt(x.CHighPrice)}</span>　最低 <span class="dn">${fmt(x.CLowPrice)}</span>` +
+        `<span class="sessico${session === "day" ? " on" : ""}" data-sess="day" title="日盤">☀</span>` +
+        `<span class="sessico${session === "night" ? " on" : ""}" data-sess="night" title="夜盤">☾</span>`;
 
       let bidTot = 0, askTot = 0;
       const levels = [1, 2, 3, 4, 5];
@@ -1032,16 +1027,13 @@
     }
 
     function setSession(s) {
-      session = s;
-      ["merge", "day", "night"].forEach((k) => {
-        const el = $("tab-" + k);
-        if (el) el.classList.toggle("on", k === s);
-      });
+      session = s === "day" ? "day" : "night";
       render();
     }
-    $("tab-merge").onclick = () => setSession("merge");
-    $("tab-day").onclick = () => setSession("day");
-    $("tab-night").onclick = () => setSession("night");
+    $("sumline").onclick = (e) => {
+      const el = e.target.closest("[data-sess]");
+      if (el) setSession(el.getAttribute("data-sess"));
+    };
     function markChips() {
       document.querySelectorAll(".chip[data-k]").forEach((b) => {
         b.classList.toggle("on", chartMode === "k" && b.getAttribute("data-k") === kInt);
@@ -1153,6 +1145,7 @@
       if (kchart && kchart.resize) kchart.resize();
       draw();
     });
+    session = liveSess();
     markChips();
     loadLocal1m();
     load();
