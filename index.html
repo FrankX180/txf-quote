@@ -421,11 +421,21 @@
       const n = daySpan < 1 ? 1 : daySpan;
       const keep = lastDates(n);
       const take = (rows) => rows.filter((b) => keep.indexOf(b.date) >= 0);
-      if (daySpan < 1 && take(m1).length >= 2) return take(m1);
-      if (n === 1 && take(m1).length >= 2) return take(m1);
-      if (take(m5).length >= 2) return take(m5);
-      if (take(m15).length >= 2) return take(m15);
-      return take(m1);
+      if (n <= 1) {
+        const a = take(m1);
+        return a.length >= 2 ? a : take(m5);
+      }
+      const have5 = {};
+      m5.forEach((b) => { have5[b.date] = true; });
+      const out = [];
+      keep.slice().reverse().forEach((d) => {
+        const src = have5[d] ? m5 : m15;
+        src.forEach((b) => { if (b.date === d) out.push(b); });
+      });
+      if (out.length >= 2) return out;
+      const t15 = take(m15);
+      if (t15.length >= 2) return t15;
+      return take(m5).length ? take(m5) : take(m1);
     }
 
     function linePoints() {
