@@ -110,12 +110,18 @@
     .oi td, .oi th { padding: 3px 2px; border-bottom: 1px solid #f3f4f6; text-align: right; font-variant-numeric: tabular-nums; }
     .oi td:first-child, .oi th:first-child { text-align: left; color: #6b7280; }
     table.q td.lab { color: #6b7280; }
-    .ob { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 0; }
+    .ob { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 0; table-layout: fixed; }
     .ob td { padding: 2px 4px; font-variant-numeric: tabular-nums; }
-    .ob .bid { color: var(--up); text-align: right; }
+    .ob .bid { color: var(--up); }
     .ob .ask { color: var(--dn); }
-    .ob .lab.bid { color: var(--up); }
-    .ob .lab.ask { color: var(--dn); }
+    .ob .lab.bid { color: var(--up); text-align: left; }
+    .ob .lab.ask { color: var(--dn); text-align: right; }
+    .ob .qty.bid { text-align: left; width: 12%; }
+    .ob .qty.ask { text-align: right; width: 12%; }
+    .ob .bar-bid { text-align: right; width: 22%; }
+    .ob .bar-ask { text-align: left; width: 22%; }
+    .ob .pxb { color: var(--up); text-align: right; width: 16%; }
+    .ob .pxa { color: var(--dn); text-align: left; width: 16%; }
     .bar-wrap {
       position: relative;
       display: flex;
@@ -139,7 +145,7 @@
     .note { font-size: 12px; color: var(--muted); margin-top: 10px; }
     .live { font-size: 11px; margin-left: 8px; color: #9ca3af; }
     .live.on { color: #16a34a; }
-    .szbar { display: inline-block; height: 10px; vertical-align: middle; background: var(--dn); }
+    .szbar { display: inline-block; height: 12px; vertical-align: middle; background: var(--dn); max-width: 100%; }
     .szbar.r { background: var(--up); }
   </style>
 </head>
@@ -334,19 +340,19 @@
       }
 
       const maxSz = Math.max(bidTot, askTot, 1);
-      let ob = `<tr><td class="lab bid">買量</td><td></td><td class="bid">買價</td><td class="ask">賣價</td><td></td><td class="lab ask">賣量</td></tr>`;
+      let ob = `<tr><td class="lab bid">買量</td><td></td><td class="pxb">買價</td><td class="pxa">賣價</td><td></td><td class="lab ask">賣量</td></tr>`;
       levels.forEach((i) => {
         const bs = n(x["CBidSize" + i]) || 0;
         const asz = n(x["CAskSize" + i]) || 0;
-        const bw = Math.round((bs / maxSz) * 72);
-        const aw = Math.round((asz / maxSz) * 72);
+        const bw = Math.round((bs / maxSz) * 100);
+        const aw = Math.round((asz / maxSz) * 100);
         ob += `<tr>
-          <td class="bid">${fmt(x["CBidSize" + i])}</td>
-          <td><span class="szbar r" style="width:${bw}px"></span></td>
-          <td class="bid">${fmt(x["CBidPrice" + i])}</td>
-          <td class="ask">${fmt(x["CAskPrice" + i])}</td>
-          <td><span class="szbar" style="width:${aw}px"></span></td>
-          <td class="ask">${fmt(x["CAskSize" + i])}</td>
+          <td class="qty bid">${fmt(x["CBidSize" + i])}</td>
+          <td class="bar-bid"><span class="szbar r" style="width:${bw}%"></span></td>
+          <td class="pxb">${fmt(x["CBidPrice" + i])}</td>
+          <td class="pxa">${fmt(x["CAskPrice" + i])}</td>
+          <td class="bar-ask"><span class="szbar" style="width:${aw}%"></span></td>
+          <td class="qty ask">${fmt(x["CAskSize" + i])}</td>
         </tr>`;
       });
       $("ob").innerHTML = ob;
