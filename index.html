@@ -119,7 +119,7 @@
       </div>
       <div class="note">
         即時：API Manager <code>:8700</code>。K 線用 BLOK 同套 <code>klinecharts v9</code>（漲紅跌綠）。
-        1～5 日日K 來自 <code>futures_daily</code>；有元大 5 分 K 時走勢改用分鐘線。
+        1～5 日走勢／分 K 來自期交所逐筆成交壓成 1 分鐘；日 K 備援來自 <code>futures_daily</code>。
       </div>
     </div>
   </div>
@@ -135,7 +135,7 @@
     let daySpan = 1;
     let chartMode = "line";
     let dailyPack = { night: [], day: [] };
-    let minuteBars = [];
+    let minutePack = { night: [], day: [] };
     let kchart = null;
 
     const $ = (id) => document.getElementById(id);
@@ -247,34 +247,32 @@
     function sessKey() { return session === "night" ? "night" : "day"; }
 
     function lastDates(nDays) {
-      const bars = dailyPack[sessKey()] || [];
+      const bars = (minutePack[sessKey()] || []).concat(dailyPack[sessKey()] || []);
       const dates = [];
       for (let i = bars.length - 1; i >= 0 && dates.length < nDays; i--) {
         const d = bars[i].date;
-        if (dates.indexOf(d) < 0) dates.push(d);
+        if (d && dates.indexOf(d) < 0) dates.push(d);
       }
       return dates;
     }
 
     function linePoints() {
-      if (minuteBars.length) {
-        const keep = lastDates(daySpan);
-        return minuteBars.filter((b) => keep.indexOf(b.date) >= 0).map((b) => ({ px: b.close, vol: b.volume, time: b.timestamp }));
-      }
       const keep = lastDates(daySpan);
-      const bars = (dailyPack[sessKey()] || []).filter((b) => keep.indexOf(b.date) >= 0);
-      const pts = bars.map((b) => ({ px: b.close, vol: b.volume, time: b.timestamp }));
+      const mins = (minutePack[sessKey()] || []).filter((b) => keep.indexOf(b.date) >= 0);
+      const pts = mins.map((b) => ({ px: b.close, vol: b.volume, time: b.timestamp }));
       const livePts = hist[session] || [];
-      if (daySpan === 1 && livePts.length) return livePts.map((p) => ({ px: p.px, vol: p.vol, time: p.t }));
+      const lastTs = pts.length ? pts[pts.length - 1].time : 0;
+      livePts.forEach((p) => {
+        const ts = Date.parse(String(p.t).replace(/-/g, "/")) || 0;
+        if (p.px && ts > lastTs) pts.push({ px: p.px, vol: p.vol, time: ts });
+      });
       return pts;
     }
 
     function klineData() {
-      if (minuteBars.length) {
-        const keep = lastDates(daySpan);
-        return minuteBars.filter((b) => keep.indexOf(b.date) >= 0);
-      }
       const keep = lastDates(daySpan);
+      const mins = (minutePack[sessKey()] || []).filter((b) => keep.indexOf(b.date) >= 0);
+      if (mins.length) return mins;
       return (dailyPack[sessKey()] || []).filter((b) => keep.indexOf(b.date) >= 0);
     }
 
@@ -512,37 +510,16 @@
       };
     });
 
-    function toMinute(bar) {
-      const ts = bar.ts || bar.timestamp;
-      const t = typeof ts === "number" ? ts : Date.parse(ts);
-      const d = new Date(t);
-      const date = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
-      return {
-        timestamp: t > 1e12 ? t : t * 1000,
-        open: Number(bar.open),
-        high: Number(bar.high),
-        low: Number(bar.low),
-        close: Number(bar.close),
-        volume: Number(bar.volume || 0),
-        date: date,
-      };
-    }
-
     async function loadKline() {
       try {
         const pack = await fetch("data/kline-daily.json?t=" + Date.now()).then((r) => r.json());
         dailyPack.night = pack.night || [];
         dailyPack.day = pack.day || [];
       } catch (e) {}
-      const end = new Date();
-      const start = new Date(end.getTime() - 6 * 86400000);
-      const fmt = (d) => d.getFullYear() + "/" + String(d.getMonth() + 1).padStart(2, "0") + "/" + String(d.getDate()).padStart(2, "0");
-      const url = "http://127.0.0.1:8700/api/broker/yuanta/kline/TXFH6?kline_type=1&start_date=" +
-        encodeURIComponent(fmt(start)) + "&end_date=" + encodeURIComponent(fmt(end));
       try {
-        const r = await fetch(url);
-        const j = await r.json();
-        if (j.ok && j.bars && j.bars.length) minuteBars = j.bars.map(toMinute);
+        const m = await fetch("data/kline-minute.json?t=" + Date.now()).then((r) => r.json());
+        minutePack.night = m.night || [];
+        minutePack.day = m.day || [];
       } catch (e) {}
       draw();
     }
