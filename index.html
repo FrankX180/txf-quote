@@ -628,9 +628,9 @@
       const open = n(qx0 && qx0.COpenPrice) || prices[0];
       const hi = Math.max(...prices, open, n(qx0 && qx0.CHighPrice) ?? -Infinity);
       const lo = Math.min(...prices, open, n(qx0 && qx0.CLowPrice) ?? Infinity);
-      let mx = Math.ceil((hi + 500) / 500) * 500;
-      let mn = Math.floor((lo - 500) / 500) * 500;
-      if (!(mx > mn)) { mx = mn + 1000; }
+      let mx = Math.ceil((hi + 100) / 100) * 100;
+      let mn = Math.floor((lo - 100) / 100) * 100;
+      if (!(mx > mn)) { mx = mn + 200; }
       const { t0, t1 } = sessRange(pts);
       const padL = 56, padR = 33, padT = 10, padB = 26;
       const cw = w - padL - padR;
@@ -642,7 +642,7 @@
       ctx.lineWidth = 1;
       ctx.fillStyle = "#6b7280";
       ctx.font = "11px sans-serif";
-      for (let pv = mn; pv <= mx; pv += 500) {
+      for (let pv = mn; pv <= mx; pv += 100) {
         const y = Math.round(yAt(pv)) + 0.5;
         ctx.beginPath();
         ctx.moveTo(padL, y);
