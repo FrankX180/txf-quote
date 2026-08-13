@@ -74,10 +74,7 @@
     }
     .side { display: flex; flex-direction: column; gap: 8px; }
     .side-top {
-      display: grid;
-      grid-template-columns: 7fr 13fr;
-      gap: 8px;
-      align-items: start;
+      display: block;
     }
     .side-oi {
       display: grid;
@@ -208,7 +205,6 @@
         </div>
         <div class="side">
           <div class="side-top">
-            <table class="q" id="stats"></table>
             <div>
               <table class="ob" id="ob"></table>
               <div class="bar-wrap">
@@ -296,28 +292,17 @@
         diff = last - ref;
         rate = ref ? (diff / ref) * 100 : 0;
       }
-      $("name").textContent = (x.DispCName || "台指期") + " " + (x.DispEName || "TXF");
+      $("name").textContent = String(x.DispCName || "台指期").replace(/\s*WTX&\s*/g, "").trim();
       $("last").className = "px " + cls(diff);
       $("last").textContent = last == null ? "—" : fmt(last, 0);
       $("chgline").className = "sub " + cls(diff);
       $("chgline").textContent =
         last == null ? "" : `${arrow(diff)} ${fmt(Math.abs(diff), 0)} (${diff >= 0 ? "" : ""}${fmt(rate, 2)}%)`;
-      $("stamp").textContent = `報價 ${fmtTime(x.CDate, x.CTime)}`;
+      $("stamp").textContent = fmtTime(x.CDate, x.CTime);
       $("sumline").innerHTML =
         `股價 <b>${fmt(last, 0)}</b> <span class="${cls(diff)}">${arrow(diff)} ${fmt(diff, 0)}(${fmt(rate, 2)}%)</span>` +
-        `　交易量 ${fmt(x.CTotalVolume)}<br>` +
-        `開盤 ${fmt(x.COpenPrice)}　昨收 ${fmt(x.CRefPrice)}　最高 <span class="up">${fmt(x.CHighPrice)}</span>　最低 <span class="dn">${fmt(x.CLowPrice)}</span>`;
-
-      const rows = [
-        ["成交", fmt(x.CLastPrice), "漲跌幅", rate == null ? "—" : fmt(rate, 2) + "%"],
-        ["開盤", fmt(x.COpenPrice), "漲跌", fmt(x.CDiff)],
-        ["最高", fmt(x.CHighPrice), "買價", fmt(x.CBidPrice1)],
-        ["最低", fmt(x.CLowPrice), "賣價", fmt(x.CAskPrice1)],
-        ["昨收", fmt(x.CRefPrice), "總量", fmt(x.CTotalVolume)],
-      ];
-      $("stats").innerHTML = rows
-        .map((r) => `<tr><td class="lab">${r[0]}</td><td>${r[1]}</td><td class="lab">${r[2]}</td><td>${r[3]}</td></tr>`)
-        .join("");
+        `　總口數 ${fmt(x.CTotalVolume)}<br>` +
+        `昨收 ${fmt(x.CRefPrice)}　開盤 ${fmt(x.COpenPrice)}　最高 <span class="up">${fmt(x.CHighPrice)}</span>　最低 <span class="dn">${fmt(x.CLowPrice)}</span>`;
 
       let bidTot = 0, askTot = 0;
       const levels = [1, 2, 3, 4, 5];
@@ -387,7 +372,12 @@
         let h = `<h4>法人未平倉 ${uncover.date || ""}</h4>`;
         h += `<table><tr><th>項目</th><th>多單</th><th>空單</th><th>淨額</th></tr>`;
         inst.forEach((r) => {
-          h += `<tr><td>${r.name}</td><td class="up">${fmt(r.long)}</td><td class="dn">${fmt(r.short)}</td><td>${signed(r.net)}</td></tr>`;
+          const nm = String(r.name || "")
+            .replace("外資及陸資", "外")
+            .replace("投信", "投")
+            .replace("自營商", "自")
+            .replace("三大法人合計", "合計");
+          h += `<tr><td>${nm}</td><td class="up">${fmt(r.long)}</td><td class="dn">${fmt(r.short)}</td><td>${signed(r.net)}</td></tr>`;
         });
         h += `</table>`;
         left.innerHTML = h;
@@ -398,6 +388,8 @@
         h += `<table><tr><th></th><th>部位數</th><th>百分比</th></tr>`;
         h += `<tr><td>買方</td><td>${fmt(r.long)}</td><td>${r.longPct == null ? "—" : fmt(r.longPct, 1) + "%"}</td></tr>`;
         h += `<tr><td>賣方</td><td>${fmt(r.short)}</td><td>${r.shortPct == null ? "—" : fmt(r.shortPct, 1) + "%"}</td></tr>`;
+        const net = (n(r.long) || 0) - (n(r.short) || 0);
+        h += `<tr><td>淨部位</td><td>${signed(net)}</td><td></td></tr>`;
         if (r.open != null) h += `<tr><td>非沖銷部位</td><td>${fmt(r.open)}</td><td></td></tr>`;
         h += `</table>`;
         right.innerHTML = h;
@@ -879,7 +871,7 @@
         if (!miniChart) return;
         if (miniChart.setPrecision) miniChart.setPrecision({ price: 0, volume: 0 });
         else if (miniChart.setPriceVolumePrecision) miniChart.setPriceVolumePrecision(0, 0);
-        miniChart.setOffsetRightDistance(8);
+        miniChart.setOffsetRightDistance(3);
         miniFit36();
         miniChart.applyNewData(bars);
         if (miniChart.resize) miniChart.resize();
