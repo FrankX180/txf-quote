@@ -242,7 +242,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0046</div>
+    <div class="ver">v20260814-0048</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -848,6 +848,37 @@
           }
         }
       });
+
+      let hiI = 0, loI = 0, hiV = -Infinity, loV = Infinity;
+      pts.forEach((p, i) => {
+        const hv = p.high != null ? p.high : p.px;
+        const lv = p.low != null ? p.low : p.px;
+        if (hv > hiV) { hiV = hv; hiI = i; }
+        if (lv < loV) { loV = lv; loI = i; }
+      });
+      function markExt(i, val, up) {
+        const x = xAtI(i, pts[i].time);
+        const y = yAt(val);
+        ctx.fillStyle = up ? "#d32f2f" : "#1b8a3e";
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        if (up) {
+          ctx.lineTo(x - 4, y + 6);
+          ctx.lineTo(x + 4, y + 6);
+        } else {
+          ctx.lineTo(x - 4, y - 6);
+          ctx.lineTo(x + 4, y - 6);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.font = "11px sans-serif";
+        ctx.textAlign = "center";
+        const lab = Math.round(val).toLocaleString("zh-TW");
+        const ty = up ? Math.max(padT + 11, y - 8) : Math.min(padT + ch - 2, y + 14);
+        ctx.fillText(lab, Math.min(padL + cw - 20, Math.max(padL + 20, x)), ty);
+      }
+      if (hiV > -Infinity) markExt(hiI, hiV, true);
+      if (loV < Infinity) markExt(loI, loV, false);
 
       const qx = q();
       const o = n(qx && qx.COpenPrice), barH = n(qx && qx.CHighPrice), barL = n(qx && qx.CLowPrice), cl = n(qx && qx.CLastPrice);
