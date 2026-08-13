@@ -611,6 +611,18 @@
       return dailyBars();
     }
 
+    function fitCanvas(c, cssH) {
+      const dpr = window.devicePixelRatio || 1;
+      const w = Math.max(1, Math.round(c.clientWidth || c.width));
+      const h = cssH || Math.max(1, Math.round(c.clientHeight || 280));
+      c.style.height = h + "px";
+      c.width = Math.round(w * dpr);
+      c.height = Math.round(h * dpr);
+      const ctx = c.getContext("2d");
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      return { ctx, w, h };
+    }
+
     function draw() {
       const lineOn = chartMode === "line";
       $("chart").style.display = lineOn ? "block" : "none";
@@ -620,8 +632,7 @@
         return;
       }
       const c = $("chart");
-      const ctx = c.getContext("2d");
-      const w = c.width, h = c.height;
+      const { ctx, w, h } = fitCanvas(c, 280);
       ctx.clearRect(0, 0, w, h);
       const pts = linePoints();
       if (pts.length < 2) {
@@ -642,11 +653,12 @@
       const yAt = (p) => padT + (1 - (p - mn) / (mx - mn)) * ch;
 
       ctx.strokeStyle = "#e5e7eb";
+      ctx.lineWidth = 1;
       ctx.fillStyle = "#6b7280";
       ctx.font = "11px sans-serif";
       for (let i = 0; i < 5; i++) {
         const pv = mn + ((mx - mn) * i) / 4;
-        const y = yAt(pv);
+        const y = Math.round(yAt(pv)) + 0.5;
         ctx.beginPath();
         ctx.moveTo(padL, y);
         ctx.lineTo(w - padR, y);
@@ -654,41 +666,52 @@
         ctx.fillText(Math.round(pv).toLocaleString("zh-TW"), 4, y + 4);
       }
 
-      const yOpen = yAt(open);
+      const yOpen = Math.round(yAt(open)) + 0.5;
       ctx.setLineDash([5, 4]);
       ctx.strokeStyle = "#9ca3af";
-      ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(padL, yOpen);
       ctx.lineTo(w - padR, yOpen);
       ctx.stroke();
       ctx.setLineDash([]);
 
+      const fills = [];
+      const lines = [];
       function paintSeg(x0, y0, p0, x1, y1, p1) {
         if ((p0 - open) * (p1 - open) < 0 && p1 !== p0) {
           const t = (open - p0) / (p1 - p0);
           const xm = x0 + (x1 - x0) * t;
-          const ym = yOpen;
-          paintSeg(x0, y0, p0, xm, ym, open);
-          paintSeg(xm, ym, open, x1, y1, p1);
+          paintSeg(x0, y0, p0, xm, yOpen, open);
+          paintSeg(xm, yOpen, open, x1, y1, p1);
           return;
         }
         const above = p0 > open || p1 > open || (p0 === open && p1 >= open);
-        ctx.beginPath();
-        ctx.moveTo(x0, y0);
-        ctx.lineTo(x1, y1);
-        ctx.strokeStyle = above ? "#d32f2f" : "#1b8a3e";
-        ctx.lineWidth = 1.6;
-        ctx.stroke();
-        ctx.lineTo(x1, yOpen);
-        ctx.lineTo(x0, yOpen);
-        ctx.closePath();
-        ctx.fillStyle = above ? "rgba(211,47,47,0.12)" : "rgba(27,138,62,0.12)";
-        ctx.fill();
+        fills.push({ x0, y0, x1, y1, above });
+        lines.push({ x0, y0, x1, y1, above });
       }
       for (let i = 1; i < pts.length; i++) {
         paintSeg(xAt(i - 1), yAt(pts[i - 1].px), pts[i - 1].px, xAt(i), yAt(pts[i].px), pts[i].px);
       }
+      fills.forEach((s) => {
+        ctx.beginPath();
+        ctx.moveTo(s.x0, s.y0);
+        ctx.lineTo(s.x1, s.y1);
+        ctx.lineTo(s.x1, yOpen);
+        ctx.lineTo(s.x0, yOpen);
+        ctx.closePath();
+        ctx.fillStyle = s.above ? "rgba(211,47,47,0.10)" : "rgba(27,138,62,0.10)";
+        ctx.fill();
+      });
+      ctx.lineWidth = 1.5;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      lines.forEach((s) => {
+        ctx.beginPath();
+        ctx.moveTo(s.x0, s.y0);
+        ctx.lineTo(s.x1, s.y1);
+        ctx.strokeStyle = s.above ? "#d32f2f" : "#1b8a3e";
+        ctx.stroke();
+      });
     }
 
     function liveDayBar() {
@@ -1005,6 +1028,7 @@
     window.addEventListener("resize", () => {
       if (miniChart && miniChart.resize) miniChart.resize();
       if (kchart && kchart.resize) kchart.resize();
+      draw();
     });
     markChips();
     load();
