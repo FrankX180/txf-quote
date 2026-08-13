@@ -1,42 +1,24 @@
 {
-  "fetchedAt": "2026-08-13 18:11:22",
+  "fetchedAt": "2026-08-13 18:12:14",
   "source": "https://mis.taifex.com.tw/futures/api/getQuoteList",
   "night": {
     "SymbolID": "TXFH6-M",
     "DispCName": "臺指期086",
     "DispEName": "TX086",
-    "CLastPrice": "46022.00",
+    "CLastPrice": "46027.00",
     "COpenPrice": "45950.00",
     "CHighPrice": "46047.00",
     "CLowPrice": "45878.00",
     "CRefPrice": "46025.00",
-    "CDiff": "-3.00",
-    "CDiffRate": "-0.01",
-    "CTotalVolume": "5010",
-    "CBidPrice1": "46022.00",
+    "CDiff": "2.00",
+    "CDiffRate": "0.00",
+    "CTotalVolume": "5020",
+    "CBidPrice1": "46027.00",
     "CBidSize1": "1",
-    "CAskPrice1": "46025.00",
-    "CAskSize1": "3",
+    "CAskPrice1": "46029.00",
+    "CAskSize1": "1",
     "CDate": "20260813",
-    "CTime": "181117"
+    "CTime": "181158"
   },
-  "day": {
-    "SymbolID": "TXF-S",
-    "DispCName": "臺指現貨",
-    "DispEName": "TXF",
-    "CLastPrice": "46021.48",
-    "COpenPrice": "45676.54",
-    "CHighPrice": "46216.41",
-    "CLowPrice": "45676.54",
-    "CRefPrice": "45518.07",
-    "CDiff": "503.41",
-    "CDiffRate": "1.11",
-    "CTotalVolume": "",
-    "CBidPrice1": "",
-    "CBidSize1": "",
-    "CAskPrice1": "",
-    "CAskSize1": "",
-    "CDate": "20260813",
-    "CTime": "133110"
-  }
+  "day": null
 }

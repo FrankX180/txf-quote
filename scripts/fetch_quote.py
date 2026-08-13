@@ -34,7 +34,7 @@ def pick_txf(quote_list):
         q
         for q in quote_list
         if str(q.get("SymbolID", "")).startswith("TXF")
-        and str(q.get("SymbolID")) != "TXF-P"
+        and str(q.get("SymbolID")).endswith("-M")
     ]
     with_px = [q for q in txf if q.get("CLastPrice")]
     return (with_px or txf or [None])[0]
