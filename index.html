@@ -279,7 +279,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0064</div>
+    <div class="ver">v20260814-0066</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -855,7 +855,14 @@
       ctx.stroke();
       ctx.setLineDash([]);
 
-      const gap = multi ? Infinity : (daySpan < 1 ? 150000 : 20 * 60 * 1000);
+      let gap = Infinity;
+      if (!multi) {
+        let step = 60000;
+        if (pts.length >= 2 && pts[1].time && pts[0].time) {
+          step = Math.max(60000, pts[1].time - pts[0].time);
+        }
+        gap = step * 2.5;
+      }
       const runs = [];
       let run = [];
       for (let i = 0; i < pts.length; i++) {
