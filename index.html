@@ -245,7 +245,7 @@
         <div class="oi" id="oi-inst"></div>
         <div class="oi" id="oi-top"></div>
       </div>
-      <div class="ver">v20260814-0032</div>
+      <div class="ver">v20260814-0036</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -721,10 +721,13 @@
       let mn = Math.floor((lo - 100) / 100) * 100;
       if (!(mx > mn)) { mx = mn + 200; }
       const { t0, t1 } = sessRange(pts);
+      const multi = daySpan >= 2;
       const padL = 56, padR = 33, padT = 10, padB = 26;
       const cw = w - padL - padR;
       const ch = h - padT - padB;
-      const xAtT = (t) => padL + ((t - t0) / (t1 - t0)) * cw;
+      const xAtI = (i, t) => multi
+        ? padL + (i / Math.max(1, pts.length - 1)) * cw
+        : padL + ((t - t0) / (t1 - t0)) * cw;
       const yAt = (p) => padT + (1 - (p - mn) / (mx - mn)) * ch;
 
       ctx.strokeStyle = "#e5e7eb";
@@ -739,21 +742,37 @@
         ctx.stroke();
         ctx.fillText(pv.toLocaleString("zh-TW"), 4, y + 4);
       }
-      const hour0 = new Date(t0);
-      hour0.setMinutes(0, 0, 0);
-      if (hour0.getTime() < t0) hour0.setHours(hour0.getHours() + 1);
-      const spanMs = t1 - t0;
-      const hourStep = spanMs > 72 * 3600000 ? 12 : spanMs > 20 * 3600000 ? 4 : 1;
       ctx.textAlign = "center";
-      for (let t = hour0.getTime(); t <= t1; t += 3600000 * hourStep) {
-        const x = Math.round(xAtT(t)) + 0.5;
-        ctx.beginPath();
-        ctx.moveTo(x, padT);
-        ctx.lineTo(x, padT + ch);
-        ctx.stroke();
-        const lab = new Date(t);
-        const hh = String(lab.getHours()).padStart(2, "0");
-        ctx.fillText(daySpan >= 2 ? (lab.getMonth() + 1) + "/" + lab.getDate() + " " + hh : hh, x, h - 6);
+      if (multi) {
+        let lastKey = "";
+        pts.forEach((p, i) => {
+          const d = new Date(p.time);
+          const hm = d.getHours() * 100 + d.getMinutes();
+          const tag = (hm >= 845 && hm < 1500) ? "日" : "夜";
+          const key = (d.getMonth() + 1) + "/" + d.getDate() + tag;
+          if (key === lastKey) return;
+          lastKey = key;
+          const x = Math.round(xAtI(i, p.time)) + 0.5;
+          ctx.beginPath();
+          ctx.moveTo(x, padT);
+          ctx.lineTo(x, padT + ch);
+          ctx.stroke();
+          ctx.fillText(key, x, h - 6);
+        });
+      } else {
+        const hour0 = new Date(t0);
+        hour0.setMinutes(0, 0, 0);
+        if (hour0.getTime() < t0) hour0.setHours(hour0.getHours() + 1);
+        const spanMs = t1 - t0;
+        const hourStep = spanMs > 72 * 3600000 ? 12 : spanMs > 20 * 3600000 ? 4 : 1;
+        for (let t = hour0.getTime(); t <= t1; t += 3600000 * hourStep) {
+          const x = Math.round(xAtI(0, t)) + 0.5;
+          ctx.beginPath();
+          ctx.moveTo(x, padT);
+          ctx.lineTo(x, padT + ch);
+          ctx.stroke();
+          ctx.fillText(String(new Date(t).getHours()).padStart(2, "0"), x, h - 6);
+        }
       }
       ctx.textAlign = "left";
 
@@ -766,7 +785,7 @@
       ctx.stroke();
       ctx.setLineDash([]);
 
-      const gap = daySpan < 1 ? 150000 : 20 * 60 * 1000;
+      const gap = multi ? 1e15 : (daySpan < 1 ? 150000 : 20 * 60 * 1000);
       const runs = [];
       let run = [];
       for (let i = 0; i < pts.length; i++) {
@@ -774,7 +793,7 @@
           if (run.length >= 2) runs.push(run);
           run = [];
         }
-        run.push({ x: xAtT(pts[i].time), y: yAt(pts[i].px), px: pts[i].px });
+        run.push({ x: xAtI(i, pts[i].time), y: yAt(pts[i].px), px: pts[i].px });
       }
       if (run.length >= 2) runs.push(run);
 
@@ -949,14 +968,18 @@
             upWickColor: "#d32f2f", downWickColor: "#1b8a3e", noChangeWickColor: "#888888",
           },
           tooltip: {
-            title: { show: false },
-            legend: {
-              template: [
-                { title: "開 ", value: "{open}" },
-                { title: "高 ", value: "{high}" },
-                { title: "低 ", value: "{low}" },
-                { title: "收 ", value: "{close}" },
-              ],
+            showRule: "follow_cross",
+            showType: "standard",
+            custom: function (data) {
+              const c = data && data.current;
+              if (!c) return [];
+              const z = function (v) { return String(Math.round(Number(v) || 0)); };
+              return [
+                { title: "開" + z(c.open), value: "" },
+                { title: "高" + z(c.high), value: "" },
+                { title: "低" + z(c.low), value: "" },
+                { title: "收" + z(c.close), value: "" },
+              ];
             },
           },
         },
@@ -989,6 +1012,8 @@
         kchart = klinecharts.init("khost", { styles: twStyles() });
         if (kchart.setPrecision) kchart.setPrecision({ price: 0, volume: 0 });
         else if (kchart.setPriceVolumePrecision) kchart.setPriceVolumePrecision(0, 0);
+      } else if (kchart.setStyles) {
+        kchart.setStyles(twStyles());
       }
       kchart.applyNewData(data.length ? data : []);
     }
