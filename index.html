@@ -118,7 +118,7 @@
     .oi td, .oi th { padding: 3px 2px; border-bottom: 1px solid #f3f4f6; text-align: right; font-variant-numeric: tabular-nums; }
     .oi td:first-child, .oi th:first-child { text-align: left; color: #6b7280; }
     table.q td.lab { color: #6b7280; }
-    .ob { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 0; table-layout: fixed; font-weight: 700; }
+    .ob { width: 100%; border-collapse: collapse; font-size: 15px; margin-top: 0; table-layout: fixed; font-weight: 700; }
     .ob col.c-qty { width: 18px; }
     .ob col.c-bar { width: auto; }
     .ob col.c-px { width: 58px; }
@@ -131,8 +131,8 @@
     .ob .qty.ask { text-align: right; }
     .ob .bar-bid { text-align: right; }
     .ob .bar-ask { text-align: left; }
-    .ob .pxb { color: var(--up); text-align: right; white-space: nowrap; font-size: 12px; font-weight: 700; }
-    .ob .pxa { color: var(--dn); text-align: left; white-space: nowrap; font-size: 12px; font-weight: 700; }
+    .ob .pxb { color: var(--up); text-align: right; white-space: nowrap; font-size: 14px; font-weight: 700; }
+    .ob .pxa { color: var(--dn); text-align: left; white-space: nowrap; font-size: 14px; font-weight: 700; }
     .bar-wrap {
       position: relative;
       display: flex;
@@ -147,7 +147,7 @@
     .bar-labs {
       position: absolute; inset: 0;
       display: flex; justify-content: space-between; align-items: center;
-      padding: 0 8px; font-size: 12px; font-weight: 700; color: #fff;
+      padding: 0 8px; font-size: 14px; font-weight: 700; color: #fff;
       pointer-events: none;
     }
     .up { color: var(--up); }
@@ -158,11 +158,14 @@
     .live.on { color: #16a34a; }
     .szbar { display: block; height: 14px; background: var(--dn); max-width: 100%; }
     .szbar.r { background: var(--up); margin-left: auto; }
+    .card.foot {
+      position: relative;
+      padding-bottom: 22px;
+    }
     .ver {
-      position: fixed;
+      position: absolute;
       right: 10px;
-      bottom: 8px;
-      z-index: 20;
+      bottom: 6px;
       font-size: 11px;
       color: #9ca3af;
       pointer-events: none;
@@ -237,14 +240,14 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card foot">
       <div class="side-oi">
         <div class="oi" id="oi-inst"></div>
         <div class="oi" id="oi-top"></div>
       </div>
+      <div class="ver">v20260814-0030</div>
     </div>
   </div>
-  <div class="ver">v20260814-0024</div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
     let session = "night";
@@ -395,7 +398,7 @@
       const top = uncover.top || [];
       if (inst.length) {
         let h = `<h4>法人未平倉 ${uncover.date || ""}</h4>`;
-        h += `<table><tr><th>項目</th><th>多單</th><th>空單</th><th>淨額</th></tr>`;
+        h += `<table><tr><th></th><th>多單</th><th>空單</th><th>淨額</th></tr>`;
         inst.forEach((r) => {
           const nm = String(r.name || "")
             .replace("外資及陸資", "外")
@@ -443,7 +446,7 @@
     }
 
     function packBars() {
-      if (session === "merge") {
+      if (session === "merge" || daySpan >= 2) {
         return {
           m1: joinBars(minutePack.night_1m, minutePack.day_1m),
           m5: joinBars(minutePack.night_5m, minutePack.day_5m),
@@ -568,6 +571,12 @@
     }
 
     function sessRange(pts) {
+      if (daySpan >= 2 && pts.length >= 2) {
+        const t0 = pts[0].time;
+        const t1 = pts[pts.length - 1].time;
+        const pad = Math.max(60000, (t1 - t0) * 0.01);
+        return { t0: t0 - pad, t1: t1 + pad };
+      }
       const tRef = pts.length ? pts[pts.length - 1].time : Date.now();
       const d = new Date(tRef);
       const start = new Date(d);
@@ -705,7 +714,7 @@
       }
       const prices = pts.map((p) => p.px);
       const qx0 = q();
-      const open = n(qx0 && qx0.COpenPrice) || prices[0];
+      const open = daySpan >= 2 ? prices[0] : (n(qx0 && qx0.COpenPrice) || prices[0]);
       const hi = Math.max(...prices, open, n(qx0 && qx0.CHighPrice) ?? -Infinity);
       const lo = Math.min(...prices, open, n(qx0 && qx0.CLowPrice) ?? Infinity);
       let mx = Math.ceil((hi + 100) / 100) * 100;
@@ -733,7 +742,8 @@
       const hour0 = new Date(t0);
       hour0.setMinutes(0, 0, 0);
       if (hour0.getTime() < t0) hour0.setHours(hour0.getHours() + 1);
-      const hourStep = (t1 - t0) > 20 * 3600000 ? 2 : 1;
+      const spanMs = t1 - t0;
+      const hourStep = spanMs > 72 * 3600000 ? 12 : spanMs > 20 * 3600000 ? 4 : 1;
       ctx.textAlign = "center";
       for (let t = hour0.getTime(); t <= t1; t += 3600000 * hourStep) {
         const x = Math.round(xAtT(t)) + 0.5;
@@ -741,8 +751,9 @@
         ctx.moveTo(x, padT);
         ctx.lineTo(x, padT + ch);
         ctx.stroke();
-        const hh = new Date(t).getHours();
-        ctx.fillText(String(hh).padStart(2, "0"), x, h - 6);
+        const lab = new Date(t);
+        const hh = String(lab.getHours()).padStart(2, "0");
+        ctx.fillText(daySpan >= 2 ? (lab.getMonth() + 1) + "/" + lab.getDate() + " " + hh : hh, x, h - 6);
       }
       ctx.textAlign = "left";
 
