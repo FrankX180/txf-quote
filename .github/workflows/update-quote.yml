@@ -7,6 +7,7 @@ on:
     branches: [main]
     paths:
       - "scripts/fetch_quote.py"
+      - "scripts/fetch_uncovered.py"
       - ".github/workflows/update-quote.yml"
 permissions:
   contents: write
@@ -23,11 +24,14 @@ jobs:
       - name: Fetch Yahoo WTX 1m/5m/15m
         run: python scripts/fetch_minute.py
         continue-on-error: true
+      - name: Fetch Yahoo FITX uncovered
+        run: python scripts/fetch_uncovered.py
+        continue-on-error: true
       - name: Commit snapshot
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/snapshot.json data/history-night.json data/history-day.json data/kline-minute.json
+          git add data/snapshot.json data/history-night.json data/history-day.json data/kline-minute.json data/uncovered.json
           git diff --cached --quiet && echo "no change" && exit 0
           git commit -m "行情快照 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           git push

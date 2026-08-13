@@ -57,21 +57,21 @@
     }
     .tab.on { color: #b91c1c; border-bottom: 2px solid #b91c1c; }
     .grid { display: grid; grid-template-columns: 1.35fr 0.95fr; gap: 16px; }
-    .side { display: flex; flex-direction: column; }
+    .side {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+      gap: 10px;
+      align-items: start;
+    }
     @media (max-width: 860px) {
       .grid { grid-template-columns: 1fr; }
-      .side {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        gap: 8px;
-        align-items: start;
-      }
       table.q { font-size: 11px; }
       table.q td { padding: 3px 2px; }
       .ob { font-size: 11px; margin-top: 0; }
       .ob td { padding: 2px 2px; }
       .szbar { max-width: 18px; }
       .bar-wrap { margin: 6px 0 4px; }
+      .oi { font-size: 11px; }
     }
     .meta { font-size: 13px; line-height: 1.7; color: #374151; }
     canvas { width: 100%; height: 280px; display: block; }
@@ -84,7 +84,12 @@
     #khost { width: 100%; height: 320px; display: none; }
     table.q { width: 100%; border-collapse: collapse; font-size: 13px; }
     table.q td { padding: 6px 0; border-bottom: 1px solid #f3f4f6; }
-    table.q td:nth-child(2) { text-align: right; font-variant-numeric: tabular-nums; }
+    table.q td:nth-child(2), table.q td:nth-child(4) { text-align: right; font-variant-numeric: tabular-nums; }
+    .oi { margin-top: 10px; font-size: 12px; }
+    .oi h4 { margin: 10px 0 4px; font-size: 12px; }
+    .oi table { width: 100%; border-collapse: collapse; }
+    .oi td, .oi th { padding: 3px 2px; border-bottom: 1px solid #f3f4f6; text-align: right; font-variant-numeric: tabular-nums; }
+    .oi td:first-child, .oi th:first-child { text-align: left; color: #6b7280; }
     table.q td.lab { color: #6b7280; }
     .ob { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
     .ob td { padding: 4px 6px; font-variant-numeric: tabular-nums; }
@@ -155,15 +160,16 @@
           <div id="khost"></div>
         </div>
         <div class="side">
+          <table class="q" id="stats"></table>
           <div>
-            <table class="q" id="stats"></table>
-            <div class="bar-wrap" title="僅買一／賣一口數近似，非正式內外盤">
+            <table class="ob" id="ob"></table>
+            <div class="bar-wrap">
               <div class="bar-in" id="barIn" style="width:50%"></div>
               <div class="bar-out" id="barOut" style="width:50%"></div>
             </div>
             <div class="sub" id="inoutlab">買一口數 —　賣一口數 —</div>
+            <div class="oi" id="oi"></div>
           </div>
-          <table class="ob" id="ob"></table>
         </div>
       </div>
     </div>
@@ -178,6 +184,7 @@
     let chartMode = "line";
     let kInt = "1";
     let dailyPack = { night: [], day: [] };
+    let uncover = { inst: [], top: [], date: "" };
     let minutePack = {
       night_1m: [], day_1m: [],
       night_5m: [], day_5m: [],
@@ -246,19 +253,14 @@
         `開盤 ${fmt(x.COpenPrice)}　昨收 ${fmt(x.CRefPrice)}　最高 ${fmt(x.CHighPrice)}　最低 ${fmt(x.CLowPrice)}`;
 
       const rows = [
-        ["成交", fmt(x.CLastPrice)],
-        ["漲跌幅", rate == null ? "—" : fmt(rate, 2) + "%"],
-        ["開盤", fmt(x.COpenPrice)],
-        ["漲跌", fmt(x.CDiff)],
-        ["最高", fmt(x.CHighPrice)],
-        ["最低", fmt(x.CLowPrice)],
-        ["昨收", fmt(x.CRefPrice)],
-        ["買價", fmt(x.CBidPrice1)],
-        ["賣價", fmt(x.CAskPrice1)],
-        ["總量", fmt(x.CTotalVolume)],
+        ["成交", fmt(x.CLastPrice), "漲跌幅", rate == null ? "—" : fmt(rate, 2) + "%"],
+        ["開盤", fmt(x.COpenPrice), "漲跌", fmt(x.CDiff)],
+        ["最高", fmt(x.CHighPrice), "買價", fmt(x.CBidPrice1)],
+        ["最低", fmt(x.CLowPrice), "賣價", fmt(x.CAskPrice1)],
+        ["昨收", fmt(x.CRefPrice), "總量", fmt(x.CTotalVolume)],
       ];
       $("stats").innerHTML = rows
-        .map((r) => `<tr><td class="lab">${r[0]}</td><td>${r[1]}</td></tr>`)
+        .map((r) => `<tr><td class="lab">${r[0]}</td><td>${r[1]}</td><td class="lab">${r[2]}</td><td>${r[3]}</td></tr>`)
         .join("");
 
       let bidTot = 0, askTot = 0;
@@ -303,7 +305,41 @@
       $("live").className = "live" + (live ? " on" : "");
       $("live").textContent = live ? "LIVE" : "快照";
       renderRelated();
+      renderOi();
       draw();
+    }
+
+    function signed(v) {
+      if (v == null) return "—";
+      const x = Number(v);
+      const c = x > 0 ? "up" : x < 0 ? "dn" : "flat";
+      return `<span class="${c}">${fmt(x)}</span>`;
+    }
+
+    function renderOi() {
+      const box = $("oi");
+      if (!box) return;
+      const inst = uncover.inst || [];
+      const top = uncover.top || [];
+      if (!inst.length && !top.length) {
+        box.innerHTML = "";
+        return;
+      }
+      let h = `<h4>法人未平倉 ${uncover.date || ""}</h4>`;
+      h += `<table><tr><th>項目</th><th>多單</th><th>空單</th><th>淨額</th></tr>`;
+      inst.forEach((r) => {
+        h += `<tr><td>${r.name}</td><td class="up">${fmt(r.long)}</td><td class="dn">${fmt(r.short)}</td><td>${signed(r.net)}</td></tr>`;
+      });
+      h += `</table>`;
+      top.forEach((r) => {
+        h += `<h4>${r.type || "前十大交易人"}</h4>`;
+        h += `<table><tr><th></th><th>部位數</th><th>百分比</th></tr>`;
+        h += `<tr><td>買方</td><td>${fmt(r.long)}</td><td>${r.longPct == null ? "—" : fmt(r.longPct, 1) + "%"}</td></tr>`;
+        h += `<tr><td>賣方</td><td>${fmt(r.short)}</td><td>${r.shortPct == null ? "—" : fmt(r.shortPct, 1) + "%"}</td></tr>`;
+        if (r.open != null) h += `<tr><td>非沖銷部位</td><td>${fmt(r.open)}</td><td></td></tr>`;
+        h += `</table>`;
+      });
+      box.innerHTML = h;
     }
 
     function renderRelated() {
@@ -716,6 +752,12 @@
           minutePack.day_1m = m.day || [];
         }
       } catch (e) {}
+      try {
+        uncover = await fetch("data/uncovered.json?t=" + Date.now()).then((r) => r.json());
+      } catch (e) {
+        uncover = { inst: [], top: [], date: "" };
+      }
+      renderOi();
       draw();
     }
 
