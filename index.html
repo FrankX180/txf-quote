@@ -39,10 +39,10 @@
     .related { display: flex; gap: 6px; margin-top: 8px; }
     #minik {
       position: relative;
-      width: 46%;
-      max-width: 460px;
-      min-width: 220px;
-      height: 200px;
+      width: 42%;
+      max-width: 400px;
+      min-width: 200px;
+      height: 132px;
       flex-shrink: 0;
     }
     .rel {
@@ -673,7 +673,7 @@
           setTimeout(drawMiniK, 80);
           return;
         }
-        miniChart = klinecharts.init(el, { styles: twStyles() });
+        miniChart = klinecharts.init(el, { styles: miniStyles() });
         if (!miniChart) return;
         miniChart.setBarSpace(8);
         miniChart.setOffsetRightDistance(6);
@@ -706,6 +706,13 @@
         },
         indicator: { bars: [{ upColor: "#d32f2f", downColor: "#1b8a3e", noChangeColor: "#888" }] },
       };
+    }
+
+    function miniStyles() {
+      const s = twStyles();
+      s.candle.tooltip = { showRule: "none" };
+      s.indicator.tooltip = { showRule: "none" };
+      return s;
     }
 
     function renderK() {
