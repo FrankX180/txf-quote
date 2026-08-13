@@ -244,7 +244,6 @@
       night_15m: [], day_15m: [],
     };
     let kchart = null;
-    let kVolOn = false;
     let miniChart = null;
     const LIVE = "https://wtx.19850926.xyz/";
 
@@ -783,16 +782,7 @@
     function renderK() {
       if (typeof klinecharts === "undefined") return;
       const data = klineData();
-      const needVol = kInt !== "d" && kInt !== "w" && kInt !== "m";
-      if (!kchart || kVolOn !== needVol) {
-        if (kchart) {
-          klinecharts.dispose("khost");
-          kchart = null;
-        }
-        kchart = klinecharts.init("khost", { styles: twStyles() });
-        if (needVol) kchart.createIndicator("VOL", false, { id: "vol_pane" });
-        kVolOn = needVol;
-      }
+      if (!kchart) kchart = klinecharts.init("khost", { styles: twStyles() });
       kchart.applyNewData(data.length ? data : []);
     }
 
