@@ -279,7 +279,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0066</div>
+    <div class="ver">v20260814-0068</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -600,20 +600,36 @@
       return out;
     }
 
+    const MIN_KEYS = ["night_1m","day_1m","night_5m","day_5m","night_15m","day_15m"];
+
+    function trimBars(rows, n) {
+      if (!rows || rows.length <= n) return rows || [];
+      const dates = [];
+      for (let i = rows.length - 1; i >= 0 && dates.length < n; i--) {
+        const d = rows[i].date;
+        if (d && dates.indexOf(d) < 0) dates.push(d);
+      }
+      const keep = {};
+      dates.forEach((d) => { keep[d] = 1; });
+      return rows.filter((b) => keep[b.date]);
+    }
+
     function save1m() {
       try {
-        localStorage.setItem("txf1m", JSON.stringify({
-          night: minutePack.night_1m, day: minutePack.day_1m, t: Date.now(),
-        }));
+        const o = { t: Date.now() };
+        MIN_KEYS.forEach((k) => { o[k] = trimBars(minutePack[k], 8); });
+        localStorage.setItem("txfMin", JSON.stringify(o));
       } catch (e) {}
     }
 
     function loadLocal1m() {
       try {
-        const j = JSON.parse(localStorage.getItem("txf1m") || "null");
+        const j = JSON.parse(localStorage.getItem("txfMin") || localStorage.getItem("txf1m") || "null");
         if (!j) return;
-        minutePack.night_1m = mergeBarLists(minutePack.night_1m, j.night);
-        minutePack.day_1m = mergeBarLists(minutePack.day_1m, j.day);
+        MIN_KEYS.forEach((k) => {
+          const src = j[k] || (k === "night_1m" ? j.night : k === "day_1m" ? j.day : null);
+          if (src && src.length) minutePack[k] = mergeBarLists(minutePack[k], src);
+        });
       } catch (e) {}
     }
 
@@ -1302,6 +1318,7 @@
 
     function setSession(s) {
       session = s === "day" ? "day" : "night";
+      if (session === "day") save1m();
       render();
     }
     $("sumline").onclick = (e) => {
