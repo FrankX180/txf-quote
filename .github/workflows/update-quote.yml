@@ -1,0 +1,30 @@
+name: update-quote
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/fetch_quote.py"
+      - ".github/workflows/update-quote.yml"
+permissions:
+  contents: write
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch TAIFEX snapshot
+        run: python scripts/fetch_quote.py
+      - name: Commit snapshot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/snapshot.json data/history-night.json data/history-day.json
+          git diff --cached --quiet && echo "no change" && exit 0
+          git commit -m "行情快照 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push
