@@ -7,8 +7,10 @@ on:
     branches: [main]
     paths:
       - "scripts/fetch_quote.py"
+      - "scripts/fetch_minute.py"
       - "scripts/fetch_uncovered.py"
       - "scripts/fetch_kline.py"
+      - "scripts/when.py"
       - ".github/workflows/update-quote.yml"
 permissions:
   contents: write

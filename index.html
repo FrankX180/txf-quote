@@ -279,7 +279,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0068</div>
+    <div class="ver">v20260814-0072</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -303,6 +303,9 @@
     let holding = false;
     let holdTimer = null;
     let lineHit = null;
+    let lastTot = null;
+    let liveTimer = null;
+    let klineTimer = null;
     const LIVE = "https://wtx.19850926.xyz/";
 
     const $ = (id) => document.getElementById(id);
@@ -512,6 +515,19 @@
       const hm = new Date().getHours() * 100 + new Date().getMinutes();
       return hm >= 845 && hm < 1500 ? "day" : "night";
     }
+    function marketOpen() {
+      const d = new Date();
+      const dow = d.getDay();
+      const hm = d.getHours() * 100 + d.getMinutes();
+      if (dow === 0) return false;
+      if (dow === 6) return hm < 510;
+      if (hm >= 845 && hm <= 1345) return true;
+      if (hm >= 1500 || hm < 510) return true;
+      return false;
+    }
+    function gh(path) {
+      return fetch(path, { cache: "no-cache" });
+    }
     function sessKey() {
       if (session === "day") return "day";
       if (session === "night") return "night";
@@ -634,27 +650,32 @@
     }
 
     function bumpLiveBar() {
-      const live = liveSess();
-      const px = n((snap && snap[live] && snap[live].CLastPrice) || (q() && q().CLastPrice));
+      const liveK = liveSess();
+      const q0 = (snap && snap[liveK]) || q();
+      const px = n(q0 && q0.CLastPrice);
       if (px == null) return;
-      const key = live + "_1m";
+      const tot = n(q0 && q0.CTotalVolume);
+      const key = liveK + "_1m";
       const rows = minutePack[key] || [];
       if (!rows.length) return;
       const slot = Math.floor(Date.now() / 60000) * 60000;
       const last = rows[rows.length - 1];
       const lastSlot = Math.floor(last.timestamp / 60000) * 60000;
+      const dVol = tot != null && lastTot != null && tot >= lastTot ? tot - lastTot : 0;
       if (lastSlot === slot) {
         last.close = px;
         last.high = Math.max(last.high, px);
         last.low = Math.min(last.low, px);
+        if (dVol) last.volume = (last.volume || 0) + dVol;
       } else if (slot > lastSlot && slot - lastSlot <= 150000) {
         rows.push({
           timestamp: slot, open: last.close, high: Math.max(last.close, px),
-          low: Math.min(last.close, px), close: px, volume: 0,
-          date: last.date, session: live,
+          low: Math.min(last.close, px), close: px, volume: dVol,
+          date: last.date, session: liveK,
         });
         minutePack[key] = rows;
       }
+      if (tot != null) lastTot = tot;
       save1m();
     }
 
@@ -1290,8 +1311,16 @@
     }
 
     async function pollLive() {
+      if (document.visibilityState !== "visible" || !marketOpen()) {
+        live = false;
+        if ($("live")) {
+          $("live").className = "live";
+          $("live").textContent = "快照";
+        }
+        return;
+      }
       try {
-        const rows = await fetch(LIVE + "?t=" + Date.now()).then((r) => r.json());
+        const rows = await fetch(LIVE).then((r) => r.json());
         if (Array.isArray(rows) && rows.length) applyLive(rows);
       } catch (e) {
         live = false;
@@ -1304,9 +1333,9 @@
 
     async function load() {
       const [s, hn, hd] = await Promise.all([
-        fetch("data/snapshot.json?t=" + Date.now()).then((r) => r.json()),
-        fetch("data/history-night.json?t=" + Date.now()).then((r) => (r.ok ? r.json() : [])).catch(() => []),
-        fetch("data/history-day.json?t=" + Date.now()).then((r) => (r.ok ? r.json() : [])).catch(() => []),
+        gh("data/snapshot.json").then((r) => r.json()),
+        gh("data/history-night.json").then((r) => (r.ok ? r.json() : [])).catch(() => []),
+        gh("data/history-day.json").then((r) => (r.ok ? r.json() : [])).catch(() => []),
       ]);
       if (!live) {
         snap = s;
@@ -1352,65 +1381,16 @@
       };
     });
 
-    function classifyTs(tsSec) {
-      const dt = new Date(tsSec * 1000);
-      const hm = dt.getHours() * 100 + dt.getMinutes();
-      const iso = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
-      if (hm >= 1500 || hm < 500) {
-        const d = new Date(dt);
-        if (hm < 500) d.setDate(d.getDate() - 1);
-        return { sess: "night", date: iso(d) };
-      }
-      if (hm >= 845 && hm <= 1345) return { sess: "day", date: iso(dt) };
-      return null;
-    }
-
-    function applyYahoo1m(chart) {
-      const tsList = chart.timestamp || [];
-      const q = (((chart.indicators || {}).quote) || [{}])[0] || {};
-      const opens = q.open || [], highs = q.high || [], lows = q.low || [], closes = q.close || [], vols = q.volume || [];
-      const night = [], day = [];
-      tsList.forEach((ts, i) => {
-        const c = closes[i];
-        if (c == null) return;
-        const hit = classifyTs(ts);
-        if (!hit) return;
-        const row = {
-          timestamp: ts * 1000,
-          open: opens[i] != null ? opens[i] : c,
-          high: highs[i] != null ? highs[i] : c,
-          low: lows[i] != null ? lows[i] : c,
-          close: c,
-          volume: Math.round((vols[i] || 0) * 1000),
-          date: hit.date,
-          session: hit.sess,
-        };
-        (hit.sess === "night" ? night : day).push(row);
-      });
-      if (night.length) minutePack.night_1m = mergeBarLists(minutePack.night_1m, night);
-      if (day.length) minutePack.day_1m = mergeBarLists(minutePack.day_1m, day);
-      bumpLiveBar();
-      save1m();
-      draw();
-    }
-
-    async function poll1m() {
-      try {
-        const j = await fetch(LIVE + "?kind=1m&t=" + Date.now()).then((r) => r.json());
-        if (j && (j.timestamp || []).length) applyYahoo1m(j);
-      } catch (e) {}
-    }
-
     async function loadKline() {
       try {
-        const pack = await fetch("data/kline-daily.json?t=" + Date.now()).then((r) => r.json());
+        const pack = await gh("data/kline-daily.json").then((r) => r.json());
         dailyPack.night = pack.night || [];
         dailyPack.day = pack.day || [];
         dailyPack.daily = pack.daily || pack.night || [];
         dailyPack.week = pack.week || [];
       } catch (e) {}
       try {
-        const m = await fetch("data/kline-minute.json?t=" + Date.now()).then((r) => r.json());
+        const m = await gh("data/kline-minute.json").then((r) => r.json());
         ["night_1m","day_1m","night_5m","day_5m","night_15m","day_15m"].forEach((k) => {
           minutePack[k] = mergeBarLists(minutePack[k], m[k] || []);
         });
@@ -1422,7 +1402,7 @@
         }
       } catch (e) {}
       try {
-        uncover = await fetch("data/uncovered.json?t=" + Date.now()).then((r) => r.json());
+        uncover = await gh("data/uncovered.json").then((r) => r.json());
       } catch (e) {
         uncover = { inst: [], top: [], date: "" };
       }
@@ -1430,6 +1410,22 @@
       drawMiniK();
       render();
     }
+
+    function startPoll() {
+      if (liveTimer) return;
+      pollLive();
+      liveTimer = setInterval(pollLive, 5000);
+    }
+    function stopPoll() {
+      if (liveTimer) {
+        clearInterval(liveTimer);
+        liveTimer = null;
+      }
+    }
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") startPoll();
+      else stopPoll();
+    });
 
     window.addEventListener("resize", () => {
       if (miniChart && miniChart.resize) miniChart.resize();
@@ -1443,11 +1439,8 @@
     loadLocal1m();
     load();
     loadKline();
-    pollLive();
-    poll1m();
-    setInterval(pollLive, 5000);
-    setInterval(poll1m, 30000);
-    setInterval(loadKline, 60000);
+    startPoll();
+    klineTimer = setInterval(loadKline, 300000);
   </script>
 </body>
 </html>

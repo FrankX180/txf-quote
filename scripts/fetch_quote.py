@@ -182,6 +182,10 @@ def append_hist(path: Path, q, now_iso):
 
 
 def main():
+    from when import want_yahoo_quote
+    if not want_yahoo_quote():
+        print("SKIP quote: closed")
+        return
     DATA.mkdir(exist_ok=True)
     now = datetime.now(TZ)
     now_iso = now.strftime("%Y-%m-%d %H:%M:%S")

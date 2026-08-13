@@ -1,9 +1,10 @@
-# 奇摩期貨 StockServices / ApacLibra → data/kline-minute.json
-# 台指近月 WTX&。勿打 query1.finance.yahoo.com。
+# 盤中：奇摩 1/5/15 分。收盤後：富邦 DJ 1 分補齊。
 import json
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from when import want_fubon, want_yahoo_minute
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data" / "kline-minute.json"
@@ -13,6 +14,11 @@ KEEP_DAYS = 10
 HDR = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
     "Referer": "https://tw.stock.yahoo.com/",
+}
+FUBON = "https://fubon-ebrokerdj.fbs.com.tw/Z/ZM/ZMB/CZMB.djbcd?a=FITXN&b=-1&c=1&D=12000"
+FUBON_HDR = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
+    "Referer": "https://fubon-ebrokerdj.fbs.com.tw/",
 }
 
 
@@ -100,6 +106,71 @@ def load_old():
     return old.get("night_1m") or old.get("night") or [], old.get("day_1m") or old.get("day") or []
 
 
+def fetch_fubon_1m():
+    req = urllib.request.Request(FUBON, headers=FUBON_HDR)
+    with urllib.request.urlopen(req, timeout=40) as r:
+        text = r.read().decode("utf-8", "replace")
+    chunks = text.split(" ")
+    if len(chunks) < 5:
+        return [], []
+    codes = [x.strip() for x in chunks[0].split(",") if len(x.strip()) == 6 and x.strip().isdigit()]
+    opens = chunks[1].split(",")
+    highs = chunks[2].split(",")
+    lows = chunks[3].split(",")
+    closes = chunks[4].split(",")
+    vols = chunks[5].split(",") if len(chunks) > 5 else []
+    now = datetime.now(TZ)
+    y, m = now.year, now.month
+    prev_dd = None
+    stamps = []
+    for code in reversed(codes):
+        dd, hh, mm = int(code[:2]), int(code[2:4]), int(code[4:6])
+        if prev_dd is not None and dd > prev_dd:
+            m -= 1
+            if m < 1:
+                m, y = 12, y - 1
+        prev_dd = dd
+        try:
+            stamps.append(datetime(y, m, dd, hh, mm, tzinfo=TZ))
+        except ValueError:
+            stamps.append(None)
+    stamps.reverse()
+    night, day = [], []
+    n = min(len(codes), len(closes))
+    for i in range(n):
+        dt = stamps[i] if i < len(stamps) else None
+        if dt is None:
+            continue
+        try:
+            c = float(closes[i])
+        except (TypeError, ValueError):
+            continue
+        def f(arr):
+            try:
+                return float(arr[i])
+            except (TypeError, ValueError, IndexError):
+                return c
+        try:
+            v = int(round(float(vols[i]))) if i < len(vols) else 0
+        except (TypeError, ValueError):
+            v = 0
+        sess, sdate, _ = classify(int(dt.timestamp()))
+        if not sess:
+            continue
+        row = {
+            "timestamp": int(dt.timestamp()) * 1000,
+            "open": f(opens),
+            "high": f(highs),
+            "low": f(lows),
+            "close": c,
+            "volume": v,
+            "date": sdate,
+            "session": sess,
+        }
+        (night if sess == "night" else day).append(row)
+    return night, day
+
+
 def fetch_apac(period: str):
     enc = "%5B%22WTX%26%22%5D"
     url = (
@@ -114,15 +185,35 @@ def fetch_apac(period: str):
 
 
 def main():
-    yn, yd = fetch_1m()
+    do_y = want_yahoo_minute()
+    do_f = want_fubon()
+    if not do_y and not do_f:
+        print("SKIP minute: closed")
+        return
     on, od = load_old()
-    n1 = trim_days(merge_bars(on, yn))
-    d1 = trim_days(merge_bars(od, yd))
-    n5, d5 = fetch_apac("5m")
-    n15, d15 = fetch_apac("15m")
+    yn, yd = [], []
+    src = []
+    if do_y:
+        yn, yd = fetch_1m()
+        src.append("yahoo 1m")
+    fn, fd = [], []
+    if do_f:
+        fn, fd = fetch_fubon_1m()
+        src.append("fubon 1m")
+    n1 = trim_days(merge_bars(on, yn, fn))
+    d1 = trim_days(merge_bars(od, yd, fd))
+    n5, d5, n15, d15 = [], [], [], []
+    old = json.loads(OUT.read_text(encoding="utf-8")) if OUT.exists() else {}
+    if do_y:
+        n5, d5 = fetch_apac("5m")
+        n15, d15 = fetch_apac("15m")
+        src.append("yahoo 5m 15m")
+    else:
+        n5, d5 = old.get("night_5m") or [], old.get("day_5m") or []
+        n15, d15 = old.get("night_15m") or [], old.get("day_15m") or []
     payload = {
         "fetchedAt": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
-        "source": "yahoo StockServices 1m merge / ApacLibra 5m 15m",
+        "source": " / ".join(src),
         "contract": "WTX&",
         "night_1m": n1,
         "day_1m": d1,

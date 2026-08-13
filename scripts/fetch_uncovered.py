@@ -43,6 +43,10 @@ def num(v):
 
 
 def main():
+    from when import want_uncovered
+    if not want_uncovered():
+        print("SKIP uncovered")
+        return
     req = urllib.request.Request(URL, headers=HDR)
     with urllib.request.urlopen(req, timeout=25) as r:
         html = r.read().decode("utf-8", "replace")

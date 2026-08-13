@@ -66,6 +66,10 @@ def to_bars(rows):
 
 
 def main():
+    from when import want_daily_k
+    if not want_daily_k():
+        print("SKIP daily k")
+        return
     daily = to_bars(get("D", 9000))
     week = to_bars(get("W", 2000))
     payload = {
