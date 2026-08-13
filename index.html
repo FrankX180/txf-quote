@@ -30,21 +30,55 @@
     }
     .chipline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 0; }
     .rowlab { font-size: 13px; font-weight: 800; color: #111; min-width: 2.4em; }
-    .hero { display: flex; justify-content: space-between; align-items: stretch; gap: 12px; }
-    .hero-l { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-    .title-row { display: flex; align-items: center; gap: 8px; }
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(220px, 32%) 1fr 28px;
+      grid-template-rows: auto 1fr;
+      gap: 8px 10px;
+      align-items: stretch;
+    }
+    .hero-head { grid-column: 1; grid-row: 1 / span 2; display: flex; flex-direction: column; min-width: 0; }
+    .hero-mid { grid-column: 2; grid-row: 1 / span 2; display: flex; flex-direction: column; min-width: 0; }
+    .fold {
+      grid-column: 3;
+      grid-row: 2;
+      align-self: end;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .fold button {
+      width: 24px; height: 22px; padding: 0; border: 0; background: transparent;
+      cursor: pointer; font-size: 14px; line-height: 1; color: #111;
+    }
+    .fold button.on { color: #111; }
+    .fold button:not(.on) { color: #9ca3af; }
+    .hero.collapsed {
+      grid-template-columns: 1fr auto 28px;
+      grid-template-rows: auto;
+    }
+    .hero.collapsed .hero-head {
+      grid-column: 1 / span 2;
+      grid-row: 1;
+      flex-direction: row;
+      align-items: center;
+      gap: 16px;
+    }
+    .hero.collapsed .hero-mid,
+    .hero.collapsed .related { display: none; }
+    .related { display: flex; gap: 6px; margin-top: 8px; }
+    .hero.collapsed .fold { grid-column: 3; grid-row: 1; align-self: center; }
+    .hero.collapsed .px { font-size: 32px; margin: 0; }
+    .hero.collapsed .pxmeta { padding-bottom: 0; }
+    .title-row { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
     .title { font-size: 22px; font-weight: 800; }
     .pxrow { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
     .pxmeta { padding-bottom: 6px; }
-    .related { display: flex; gap: 6px; margin-top: 8px; }
     #minik {
       position: relative;
-      width: 42%;
-      max-width: 420px;
-      min-width: 220px;
+      width: 100%;
       min-height: 168px;
-      align-self: stretch;
-      flex-shrink: 0;
+      flex: 1;
     }
     .rel {
       border: 1.5px solid #2563eb;
@@ -56,10 +90,6 @@
     .rel .n { font-size: 11px; font-weight: 700; color: #1e3a8a; }
     .rel .p { font-size: 16px; font-weight: 800; margin: 0; }
     .rel .c { font-size: 11px; }
-    .badge {
-      font-size: 12px; background: #fef3c7; color: #92400e;
-      border-radius: 4px; padding: 2px 6px; font-weight: 700;
-    }
     .px { font-size: 40px; font-weight: 800; letter-spacing: -1px; margin: 8px 0 4px; }
     .sub { font-size: 13px; color: var(--muted); }
     .sessico {
@@ -150,11 +180,10 @@
 <body>
   <div class="wrap">
     <div class="card">
-      <div class="hero">
-        <div class="hero-l">
+      <div class="hero" id="hero">
+        <div class="hero-head">
           <div class="title-row">
-            <div class="title" id="name">台指期 TXF</div>
-            <span class="badge">期貨</span>
+            <div class="title" id="name">台指期</div>
             <span class="live" id="live">未連線</span>
           </div>
           <div class="pxrow">
@@ -166,7 +195,13 @@
           </div>
           <div class="related" id="related"></div>
         </div>
-        <div id="minik"></div>
+        <div class="hero-mid">
+          <div id="minik"></div>
+        </div>
+        <div class="fold">
+          <button type="button" id="foldUp" title="收合">▲</button>
+          <button type="button" id="foldDn" class="on" title="展開">▼</button>
+        </div>
       </div>
     </div>
 
@@ -220,6 +255,7 @@
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
+    let heroOpen = true;
     let session = "night";
     let snap = null;
     let hist = { night: [], day: [] };
@@ -285,7 +321,10 @@
         diff = last - ref;
         rate = ref ? (diff / ref) * 100 : 0;
       }
-      $("name").textContent = String(x.DispCName || "台指期").replace(/\s*WTX&\s*/g, "").trim();
+      $("name").textContent = String(x.DispCName || "台指期")
+        .replace(/\s*WTX&\s*/g, "")
+        .replace(/近一/g, "")
+        .trim();
       $("last").className = "px " + cls(diff);
       $("last").textContent = last == null ? "—" : fmt(last, 0);
       $("chgline").className = "sub " + cls(diff);
@@ -1019,6 +1058,20 @@
         render();
       }
     }
+
+    function setHeroOpen(open) {
+      heroOpen = !!open;
+      $("hero").classList.toggle("collapsed", !heroOpen);
+      $("foldUp").classList.toggle("on", !heroOpen);
+      $("foldDn").classList.toggle("on", heroOpen);
+      if (heroOpen) {
+        if (miniChart && miniChart.resize) miniChart.resize();
+        miniFit36();
+        drawMiniK();
+      }
+    }
+    $("foldUp").onclick = () => setHeroOpen(false);
+    $("foldDn").onclick = () => setHeroOpen(true);
 
     function setSession(s) {
       session = s === "day" ? "day" : "night";
