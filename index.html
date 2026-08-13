@@ -771,6 +771,14 @@
       return all;
     }
 
+    function miniFit36() {
+      const el = $("minik");
+      if (!miniChart || !el) return;
+      const w = el.clientWidth || 300;
+      const space = Math.max(4, (w - 60) / 36);
+      miniChart.setBarSpace(space);
+    }
+
     function drawMiniK() {
       if (typeof klinecharts === "undefined") return;
       const el = $("minik");
@@ -786,10 +794,11 @@
         if (!miniChart) return;
         if (miniChart.setPrecision) miniChart.setPrecision({ price: 0, volume: 0 });
         else if (miniChart.setPriceVolumePrecision) miniChart.setPriceVolumePrecision(0, 0);
-        miniChart.setBarSpace(18);
         miniChart.setOffsetRightDistance(8);
+        miniFit36();
         miniChart.applyNewData(bars);
         if (miniChart.resize) miniChart.resize();
+        miniFit36();
         return;
       }
       const have = miniChart.getDataList ? miniChart.getDataList().length : 0;
@@ -1059,6 +1068,7 @@
 
     window.addEventListener("resize", () => {
       if (miniChart && miniChart.resize) miniChart.resize();
+      miniFit36();
       if (kchart && kchart.resize) kchart.resize();
       draw();
     });
