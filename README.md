@@ -1,8 +1,8 @@
 # 台指期 TXF 看盤小頁
 
-資料來源：奇摩股市期貨 `WTX&`（台指近月）
+資料來源：奇摩股市（不依賴本機）
 
-- 報價＋五檔：`StockServices.stockList`
-- 當日 1 分／多日 5／15 分：`StockServices.chart`、`FinanceChartService.ApacLibraCharts`
+- 台指近月 `WTX&`：報價、五檔、1 分／5 分／15 分
+- 台積電期近月 `WCDF&`、聯電期近月 `WCCF&`：報價
 
-GitHub Actions 每 5 分鐘寫入 `data/*.json`。頁面只讀這些靜態檔，不連本機閘道。
+GitHub Actions 每 5 分鐘打奇摩並寫入 `data/*.json`。頁面只讀這些檔。電腦關機不影響。

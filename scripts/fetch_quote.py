@@ -10,7 +10,7 @@ DATA = ROOT / "data"
 TZ = timezone(timedelta(hours=8))
 URL = (
     "https://tw.stock.yahoo.com/_td-stock/api/resource/"
-    "StockServices.stockList;symbols=WTX%26"
+    "StockServices.stockList;symbols=WTX%26,WCDF%26,WCCF%26"
 )
 HDR = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
@@ -19,11 +19,44 @@ HDR = {
 KEEP_POINTS = 800
 
 
-def get() -> dict:
+def get_list() -> list:
     req = urllib.request.Request(URL, headers=HDR)
     with urllib.request.urlopen(req, timeout=25) as r:
         j = json.loads(r.read().decode("utf-8", "replace"))
-    return j[0] if isinstance(j, list) else j
+    return j if isinstance(j, list) else [j]
+
+
+def pick(rows, symbol):
+    for d in rows:
+        if d.get("symbol") == symbol:
+            return d
+    return None
+
+
+def slim_mini(d):
+    if not d:
+        return None
+    last = raw(d.get("price"))
+    ref = raw(d.get("regularMarketPreviousClose"))
+    diff = raw(d.get("change"))
+    if diff is None and last is not None and ref is not None:
+        diff = last - ref
+    rate = None
+    cp = d.get("changePercent")
+    if isinstance(cp, str) and cp.endswith("%"):
+        try:
+            rate = float(cp.replace("%", ""))
+        except ValueError:
+            rate = None
+    if rate is None and diff is not None and ref:
+        rate = (diff / ref) * 100
+    return {
+        "symbol": d.get("symbol") or "",
+        "name": d.get("symbolName") or "",
+        "last": fmt_num(last, 0 if last and last >= 100 else 1),
+        "diff": fmt_num(diff, 0 if last and last >= 100 else 1),
+        "rate": "" if rate is None else ("%.2f" % rate),
+    }
 
 
 def raw(v):
@@ -152,13 +185,20 @@ def main():
     DATA.mkdir(exist_ok=True)
     now = datetime.now(TZ)
     now_iso = now.strftime("%Y-%m-%d %H:%M:%S")
-    d = get()
+    rows = get_list()
+    d = pick(rows, "WTX&") or (rows[0] if rows else {})
     q = slim(d)
+    related = [
+        slim_mini(pick(rows, "WCDF&")),
+        slim_mini(pick(rows, "WCCF&")),
+    ]
+    related = [x for x in related if x]
     snap = {
         "fetchedAt": now_iso,
-        "source": "yahoo tw.stock StockServices.stockList WTX&",
+        "source": "yahoo tw.stock StockServices.stockList WTX& WCDF& WCCF&",
         "night": q,
         "day": q,
+        "related": related,
     }
     # 同一口近月：兩個分頁都吃這份五檔；盤別只影響走勢分鐘線
     (DATA / "snapshot.json").write_text(
@@ -177,6 +217,8 @@ def main():
         "levels",
         sum(1 for i in range(1, 6) if q.get("CBidPrice" + str(i))),
         q.get("marketStatus"),
+        "related",
+        len(related),
     )
 
 

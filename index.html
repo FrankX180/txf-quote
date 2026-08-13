@@ -28,8 +28,23 @@
       padding: 18px 20px;
       margin-bottom: 12px;
     }
+    #daychips { display: none; align-items: center; gap: 8px; flex-wrap: wrap; }
+    #daychips.show { display: flex; }
+    .hero { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: start; }
+    @media (max-width: 860px) { .hero { grid-template-columns: 1fr; } }
     .title-row { display: flex; align-items: center; gap: 8px; }
     .title { font-size: 22px; font-weight: 800; }
+    .related { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+    .rel {
+      border: 2px solid #2563eb;
+      border-radius: 8px;
+      padding: 8px 12px;
+      min-width: 168px;
+      background: #f8fbff;
+    }
+    .rel .n { font-size: 13px; font-weight: 700; color: #1e3a8a; }
+    .rel .p { font-size: 22px; font-weight: 800; margin: 2px 0; }
+    .rel .c { font-size: 12px; }
     .badge {
       font-size: 12px; background: #fef3c7; color: #92400e;
       border-radius: 4px; padding: 2px 6px; font-weight: 700;
@@ -77,14 +92,19 @@
 <body>
   <div class="wrap">
     <div class="card">
-      <div class="title-row">
-        <div class="title" id="name">台指期 TXF</div>
-        <span class="badge">期貨</span>
-        <span class="live" id="live">未連線</span>
+      <div class="hero">
+        <div>
+          <div class="title-row">
+            <div class="title" id="name">台指期 TXF</div>
+            <span class="badge">期貨</span>
+            <span class="live" id="live">未連線</span>
+          </div>
+          <div class="px flat" id="last">—</div>
+          <div class="sub" id="chgline"></div>
+          <div class="sub" id="stamp">載入中…</div>
+        </div>
+        <div class="related" id="related"></div>
       </div>
-      <div class="px flat" id="last">—</div>
-      <div class="sub" id="chgline"></div>
-      <div class="sub" id="stamp">載入中…</div>
     </div>
 
     <div class="card">
@@ -95,13 +115,15 @@
       <div class="grid">
         <div>
           <div class="chips">
-            <button class="mode on" id="mode-line" type="button">走勢</button>
-            <button class="mode" id="mode-k" type="button">K線</button>
-            <button class="chip on" data-days="1" type="button">當日</button>
-            <button class="chip" data-days="2" type="button">二日</button>
-            <button class="chip" data-days="3" type="button">三日</button>
-            <button class="chip" data-days="4" type="button">四日</button>
-            <button class="chip" data-days="5" type="button">五日</button>
+            <button class="mode on" id="mode-k" type="button">K線</button>
+            <button class="mode" id="mode-line" type="button">走勢</button>
+            <span id="daychips">
+              <button class="chip on" data-days="1" type="button">當日</button>
+              <button class="chip" data-days="2" type="button">二日</button>
+              <button class="chip" data-days="3" type="button">三日</button>
+              <button class="chip" data-days="4" type="button">四日</button>
+              <button class="chip" data-days="5" type="button">五日</button>
+            </span>
           </div>
           <div class="meta" id="sumline"></div>
           <canvas id="chart" width="720" height="280"></canvas>
@@ -117,10 +139,6 @@
           <table class="ob" id="ob"></table>
         </div>
       </div>
-      <div class="note">
-        報價、五檔、走勢／分 K 全部來自奇摩期貨 <code>WTX&amp;</code>（<code>stockList</code> + <code>StockServices.chart</code>／<code>ApacLibra</code>）。
-        K 線用 BLOK 同套 <code>klinecharts v9</code>（漲紅跌綠）。日 K 備援來自 <code>futures_daily</code>。
-      </div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -130,7 +148,7 @@
     let hist = { night: [], day: [] };
     let live = false;
     let daySpan = 1;
-    let chartMode = "line";
+    let chartMode = "k";
     let dailyPack = { night: [], day: [] };
     let minutePack = {
       night_1m: [], day_1m: [],
@@ -244,7 +262,22 @@
       $("ob").innerHTML = ob;
       $("live").className = "live" + (live ? " on" : "");
       $("live").textContent = live ? "LIVE" : "快照";
+      renderRelated();
       draw();
+    }
+
+    function renderRelated() {
+      const box = $("related");
+      if (!box) return;
+      const items = (snap && snap.related) || [];
+      box.innerHTML = items.map((r) => {
+        const diff = n(r.diff);
+        return `<div class="rel">
+          <div class="n">${r.name || r.symbol}</div>
+          <div class="p ${cls(diff)}">${fmt(r.last)}</div>
+          <div class="c ${cls(diff)}">${arrow(diff)} ${fmt(Math.abs(diff))} (${fmt(n(r.rate), 2)}%)</div>
+        </div>`;
+      }).join("");
     }
 
     function fmtTime(d, t) {
@@ -256,20 +289,38 @@
 
     function sessKey() { return session === "night" ? "night" : "day"; }
 
+    function resample(bars, minutes) {
+      if (!bars || minutes <= 1) return bars || [];
+      const ms = minutes * 60 * 1000;
+      const out = [];
+      let cur = null;
+      bars.forEach((b) => {
+        const t = Math.floor(b.timestamp / ms) * ms;
+        if (!cur || cur.timestamp !== t) {
+          if (cur) out.push(cur);
+          cur = {
+            timestamp: t,
+            open: b.open, high: b.high, low: b.low, close: b.close,
+            volume: b.volume || 0, date: b.date, session: b.session,
+          };
+        } else {
+          cur.high = Math.max(cur.high, b.high);
+          cur.low = Math.min(cur.low, b.low);
+          cur.close = b.close;
+          cur.volume += (b.volume || 0);
+        }
+      });
+      if (cur) out.push(cur);
+      return out;
+    }
+
     function minuteSeries() {
-      const k = sessKey();
-      const m1 = minutePack[k + "_1m"] || [];
-      const m5 = minutePack[k + "_5m"] || [];
-      const m15 = minutePack[k + "_15m"] || [];
-      if (daySpan === 1 && m1.length >= 2) return m1;
-      if (daySpan <= 3 && m5.length >= 2) return m5;
-      if (m15.length >= 2) return m15;
-      if (m5.length >= 2) return m5;
-      return m1;
+      const m1 = minutePack[sessKey() + "_1m"] || [];
+      return resample(m1, daySpan);
     }
 
     function lastDates(nDays) {
-      const bars = minuteSeries().concat(dailyPack[sessKey()] || []);
+      const bars = (minutePack[sessKey() + "_1m"] || []).concat(dailyPack[sessKey()] || []);
       const dates = [];
       for (let i = bars.length - 1; i >= 0 && dates.length < nDays; i--) {
         const d = bars[i].date;
@@ -292,10 +343,11 @@
     }
 
     function klineData() {
-      const keep = lastDates(daySpan);
-      const mins = minuteSeries().filter((b) => keep.indexOf(b.date) >= 0);
+      const m1 = minutePack[sessKey() + "_1m"] || [];
+      const keep = lastDates(1);
+      const mins = m1.filter((b) => keep.indexOf(b.date) >= 0);
       if (mins.length) return mins;
-      return (dailyPack[sessKey()] || []).filter((b) => keep.indexOf(b.date) >= 0);
+      return dailyPack[sessKey()] || [];
     }
 
     function draw() {
@@ -403,16 +455,25 @@
       $("tab-day").classList.remove("on");
       render();
     };
+    function syncDayChips() {
+      const el = $("daychips");
+      if (!el) return;
+      if (chartMode === "line") el.classList.add("show");
+      else el.classList.remove("show");
+    }
+
     $("mode-line").onclick = () => {
       chartMode = "line";
       $("mode-line").classList.add("on");
       $("mode-k").classList.remove("on");
+      syncDayChips();
       draw();
     };
     $("mode-k").onclick = () => {
       chartMode = "k";
       $("mode-k").classList.add("on");
       $("mode-line").classList.remove("on");
+      syncDayChips();
       draw();
     };
     document.querySelectorAll(".chip[data-days]").forEach((btn) => {
@@ -443,6 +504,7 @@
       draw();
     }
 
+    syncDayChips();
     load();
     loadKline();
     setInterval(load, 30000);

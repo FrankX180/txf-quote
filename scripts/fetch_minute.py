@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data" / "kline-minute.json"
 TZ = timezone(timedelta(hours=8))
 SYM = "WTX%26"
+KEEP_DAYS = 10
 HDR = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
     "Referer": "https://tw.stock.yahoo.com/",
@@ -72,6 +73,33 @@ def fetch_1m():
     return bars_from_chart(j)
 
 
+def merge_bars(*groups):
+    by_ts = {}
+    for rows in groups:
+        for b in rows or []:
+            by_ts[b["timestamp"]] = b
+    return sorted(by_ts.values(), key=lambda x: x["timestamp"])
+
+
+def trim_days(rows, n=KEEP_DAYS):
+    dates = []
+    for b in reversed(rows):
+        d = b.get("date")
+        if d and d not in dates:
+            dates.append(d)
+        if len(dates) >= n:
+            break
+    keep = set(dates)
+    return [b for b in rows if b.get("date") in keep]
+
+
+def load_old():
+    if not OUT.exists():
+        return [], []
+    old = json.loads(OUT.read_text(encoding="utf-8"))
+    return old.get("night_1m") or old.get("night") or [], old.get("day_1m") or old.get("day") or []
+
+
 def fetch_apac(period: str):
     enc = "%5B%22WTX%26%22%5D"
     url = (
@@ -86,12 +114,15 @@ def fetch_apac(period: str):
 
 
 def main():
-    n1, d1 = fetch_1m()
+    yn, yd = fetch_1m()
+    on, od = load_old()
+    n1 = trim_days(merge_bars(on, yn))
+    d1 = trim_days(merge_bars(od, yd))
     n5, d5 = fetch_apac("5m")
     n15, d15 = fetch_apac("15m")
     payload = {
         "fetchedAt": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
-        "source": "yahoo tw.stock StockServices/ApacLibra WTX&",
+        "source": "yahoo StockServices 1m merge / ApacLibra 5m 15m",
         "contract": "WTX&",
         "night_1m": n1,
         "day_1m": d1,
