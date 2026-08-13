@@ -1,75 +1,90 @@
-# TX 近月日K（盤後／一般）→ data/kline-daily.json
+# MoneyDJ 期貨 FITX 日／週／月 K → data/kline-daily.json
+# 不併奇摩、不併本機庫。c=D/W/M 各打一次。
 import json
-import sys
-from datetime import datetime, timezone, timedelta
+import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-
-sys.path.insert(0, r"E:\_Project\BLOK\backend")
-from config import DATABASE_URL  # noqa: E402
-import psycopg2  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data" / "kline-daily.json"
 TZ = timezone(timedelta(hours=8))
+HDR = {"User-Agent": "Mozilla/5.0"}
+BASE = (
+    "https://pscnetsecrwd.moneydj.com/b2brwdCommon/jsondata/00/00/00/twstockdata.xdjjson"
+    "?x=afterhours-options-common-10&a=FITX&b=0&c={per}&d={n}"
+)
+
+
+def get(per: str, n: int):
+    url = BASE.format(per=per, n=n)
+    req = urllib.request.Request(url, headers=HDR)
+    with urllib.request.urlopen(req, timeout=40) as r:
+        j = json.loads(r.read().decode("utf-8", "replace"))
+    return (j.get("ResultSet") or {}).get("Result") or []
+
+
+def fnum(v):
+    if v is None or v == "":
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def to_bars(rows):
+    out = []
+    for r in reversed(rows or []):
+        ds = str(r.get("V1") or "").replace("/", "-")
+        c = fnum(r.get("V5"))
+        if not ds or c is None:
+            continue
+        o = fnum(r.get("V2"))
+        h = fnum(r.get("V3"))
+        l = fnum(r.get("V4"))
+        v = fnum(r.get("V6"))
+        if o is None:
+            o = c
+        if h is None:
+            h = max(o, c)
+        if l is None:
+            l = min(o, c)
+        y, m, d = [int(x) for x in ds.split("-")[:3]]
+        ts = int(datetime(y, m, d, 13, 45, tzinfo=TZ).timestamp() * 1000)
+        out.append(
+            {
+                "timestamp": ts,
+                "open": o,
+                "high": h,
+                "low": l,
+                "close": c,
+                "volume": int(v or 0),
+                "date": ds,
+            }
+        )
+    return out
 
 
 def main():
-    conn = psycopg2.connect(DATABASE_URL)
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT delivery_month FROM futures_daily
-        WHERE contract = 'TX' AND session = '盤後' AND open_price IS NOT NULL
-          AND trade_date = (SELECT MAX(trade_date) FROM futures_daily WHERE contract = 'TX')
-        ORDER BY volume DESC NULLS LAST
-        LIMIT 1
-        """
-    )
-    month = cur.fetchone()[0]
-    print("month", month)
-    cur.execute(
-        """
-        SELECT trade_date, session, open_price, high_price, low_price, close_price, volume
-        FROM futures_daily
-        WHERE contract = 'TX' AND delivery_month = %s
-          AND open_price IS NOT NULL
-        ORDER BY trade_date, session
-        """,
-        (month,),
-    )
-    night, day = [], []
-    for d, sess, o, h, l, c, v in cur.fetchall():
-        if hasattr(d, "year"):
-            y, m, dd = d.year, d.month, d.day
-        else:
-            parts = str(d)[:10].split("-")
-            y, m, dd = int(parts[0]), int(parts[1]), int(parts[2])
-        ts = int(datetime(y, m, dd, 15 if sess == "盤後" else 9, tzinfo=TZ).timestamp() * 1000)
-        bar = {
-            "timestamp": ts,
-            "open": float(o),
-            "high": float(h),
-            "low": float(l),
-            "close": float(c),
-            "volume": int(v or 0),
-            "date": d.isoformat() if hasattr(d, "isoformat") else str(d)[:10],
-            "session": sess,
-        }
-        if sess == "盤後":
-            night.append(bar)
-        elif sess == "一般":
-            day.append(bar)
-    conn.close()
+    daily = to_bars(get("D", 9000))
+    week = to_bars(get("W", 2000))
+    month = to_bars(get("M", 500))
     payload = {
         "fetchedAt": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
-        "contract": "TX",
-        "delivery_month": month,
-        "night": night,
-        "day": day,
+        "source": "moneydj afterhours-options-common-10 FITX",
+        "contract": "FITX",
+        "daily": daily,
+        "week": week,
+        "month": month,
+        "night": daily,
+        "day": daily,
     }
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    print("OK night", len(night), "day", len(day))
+    print(
+        "OK daily", len(daily), daily[0]["date"] if daily else "", daily[-1]["date"] if daily else "",
+        "week", len(week), "month", len(month),
+    )
 
 
 if __name__ == "__main__":

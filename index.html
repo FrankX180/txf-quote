@@ -183,7 +183,7 @@
     let daySpan = 1;
     let chartMode = "line";
     let kInt = "1";
-    let dailyPack = { night: [], day: [] };
+    let dailyPack = { night: [], day: [], daily: [], week: [], month: [] };
     let uncover = { inst: [], top: [], date: "" };
     let minutePack = {
       night_1m: [], day_1m: [],
@@ -441,8 +441,7 @@
     }
 
     function dailyBars() {
-      if (session === "merge") return mergeDaily();
-      return dailyPack[sessKey()] || [];
+      return dailyPack.daily || dailyPack.night || [];
     }
 
     function resample(bars, ms) {
@@ -509,10 +508,9 @@
       if (kInt === "5") return m5.length ? m5 : resample(m1, 5 * 60 * 1000);
       if (kInt === "15") return m15.length ? m15 : resample(m5.length ? m5 : m1, 15 * 60 * 1000);
       if (kInt === "30") return resample(m15.length ? m15 : (m5.length ? m5 : m1), 30 * 60 * 1000);
-      const d = dailyBars();
-      if (kInt === "w") return foldDaily(d, weekKey);
-      if (kInt === "m") return foldDaily(d, monthKey);
-      return d;
+      if (kInt === "w") return dailyPack.week && dailyPack.week.length ? dailyPack.week : foldDaily(dailyBars(), weekKey);
+      if (kInt === "m") return dailyPack.month && dailyPack.month.length ? dailyPack.month : foldDaily(dailyBars(), monthKey);
+      return dailyBars();
     }
 
     function draw() {
@@ -741,6 +739,9 @@
         const pack = await fetch("data/kline-daily.json?t=" + Date.now()).then((r) => r.json());
         dailyPack.night = pack.night || [];
         dailyPack.day = pack.day || [];
+        dailyPack.daily = pack.daily || pack.night || [];
+        dailyPack.week = pack.week || [];
+        dailyPack.month = pack.month || [];
       } catch (e) {}
       try {
         const m = await fetch("data/kline-minute.json?t=" + Date.now()).then((r) => r.json());
