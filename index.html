@@ -177,11 +177,11 @@
             <div class="chipline">
               <span class="rowlab">Ｋ線</span>
               <button class="chip" data-k="1" type="button">１分</button>
+              <button class="chip" data-k="5" type="button">５分</button>
               <button class="chip" data-k="15" type="button">１５</button>
               <button class="chip" data-k="30" type="button">３０</button>
               <button class="chip" data-k="d" type="button">日Ｋ</button>
               <button class="chip" data-k="w" type="button">週Ｋ</button>
-              <button class="chip" data-k="m" type="button">月Ｋ</button>
             </div>
             <div class="chipline">
               <span class="rowlab">走勢</span>
@@ -227,7 +227,7 @@
     let daySpan = 0;
     let chartMode = "line";
     let kInt = "1";
-    let dailyPack = { night: [], day: [], daily: [], week: [], month: [] };
+    let dailyPack = { night: [], day: [], daily: [], week: [] };
     let uncover = { inst: [], top: [], date: "" };
     let minutePack = {
       night_1m: [], day_1m: [],
@@ -648,11 +648,6 @@
       return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
     }
 
-    function monthKey(b) {
-      const d = new Date(b.timestamp);
-      return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
-    }
-
     function klineData() {
       const { m1, m5, m15 } = packBars();
       if (kInt === "1") return m1.length ? m1 : m5;
@@ -660,7 +655,6 @@
       if (kInt === "15") return m15.length ? m15 : resample(m5.length ? m5 : m1, 15 * 60 * 1000);
       if (kInt === "30") return resample(m15.length ? m15 : (m5.length ? m5 : m1), 30 * 60 * 1000);
       if (kInt === "w") return dailyPack.week && dailyPack.week.length ? dailyPack.week : foldDaily(dailyBars(), weekKey);
-      if (kInt === "m") return dailyPack.month && dailyPack.month.length ? dailyPack.month : foldDaily(dailyBars(), monthKey);
       return dailyBars();
     }
 
@@ -1115,7 +1109,6 @@
         dailyPack.day = pack.day || [];
         dailyPack.daily = pack.daily || pack.night || [];
         dailyPack.week = pack.week || [];
-        dailyPack.month = pack.month || [];
       } catch (e) {}
       try {
         const m = await fetch("data/kline-minute.json?t=" + Date.now()).then((r) => r.json());

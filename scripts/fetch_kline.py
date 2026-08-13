@@ -68,14 +68,12 @@ def to_bars(rows):
 def main():
     daily = to_bars(get("D", 9000))
     week = to_bars(get("W", 2000))
-    month = to_bars(get("M", 500))
     payload = {
         "fetchedAt": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
         "source": "moneydj afterhours-options-common-10 FITX",
         "contract": "FITX",
         "daily": daily,
         "week": week,
-        "month": month,
         "night": daily,
         "day": daily,
     }
@@ -83,7 +81,7 @@ def main():
     OUT.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     print(
         "OK daily", len(daily), daily[0]["date"] if daily else "", daily[-1]["date"] if daily else "",
-        "week", len(week), "month", len(month),
+        "week", len(week),
     )
 
 
