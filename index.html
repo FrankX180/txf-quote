@@ -32,7 +32,7 @@
     .rowlab { font-size: 13px; font-weight: 800; color: #111; min-width: 2.4em; }
     .hero {
       display: grid;
-      grid-template-columns: minmax(220px, 32%) 1fr 28px;
+      grid-template-columns: minmax(220px, 32%) 1fr;
       grid-template-rows: auto 1fr;
       gap: 8px 10px;
       align-items: stretch;
@@ -40,13 +40,22 @@
     .hero-head { grid-column: 1; grid-row: 1 / span 2; display: flex; flex-direction: column; min-width: 0; }
     .hero-mid { grid-column: 2; grid-row: 1 / span 2; display: flex; flex-direction: column; min-width: 0; }
     .fold {
-      grid-column: 3;
-      grid-row: 2;
-      align-self: end;
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      z-index: 40;
       display: flex;
       flex-direction: column;
       gap: 2px;
+      padding: 4px 3px;
+      background: rgba(255,255,255,0.92);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+      touch-action: none;
+      cursor: grab;
     }
+    .fold.drag { cursor: grabbing; }
     .fold button {
       width: 24px; height: 22px; padding: 0; border: 0; background: transparent;
       cursor: pointer; font-size: 14px; line-height: 1; color: #111;
@@ -54,20 +63,17 @@
     .fold button.on { color: #111; }
     .fold button:not(.on) { color: #9ca3af; }
     .hero.collapsed {
-      grid-template-columns: 1fr auto 28px;
+      grid-template-columns: 1fr;
       grid-template-rows: auto;
     }
     .hero.collapsed .hero-head {
-      grid-column: 1 / span 2;
+      grid-column: 1;
       grid-row: 1;
       flex-direction: row;
       align-items: center;
       gap: 16px;
     }
-    .hero.collapsed .hero-mid,
-    .hero.collapsed .related { display: none; }
-    .related { display: flex; gap: 6px; margin-top: 8px; }
-    .hero.collapsed .fold { grid-column: 3; grid-row: 1; align-self: center; }
+    .hero.collapsed .hero-mid { display: none; }
     .hero.collapsed .px { font-size: 32px; margin: 0; }
     .hero.collapsed .pxmeta { padding-bottom: 0; }
     .title-row { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
@@ -80,16 +86,6 @@
       min-height: 168px;
       flex: 1;
     }
-    .rel {
-      border: 1.5px solid #2563eb;
-      border-radius: 6px;
-      padding: 4px 8px;
-      background: #f8fbff;
-      line-height: 1.25;
-    }
-    .rel .n { font-size: 11px; font-weight: 700; color: #1e3a8a; }
-    .rel .p { font-size: 16px; font-weight: 800; margin: 0; }
-    .rel .c { font-size: 11px; }
     .px { font-size: 40px; font-weight: 800; letter-spacing: -1px; margin: 8px 0 4px; }
     .sub { font-size: 13px; color: var(--muted); }
     .sessico {
@@ -193,14 +189,9 @@
               <div class="sub" id="stamp">載入中…</div>
             </div>
           </div>
-          <div class="related" id="related"></div>
         </div>
         <div class="hero-mid">
           <div id="minik"></div>
-        </div>
-        <div class="fold">
-          <button type="button" id="foldUp" title="收合">▲</button>
-          <button type="button" id="foldDn" class="on" title="展開">▼</button>
         </div>
       </div>
     </div>
@@ -252,6 +243,10 @@
         </div>
       </div>
     </div>
+  </div>
+  <div class="fold" id="fold">
+    <button type="button" id="foldUp" title="收合">▲</button>
+    <button type="button" id="foldDn" class="on" title="展開">▼</button>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -335,8 +330,7 @@
         `股價 <b>${fmt(last, 0)}</b> <span class="${cls(diff)}">${arrow(diff)} ${fmt(diff, 0)}(${fmt(rate, 2)}%)</span>` +
         `　總口數 ${fmt(x.CTotalVolume)}<br>` +
         `昨收 ${fmt(x.CRefPrice)}　開盤 ${fmt(x.COpenPrice)}　最高 <span class="up">${fmt(x.CHighPrice)}</span>　最低 <span class="dn">${fmt(x.CLowPrice)}</span>` +
-        `<span class="sessico${session === "day" ? " on" : ""}" data-sess="day" title="日盤">☀</span>` +
-        `<span class="sessico${session === "night" ? " on" : ""}" data-sess="night" title="夜盤">☾</span>`;
+        `<span class="sessico on" id="sessToggle" title="${session === "day" ? "日盤，點一下切夜盤" : "夜盤，點一下切日盤"}">${session === "day" ? "☀️" : "🌙"}</span>`;
 
       let bidTot = 0, askTot = 0;
       const levels = [1, 2, 3, 4, 5];
@@ -383,7 +377,6 @@
       $("ob").innerHTML = ob;
       $("live").className = "live" + (live ? " on" : "");
       $("live").textContent = live ? "LIVE" : "快照";
-      renderRelated();
       renderOi();
       drawMiniK();
       draw();
@@ -428,21 +421,6 @@
         h += `</table>`;
         right.innerHTML = h;
       } else right.innerHTML = "";
-    }
-
-    function renderRelated() {
-      const box = $("related");
-      if (!box) return;
-      const items = (snap && snap.related) || [];
-      box.innerHTML = items.map((r) => {
-        const diff = n(r.diff);
-        const name = String(r.name || r.symbol || "").replace("期貨近一", "期").replace("近一", "");
-        return `<div class="rel">
-          <div class="n">${name}</div>
-          <div class="p ${cls(diff)}">${fmt(r.last)}</div>
-          <div class="c ${cls(diff)}">${arrow(diff)} ${fmt(Math.abs(diff))} (${fmt(n(r.rate), 2)}%)</div>
-        </div>`;
-      }).join("");
     }
 
     function fmtTime(d, t) {
@@ -993,29 +971,15 @@
       return q;
     }
 
-    function miniYahoo(d) {
-      const last = raw(d.price);
-      const ref = raw(d.regularMarketPreviousClose);
-      let diff = raw(d.change);
-      if (diff == null && last != null && ref != null) diff = last - ref;
-      let rate = null;
-      const cp = d.changePercent;
-      if (typeof cp === "string" && cp.endsWith("%")) rate = parseFloat(cp);
-      if (rate == null && diff != null && ref) rate = (diff / ref) * 100;
-      return { symbol: d.symbol, name: d.symbolName, last, diff, rate };
-    }
-
     function applyLive(rows) {
       const wtx = rows.find((x) => x.symbol === "WTX&") || rows[0];
       if (!wtx) return;
       const q0 = slimYahoo(wtx);
-      const related = rows.filter((x) => x.symbol === "WCDF&" || x.symbol === "WCCF&").map(miniYahoo);
       snap = {
         fetchedAt: new Date().toLocaleString("zh-TW", { hour12: false }),
         source: "yahoo via wtx.19850926.xyz",
         night: q0,
         day: q0,
-        related,
       };
       const px = n(q0.CLastPrice);
       if (px) {
@@ -1070,16 +1034,65 @@
         drawMiniK();
       }
     }
-    $("foldUp").onclick = () => setHeroOpen(false);
-    $("foldDn").onclick = () => setHeroOpen(true);
+    let foldMoved = false;
+    $("foldUp").onclick = () => { if (!foldMoved) setHeroOpen(false); };
+    $("foldDn").onclick = () => { if (!foldMoved) setHeroOpen(true); };
+    (function bindFoldDrag() {
+      const el = $("fold");
+      try {
+        const pos = JSON.parse(localStorage.getItem("txfFold") || "null");
+        if (pos && Number.isFinite(pos.x) && Number.isFinite(pos.y)) {
+          el.style.left = pos.x + "px";
+          el.style.top = pos.y + "px";
+          el.style.right = "auto";
+        }
+      } catch (e) {}
+      let sx = 0, sy = 0, sl = 0, st = 0;
+      el.addEventListener("pointerdown", (e) => {
+        if (e.button) return;
+        foldMoved = false;
+        const r = el.getBoundingClientRect();
+        sx = e.clientX;
+        sy = e.clientY;
+        sl = r.left;
+        st = r.top;
+        el.classList.add("drag");
+        el.setPointerCapture(e.pointerId);
+      });
+      el.addEventListener("pointermove", (e) => {
+        if (!el.hasPointerCapture(e.pointerId)) return;
+        const dx = e.clientX - sx;
+        const dy = e.clientY - sy;
+        if (Math.abs(dx) + Math.abs(dy) < 4) return;
+        foldMoved = true;
+        const x = Math.max(0, Math.min(window.innerWidth - el.offsetWidth, sl + dx));
+        const y = Math.max(0, Math.min(window.innerHeight - el.offsetHeight, st + dy));
+        el.style.left = x + "px";
+        el.style.top = y + "px";
+        el.style.right = "auto";
+      });
+      function endDrag(e) {
+        if (!el.hasPointerCapture(e.pointerId)) return;
+        el.releasePointerCapture(e.pointerId);
+        el.classList.remove("drag");
+        if (foldMoved) {
+          localStorage.setItem("txfFold", JSON.stringify({
+            x: parseFloat(el.style.left), y: parseFloat(el.style.top),
+          }));
+        }
+      }
+      el.addEventListener("pointerup", endDrag);
+      el.addEventListener("pointercancel", endDrag);
+    })();
 
     function setSession(s) {
       session = s === "day" ? "day" : "night";
       render();
     }
     $("sumline").onclick = (e) => {
-      const el = e.target.closest("[data-sess]");
-      if (el) setSession(el.getAttribute("data-sess"));
+      if (e.target.id === "sessToggle" || e.target.closest("#sessToggle")) {
+        setSession(session === "day" ? "night" : "day");
+      }
     };
     function markChips() {
       document.querySelectorAll(".chip[data-k]").forEach((b) => {
