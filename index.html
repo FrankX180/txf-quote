@@ -37,7 +37,7 @@
     .pxrow { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
     .pxmeta { padding-bottom: 6px; }
     .related { display: flex; gap: 6px; margin-top: 8px; }
-    #miniK { width: 46%; max-width: 420px; height: 150px; flex-shrink: 0; }
+    #minik { width: 46%; max-width: 420px; height: 168px; flex-shrink: 0; }
     .rel {
       border: 1.5px solid #2563eb;
       border-radius: 6px;
@@ -135,7 +135,7 @@
           </div>
           <div class="related" id="related"></div>
         </div>
-        <canvas id="miniK" width="400" height="150"></canvas>
+        <div id="minik"></div>
       </div>
     </div>
 
@@ -207,6 +207,7 @@
       night_15m: [], day_15m: [],
     };
     let kchart = null;
+    let miniChart = null;
     const LIVE = "https://wtx.19850926.xyz/";
 
     const $ = (id) => document.getElementById(id);
@@ -621,8 +622,11 @@
       const l = n(x.CLowPrice);
       const ds = String(x.CDate || "");
       const date = ds.length === 8 ? ds.slice(0, 4) + "-" + ds.slice(4, 6) + "-" + ds.slice(6, 8) : "";
+      if (!date) return null;
+      const p = date.split("-");
+      const ts = Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2]), 5, 45);
       return {
-        timestamp: Date.now(),
+        timestamp: ts,
         open: o == null ? c : o,
         high: h == null ? c : h,
         low: l == null ? c : l,
@@ -632,53 +636,36 @@
       };
     }
 
-    function drawMiniK() {
-      const c = $("miniK");
-      if (!c) return;
-      const ctx = c.getContext("2d");
-      const w = c.width, h = c.height;
-      ctx.clearRect(0, 0, w, h);
+    function miniBars() {
       const all = dailyBars().slice();
       const liveBar = liveDayBar();
       if (liveBar) {
         const last = all[all.length - 1];
-        if (last && last.date === liveBar.date) all[all.length - 1] = liveBar;
+        if (last && last.date === liveBar.date) all[all.length - 1] = Object.assign({}, last, liveBar, { timestamp: last.timestamp });
         else all.push(liveBar);
       }
-      const bars = all.slice(-80);
-      if (bars.length < 2) {
-        ctx.fillStyle = "#9ca3af";
-        ctx.font = "12px sans-serif";
-        ctx.fillText("日Ｋ載入中…", 10, h / 2);
+      return all;
+    }
+
+    function drawMiniK() {
+      if (typeof klinecharts === "undefined") return;
+      const el = $("minik");
+      if (!el) return;
+      const bars = miniBars();
+      if (bars.length < 2) return;
+      if (!miniChart) {
+        miniChart = klinecharts.init("minik", { styles: twStyles() });
+        miniChart.setBarSpace(6);
+        miniChart.applyNewData(bars);
         return;
       }
-      const padL = 8, padR = 44, padT = 18, padB = 8;
-      const highs = bars.map((b) => b.high);
-      const lows = bars.map((b) => b.low);
-      let mn = Math.min.apply(null, lows), mx = Math.max.apply(null, highs);
-      if (mx === mn) { mx += 10; mn -= 10; }
-      const cw = w - padL - padR;
-      const ch = h - padT - padB;
-      const bw = Math.max(2, cw / bars.length - 1);
-      const yAt = (p) => padT + (1 - (p - mn) / (mx - mn)) * ch;
-      const last = bars[bars.length - 1];
-      ctx.fillStyle = "#6b7280";
-      ctx.font = "10px sans-serif";
-      ctx.fillText("O " + Math.round(last.open) + "  H " + Math.round(last.high) + "  L " + Math.round(last.low), padL, 12);
-      ctx.fillText(Math.round(last.close).toLocaleString("zh-TW"), w - padR + 2, yAt(last.close) + 4);
-      bars.forEach((b, i) => {
-        const x = padL + (i + 0.5) * (cw / bars.length);
-        const up = b.close >= b.open;
-        ctx.strokeStyle = up ? "#d32f2f" : "#1b8a3e";
-        ctx.fillStyle = up ? "#d32f2f" : "#1b8a3e";
-        ctx.beginPath();
-        ctx.moveTo(x, yAt(b.high));
-        ctx.lineTo(x, yAt(b.low));
-        ctx.stroke();
-        const y1 = yAt(Math.max(b.open, b.close));
-        const y2 = yAt(Math.min(b.open, b.close));
-        ctx.fillRect(x - bw / 2, y1, bw, Math.max(1, y2 - y1));
-      });
+      const have = miniChart.getDataList ? miniChart.getDataList().length : 0;
+      if (have < bars.length - 1) {
+        miniChart.applyNewData(bars);
+        return;
+      }
+      const liveBar = liveDayBar();
+      if (liveBar) miniChart.updateData(liveBar);
     }
 
     function twStyles() {
