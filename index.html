@@ -101,17 +101,19 @@
         </div>
       </div>
       <div class="note">
-        秒級五檔：本機中繼連期交所 SockJS，再經 Cloudflare <code>wss://txf.19850926.xyz</code>。
-        中繼沒開時退回 Actions 快照（約 5 分鐘）。
+        即時：本機 API Manager <code>ws://127.0.0.1:8700/ws/quotes</code>（元大 TXFH6）。
+        閘道沒開時退回 Actions 快照。這台電腦開著 API Manager 才有秒級。
       </div>
     </div>
   </div>
   <script>
-    const WS_URL = "wss://txf.19850926.xyz/";
+    const AM_WS = "ws://127.0.0.1:8700/ws/quotes";
+    const AM_SYM = ["TXFH6", "TXFG6", "TXF"];
     let session = "night";
     let snap = null;
     let hist = { night: [], day: [] };
     let live = false;
+    let amCache = {};
 
     const $ = (id) => document.getElementById(id);
 
@@ -272,20 +274,95 @@
       ctx.fill();
     }
 
-    function applyLive(msg) {
-      snap = { fetchedAt: msg.fetchedAt, night: msg.night, day: msg.day };
-      if (msg.histNight && msg.histNight.length) hist.night = msg.histNight;
-      if (msg.histDay && msg.histDay.length) hist.day = msg.histDay;
+    function pickAm() {
+      for (const s of AM_SYM) {
+        if (amCache[s] && amCache[s].last) return amCache[s];
+      }
+      for (const k of Object.keys(amCache)) {
+        if (k.indexOf("TX") === 0 && amCache[k] && amCache[k].last) return amCache[k];
+      }
+      return null;
+    }
+
+    function fromAm(q) {
+      if (!q) return null;
+      const bids = q.bids || [];
+      const asks = q.asks || [];
+      const o = {
+        DispCName: q.name || "臺指期",
+        DispEName: q.symbol,
+        SymbolID: q.symbol,
+        CLastPrice: q.last,
+        COpenPrice: q.open,
+        CHighPrice: q.high,
+        CLowPrice: q.low,
+        CRefPrice: q.prev_close,
+        CDiff: (q.last != null && q.prev_close != null) ? (q.last - q.prev_close) : q.diff,
+        CDiffRate: (q.last != null && q.prev_close) ? ((q.last - q.prev_close) / q.prev_close * 100) : null,
+        CTotalVolume: q.total_volume,
+        CDate: "",
+        CTime: (q.tick_time || q.timestamp || "").toString().replace(/[:.]/g, "").slice(0, 6),
+      };
+      for (let i = 0; i < 5; i++) {
+        if (bids[i]) {
+          o["CBidPrice" + (i + 1)] = bids[i].price;
+          o["CBidSize" + (i + 1)] = bids[i].size;
+        }
+        if (asks[i]) {
+          o["CAskPrice" + (i + 1)] = asks[i].price;
+          o["CAskSize" + (i + 1)] = asks[i].size;
+        }
+      }
+      o._in = q.in_vol;
+      o._out = q.out_vol;
+      return o;
+    }
+
+    function applyAm() {
+      const v = fromAm(pickAm());
+      if (!v) return;
+      snap = { fetchedAt: new Date().toLocaleString("zh-TW", { hour12: false }), night: v, day: v };
+      const px = Number(v.CLastPrice);
+      if (px) {
+        const pt = { t: snap.fetchedAt, time: v.CTime, px: px, vol: Number(v.CTotalVolume) || 0 };
+        const h = hist.night;
+        if (!h.length || h[h.length - 1].px !== px || h[h.length - 1].time !== pt.time) {
+          h.push(pt);
+          if (h.length > 800) h.splice(0, h.length - 800);
+          hist.day = h;
+        }
+      }
       live = true;
       render();
+      const inn = Number(v._in), out = Number(v._out);
+      if (inn + out > 0) {
+        const pin = (inn / (inn + out)) * 100;
+        $("barIn").style.width = pin + "%";
+        $("barOut").style.width = (100 - pin) + "%";
+        $("inoutlab").innerHTML =
+          `<span class="dn">內盤 ${fmt(inn)}</span>　<span class="up">外盤 ${fmt(out)}</span>`;
+      }
+    }
+
+    function ingestAm(msg) {
+      if (!msg) return;
+      if (msg.type === "snapshot_batch" && msg.data) {
+        Object.assign(amCache, msg.data);
+        applyAm();
+        return;
+      }
+      if (msg.type === "quote" && msg.data && msg.data.symbol) {
+        const s = msg.data.symbol;
+        amCache[s] = Object.assign({}, amCache[s] || {}, msg.data);
+        if (AM_SYM.indexOf(s) >= 0 || s.indexOf("TX") === 0) applyAm();
+      }
     }
 
     function connectWs() {
-      let ws;
       const open = () => {
-        ws = new WebSocket(WS_URL);
+        const ws = new WebSocket(AM_WS);
         ws.onmessage = (ev) => {
-          try { applyLive(JSON.parse(ev.data)); } catch (e) {}
+          try { ingestAm(JSON.parse(ev.data)); } catch (e) {}
         };
         ws.onclose = () => {
           live = false;

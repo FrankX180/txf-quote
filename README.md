@@ -3,7 +3,6 @@
 資料來源：臺灣期貨交易所 MIS 公開行情  
 `POST https://mis.taifex.com.tw/futures/api/getQuoteList`
 
-GitHub Pages 瀏覽器**不能**直連官方 API（回應沒有 CORS）。  
-本頁讀 `data/snapshot.json`，由 GitHub Actions 約每 5 分鐘抓一次。
+即時走勢與五檔：本機 API Manager `ws://127.0.0.1:8700/ws/quotes`（元大 `TXFH6`）。
 
-官方列表只有買一／賣一，沒有完整五檔。
+這台電腦要開著 API Manager。閘道沒開時才讀 Actions 快照。
