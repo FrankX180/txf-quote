@@ -30,21 +30,20 @@
     }
     #daychips { display: none; align-items: center; gap: 8px; flex-wrap: wrap; }
     #daychips.show { display: flex; }
-    .hero { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: start; }
-    @media (max-width: 860px) { .hero { grid-template-columns: 1fr; } }
+    .hero { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
     .title-row { display: flex; align-items: center; gap: 8px; }
     .title { font-size: 22px; font-weight: 800; }
-    .related { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+    .related { display: flex; gap: 6px; flex-shrink: 0; }
     .rel {
-      border: 2px solid #2563eb;
-      border-radius: 8px;
-      padding: 8px 12px;
-      min-width: 168px;
+      border: 1.5px solid #2563eb;
+      border-radius: 6px;
+      padding: 4px 8px;
       background: #f8fbff;
+      line-height: 1.25;
     }
-    .rel .n { font-size: 13px; font-weight: 700; color: #1e3a8a; }
-    .rel .p { font-size: 22px; font-weight: 800; margin: 2px 0; }
-    .rel .c { font-size: 12px; }
+    .rel .n { font-size: 11px; font-weight: 700; color: #1e3a8a; }
+    .rel .p { font-size: 16px; font-weight: 800; margin: 0; }
+    .rel .c { font-size: 11px; }
     .badge {
       font-size: 12px; background: #fef3c7; color: #92400e;
       border-radius: 4px; padding: 2px 6px; font-weight: 700;
@@ -212,8 +211,7 @@
       $("chgline").className = "sub " + cls(diff);
       $("chgline").textContent =
         last == null ? "" : `${arrow(diff)} ${fmt(Math.abs(diff), 0)} (${diff >= 0 ? "" : ""}${fmt(rate, 2)}%)`;
-      $("stamp").textContent =
-        `報價 ${fmtTime(x.CDate, x.CTime)}　快照 ${snap.fetchedAt}　${x.SymbolID || ""}`;
+      $("stamp").textContent = `報價 ${fmtTime(x.CDate, x.CTime)}`;
       $("sumline").innerHTML =
         `股價 ${fmt(last, 2)} <span class="${cls(diff)}">${arrow(diff)} ${fmt(diff, 0)}(${fmt(rate, 2)}%)</span>` +
         `　交易量 ${fmt(x.CTotalVolume)}<br>` +
@@ -281,8 +279,9 @@
       const items = (snap && snap.related) || [];
       box.innerHTML = items.map((r) => {
         const diff = n(r.diff);
+        const name = String(r.name || r.symbol || "").replace("期貨近一", "期").replace("近一", "");
         return `<div class="rel">
-          <div class="n">${r.name || r.symbol}</div>
+          <div class="n">${name}</div>
           <div class="p ${cls(diff)}">${fmt(r.last)}</div>
           <div class="c ${cls(diff)}">${arrow(diff)} ${fmt(Math.abs(diff))} (${fmt(n(r.rate), 2)}%)</div>
         </div>`;
