@@ -482,6 +482,26 @@
       return pts;
     }
 
+    function sessRange(pts) {
+      const tRef = pts.length ? pts[pts.length - 1].time : Date.now();
+      const d = new Date(tRef);
+      const start = new Date(d);
+      if (session === "day") {
+        start.setHours(8, 45, 0, 0);
+        const end = new Date(start);
+        end.setHours(13, 45, 0, 0);
+        return { t0: start.getTime(), t1: end.getTime() };
+      }
+      if (d.getHours() < 14) start.setDate(start.getDate() - 1);
+      start.setHours(14, 0, 0, 0);
+      const days = daySpan < 1 ? 1 : daySpan;
+      start.setDate(start.getDate() - (days - 1));
+      const end = new Date(start);
+      end.setDate(end.getDate() + days);
+      end.setHours(5, 0, 0, 0);
+      return { t0: start.getTime(), t1: end.getTime() };
+    }
+
     function mergeDaily() {
       const by = {};
       (dailyPack.night || []).concat(dailyPack.day || []).forEach((b) => {
@@ -608,10 +628,11 @@
       let mn = Math.min(...prices, open);
       let mx = Math.max(...prices, open);
       if (mx === mn) { mx += 10; mn -= 10; }
-      const padL = 56, padR = 28, padT = 10, padB = 22;
+      const { t0, t1 } = sessRange(pts);
+      const padL = 56, padR = 33, padT = 10, padB = 26;
       const cw = w - padL - padR;
       const ch = h - padT - padB;
-      const xAt = (i) => padL + (i / (pts.length - 1)) * cw;
+      const xAtT = (t) => padL + ((t - t0) / (t1 - t0)) * cw;
       const yAt = (p) => padT + (1 - (p - mn) / (mx - mn)) * ch;
 
       ctx.strokeStyle = "#e5e7eb";
@@ -627,6 +648,21 @@
         ctx.stroke();
         ctx.fillText(Math.round(pv).toLocaleString("zh-TW"), 4, y + 4);
       }
+      const hour0 = new Date(t0);
+      hour0.setMinutes(0, 0, 0);
+      if (hour0.getTime() < t0) hour0.setHours(hour0.getHours() + 1);
+      const hourStep = (t1 - t0) > 20 * 3600000 ? 2 : 1;
+      ctx.textAlign = "center";
+      for (let t = hour0.getTime(); t <= t1; t += 3600000 * hourStep) {
+        const x = Math.round(xAtT(t)) + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(x, padT);
+        ctx.lineTo(x, padT + ch);
+        ctx.stroke();
+        const hh = new Date(t).getHours();
+        ctx.fillText(String(hh).padStart(2, "0"), x, h - 6);
+      }
+      ctx.textAlign = "left";
 
       const yOpen = Math.round(yAt(open)) + 0.5;
       ctx.setLineDash([5, 4]);
@@ -652,7 +688,9 @@
         lines.push({ x0, y0, x1, y1, above });
       }
       for (let i = 1; i < pts.length; i++) {
-        paintSeg(xAt(i - 1), yAt(pts[i - 1].px), pts[i - 1].px, xAt(i), yAt(pts[i].px), pts[i].px);
+        const tA = pts[i - 1].time, tB = pts[i].time;
+        if (!tA || !tB) continue;
+        paintSeg(xAtT(tA), yAt(pts[i - 1].px), pts[i - 1].px, xAtT(tB), yAt(pts[i].px), pts[i].px);
       }
       fills.forEach((s) => {
         ctx.beginPath();
