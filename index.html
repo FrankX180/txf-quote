@@ -875,8 +875,22 @@
             upBorderColor: "#d32f2f", downBorderColor: "#1b8a3e", noChangeBorderColor: "#888888",
             upWickColor: "#d32f2f", downWickColor: "#1b8a3e", noChangeWickColor: "#888888",
           },
+          tooltip: {
+            title: { show: false },
+            legend: {
+              template: [
+                { title: "開 ", value: "{open}" },
+                { title: "高 ", value: "{high}" },
+                { title: "低 ", value: "{low}" },
+                { title: "收 ", value: "{close}" },
+              ],
+            },
+          },
         },
-        indicator: { bars: [{ upColor: "#d32f2f", downColor: "#1b8a3e", noChangeColor: "#888" }] },
+        indicator: {
+          bars: [{ upColor: "#d32f2f", downColor: "#1b8a3e", noChangeColor: "#888" }],
+          tooltip: { showRule: "none" },
+        },
       };
     }
 
@@ -898,7 +912,11 @@
     function renderK() {
       if (typeof klinecharts === "undefined") return;
       const data = klineData();
-      if (!kchart) kchart = klinecharts.init("khost", { styles: twStyles() });
+      if (!kchart) {
+        kchart = klinecharts.init("khost", { styles: twStyles() });
+        if (kchart.setPrecision) kchart.setPrecision({ price: 0, volume: 0 });
+        else if (kchart.setPriceVolumePrecision) kchart.setPriceVolumePrecision(0, 0);
+      }
       kchart.applyNewData(data.length ? data : []);
     }
 
