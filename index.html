@@ -156,8 +156,14 @@
       night_15m: [], day_15m: [],
     };
     let kchart = null;
+    const LIVE = "https://wtx.19850926.xyz/";
 
     const $ = (id) => document.getElementById(id);
+
+    function raw(v) {
+      if (v && typeof v === "object") v = v.raw;
+      return n(v);
+    }
 
     function n(v) {
       if (v === "" || v == null) return null;
@@ -431,16 +437,107 @@
       kchart.applyNewData(data.length ? data : []);
     }
 
+    function slimYahoo(d) {
+      const last = raw(d.price);
+      const ref = raw(d.regularMarketPreviousClose);
+      let diff = raw(d.change);
+      if (diff == null && last != null && ref != null) diff = last - ref;
+      let rate = null;
+      const cp = d.changePercent;
+      if (typeof cp === "string" && cp.endsWith("%")) rate = parseFloat(cp);
+      if (rate == null && diff != null && ref) rate = (diff / ref) * 100;
+      const now = new Date();
+      const q = {
+        SymbolID: d.symbol || "WTX&",
+        DispCName: d.symbolName || "台指期近一",
+        DispEName: d.symbol || "WTX&",
+        CLastPrice: last,
+        COpenPrice: raw(d.regularMarketOpen),
+        CHighPrice: raw(d.regularMarketDayHigh),
+        CLowPrice: raw(d.regularMarketDayLow),
+        CRefPrice: ref,
+        CDiff: diff,
+        CDiffRate: rate,
+        CTotalVolume: raw(d.volume) != null ? raw(d.volume) : Math.round((raw(d.volumeK) || 0) * 1000),
+        CDate: now.getFullYear() + String(now.getMonth() + 1).padStart(2, "0") + String(now.getDate()).padStart(2, "0"),
+        CTime: String(now.getHours()).padStart(2, "0") + String(now.getMinutes()).padStart(2, "0") + String(now.getSeconds()).padStart(2, "0"),
+        inMarket: raw(d.inMarket) != null ? Math.round(raw(d.inMarket) * 1000) : "",
+        outMarket: raw(d.outMarket) != null ? Math.round(raw(d.outMarket) * 1000) : "",
+      };
+      const book = d.orderbook || [];
+      for (let i = 0; i < 5; i++) {
+        const lvl = book[i] || {};
+        q["CBidPrice" + (i + 1)] = raw(lvl.bid);
+        q["CBidSize" + (i + 1)] = raw(lvl.bidVol);
+        q["CAskPrice" + (i + 1)] = raw(lvl.ask);
+        q["CAskSize" + (i + 1)] = raw(lvl.askVol);
+      }
+      return q;
+    }
+
+    function miniYahoo(d) {
+      const last = raw(d.price);
+      const ref = raw(d.regularMarketPreviousClose);
+      let diff = raw(d.change);
+      if (diff == null && last != null && ref != null) diff = last - ref;
+      let rate = null;
+      const cp = d.changePercent;
+      if (typeof cp === "string" && cp.endsWith("%")) rate = parseFloat(cp);
+      if (rate == null && diff != null && ref) rate = (diff / ref) * 100;
+      return { symbol: d.symbol, name: d.symbolName, last, diff, rate };
+    }
+
+    function applyLive(rows) {
+      const wtx = rows.find((x) => x.symbol === "WTX&") || rows[0];
+      if (!wtx) return;
+      const q0 = slimYahoo(wtx);
+      const related = rows.filter((x) => x.symbol === "WCDF&" || x.symbol === "WCCF&").map(miniYahoo);
+      snap = {
+        fetchedAt: new Date().toLocaleString("zh-TW", { hour12: false }),
+        source: "yahoo via wtx.19850926.xyz",
+        night: q0,
+        day: q0,
+        related,
+      };
+      const px = n(q0.CLastPrice);
+      if (px) {
+        const pt = { t: snap.fetchedAt, time: q0.CTime, px, vol: n(q0.CTotalVolume) || 0 };
+        const h = hist.night;
+        if (!h.length || h[h.length - 1].px !== px || h[h.length - 1].time !== pt.time) {
+          h.push(pt);
+          if (h.length > 800) h.splice(0, h.length - 800);
+          hist.day = h;
+        }
+      }
+      live = true;
+      render();
+    }
+
+    async function pollLive() {
+      try {
+        const rows = await fetch(LIVE + "?t=" + Date.now()).then((r) => r.json());
+        if (Array.isArray(rows) && rows.length) applyLive(rows);
+      } catch (e) {
+        live = false;
+        if ($("live")) {
+          $("live").className = "live";
+          $("live").textContent = "快照";
+        }
+      }
+    }
+
     async function load() {
       const [s, hn, hd] = await Promise.all([
         fetch("data/snapshot.json?t=" + Date.now()).then((r) => r.json()),
         fetch("data/history-night.json?t=" + Date.now()).then((r) => (r.ok ? r.json() : [])).catch(() => []),
         fetch("data/history-day.json?t=" + Date.now()).then((r) => (r.ok ? r.json() : [])).catch(() => []),
       ]);
-      snap = s;
-      hist.night = hn;
-      hist.day = hd;
-      render();
+      if (!live) {
+        snap = s;
+        hist.night = hn;
+        hist.day = hd;
+        render();
+      }
     }
 
     $("tab-day").onclick = () => {
@@ -507,7 +604,9 @@
     syncDayChips();
     load();
     loadKline();
-    setInterval(load, 30000);
+    pollLive();
+    setInterval(pollLive, 5000);
+    setInterval(loadKline, 60000);
   </script>
 </body>
 </html>
