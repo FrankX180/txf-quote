@@ -30,10 +30,14 @@
     }
     .chipline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 0; }
     .rowlab { font-size: 13px; font-weight: 800; color: #111; min-width: 2.4em; }
-    .hero { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+    .hero { display: flex; justify-content: space-between; align-items: stretch; gap: 12px; }
+    .hero-l { flex: 1; min-width: 0; display: flex; flex-direction: column; }
     .title-row { display: flex; align-items: center; gap: 8px; }
     .title { font-size: 22px; font-weight: 800; }
-    .related { display: flex; gap: 6px; flex-shrink: 0; }
+    .pxrow { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+    .pxmeta { padding-bottom: 6px; }
+    .related { display: flex; gap: 6px; margin-top: 8px; }
+    #miniK { width: 46%; max-width: 420px; height: 150px; flex-shrink: 0; }
     .rel {
       border: 1.5px solid #2563eb;
       border-radius: 6px;
@@ -112,17 +116,22 @@
   <div class="wrap">
     <div class="card">
       <div class="hero">
-        <div>
+        <div class="hero-l">
           <div class="title-row">
             <div class="title" id="name">台指期 TXF</div>
             <span class="badge">期貨</span>
             <span class="live" id="live">未連線</span>
           </div>
-          <div class="px flat" id="last">—</div>
-          <div class="sub" id="chgline"></div>
-          <div class="sub" id="stamp">載入中…</div>
+          <div class="pxrow">
+            <div class="px flat" id="last">—</div>
+            <div class="pxmeta">
+              <div class="sub" id="chgline"></div>
+              <div class="sub" id="stamp">載入中…</div>
+            </div>
+          </div>
+          <div class="related" id="related"></div>
         </div>
-        <div class="related" id="related"></div>
+        <canvas id="miniK" width="400" height="150"></canvas>
       </div>
     </div>
 
@@ -306,6 +315,7 @@
       $("live").textContent = live ? "LIVE" : "快照";
       renderRelated();
       renderOi();
+      drawMiniK();
       draw();
     }
 
@@ -533,9 +543,9 @@
         return;
       }
       const prices = pts.map((p) => p.px);
-      const ref = n(q() && q().CRefPrice) || prices[0];
-      let mn = Math.min(...prices, ref);
-      let mx = Math.max(...prices, ref);
+      const open = n(q() && q().COpenPrice) || prices[0];
+      let mn = Math.min(...prices, open);
+      let mx = Math.max(...prices, open);
       if (mx === mn) { mx += 10; mn -= 10; }
       const padL = 56, padR = 10, padT = 10, padB = 22;
       const cw = w - padL - padR;
@@ -556,19 +566,84 @@
         ctx.fillText(Math.round(pv).toLocaleString("zh-TW"), 4, y + 4);
       }
 
+      const yOpen = yAt(open);
+      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = "#9ca3af";
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      pts.forEach((p, i) => {
-        const x = xAt(i), y = yAt(p.px);
-        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-      });
-      ctx.strokeStyle = prices[prices.length - 1] >= ref ? "#ff4444" : "#44bb44";
-      ctx.lineWidth = 1.6;
+      ctx.moveTo(padL, yOpen);
+      ctx.lineTo(w - padR, yOpen);
       ctx.stroke();
-      ctx.lineTo(xAt(pts.length - 1), padT + ch);
-      ctx.lineTo(xAt(0), padT + ch);
-      ctx.closePath();
-      ctx.fillStyle = prices[prices.length - 1] >= ref ? "rgba(255,68,68,0.12)" : "rgba(68,187,68,0.12)";
-      ctx.fill();
+      ctx.setLineDash([]);
+
+      function paintSeg(x0, y0, p0, x1, y1, p1) {
+        if ((p0 - open) * (p1 - open) < 0 && p1 !== p0) {
+          const t = (open - p0) / (p1 - p0);
+          const xm = x0 + (x1 - x0) * t;
+          const ym = yOpen;
+          paintSeg(x0, y0, p0, xm, ym, open);
+          paintSeg(xm, ym, open, x1, y1, p1);
+          return;
+        }
+        const above = p0 > open || p1 > open || (p0 === open && p1 >= open);
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
+        ctx.strokeStyle = above ? "#ff4444" : "#44bb44";
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+        ctx.lineTo(x1, yOpen);
+        ctx.lineTo(x0, yOpen);
+        ctx.closePath();
+        ctx.fillStyle = above ? "rgba(255,68,68,0.12)" : "rgba(68,187,68,0.12)";
+        ctx.fill();
+      }
+      for (let i = 1; i < pts.length; i++) {
+        paintSeg(xAt(i - 1), yAt(pts[i - 1].px), pts[i - 1].px, xAt(i), yAt(pts[i].px), pts[i].px);
+      }
+    }
+
+    function drawMiniK() {
+      const c = $("miniK");
+      if (!c) return;
+      const ctx = c.getContext("2d");
+      const w = c.width, h = c.height;
+      ctx.clearRect(0, 0, w, h);
+      const all = dailyBars();
+      const bars = all.slice(-80);
+      if (bars.length < 2) {
+        ctx.fillStyle = "#9ca3af";
+        ctx.font = "12px sans-serif";
+        ctx.fillText("日Ｋ載入中…", 10, h / 2);
+        return;
+      }
+      const padL = 8, padR = 44, padT = 18, padB = 8;
+      const highs = bars.map((b) => b.high);
+      const lows = bars.map((b) => b.low);
+      let mn = Math.min.apply(null, lows), mx = Math.max.apply(null, highs);
+      if (mx === mn) { mx += 10; mn -= 10; }
+      const cw = w - padL - padR;
+      const ch = h - padT - padB;
+      const bw = Math.max(2, cw / bars.length - 1);
+      const yAt = (p) => padT + (1 - (p - mn) / (mx - mn)) * ch;
+      const last = bars[bars.length - 1];
+      ctx.fillStyle = "#6b7280";
+      ctx.font = "10px sans-serif";
+      ctx.fillText("O " + Math.round(last.open) + "  H " + Math.round(last.high) + "  L " + Math.round(last.low), padL, 12);
+      ctx.fillText(Math.round(last.close).toLocaleString("zh-TW"), w - padR + 2, yAt(last.close) + 4);
+      bars.forEach((b, i) => {
+        const x = padL + (i + 0.5) * (cw / bars.length);
+        const up = b.close >= b.open;
+        ctx.strokeStyle = up ? "#ff4444" : "#44bb44";
+        ctx.fillStyle = up ? "#ff4444" : "#44bb44";
+        ctx.beginPath();
+        ctx.moveTo(x, yAt(b.high));
+        ctx.lineTo(x, yAt(b.low));
+        ctx.stroke();
+        const y1 = yAt(Math.max(b.open, b.close));
+        const y2 = yAt(Math.min(b.open, b.close));
+        ctx.fillRect(x - bw / 2, y1, bw, Math.max(1, y2 - y1));
+      });
     }
 
     function twStyles() {
@@ -759,6 +834,7 @@
         uncover = { inst: [], top: [], date: "" };
       }
       renderOi();
+      drawMiniK();
       draw();
     }
 
