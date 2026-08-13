@@ -32,36 +32,17 @@
     .rowlab { font-size: 13px; font-weight: 800; color: #111; min-width: 2.4em; }
     .hero {
       display: grid;
-      grid-template-columns: minmax(220px, 32%) 1fr;
+      grid-template-columns: 1fr 1fr;
       grid-template-rows: auto 1fr;
       gap: 8px 10px;
       align-items: stretch;
     }
     .hero-head { grid-column: 1; grid-row: 1 / span 2; display: flex; flex-direction: column; min-width: 0; }
     .hero-mid { grid-column: 2; grid-row: 1 / span 2; display: flex; flex-direction: column; min-width: 0; }
-    .fold {
-      position: fixed;
-      top: 12px;
-      right: 12px;
-      z-index: 40;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      padding: 4px 3px;
-      background: rgba(255,255,255,0.92);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.12);
-      touch-action: none;
-      cursor: grab;
+    #foldBtn {
+      width: 28px; height: 28px; padding: 0; border: 0; background: transparent;
+      cursor: pointer; font-size: 16px; line-height: 1; color: #111; flex-shrink: 0;
     }
-    .fold.drag { cursor: grabbing; }
-    .fold button {
-      width: 24px; height: 22px; padding: 0; border: 0; background: transparent;
-      cursor: pointer; font-size: 14px; line-height: 1; color: #111;
-    }
-    .fold button.on { color: #111; }
-    .fold button:not(.on) { color: #9ca3af; }
     .hero.collapsed {
       grid-template-columns: 1fr;
       grid-template-rows: auto;
@@ -179,6 +160,7 @@
       <div class="hero" id="hero">
         <div class="hero-head">
           <div class="title-row">
+            <button type="button" id="foldBtn" title="收合">▲</button>
             <div class="title" id="name">台指期</div>
             <span class="live" id="live">未連線</span>
           </div>
@@ -243,10 +225,6 @@
         </div>
       </div>
     </div>
-  </div>
-  <div class="fold" id="fold">
-    <button type="button" id="foldUp" title="收合">▲</button>
-    <button type="button" id="foldDn" class="on" title="展開">▼</button>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -1026,64 +1004,15 @@
     function setHeroOpen(open) {
       heroOpen = !!open;
       $("hero").classList.toggle("collapsed", !heroOpen);
-      $("foldUp").classList.toggle("on", !heroOpen);
-      $("foldDn").classList.toggle("on", heroOpen);
+      $("foldBtn").textContent = heroOpen ? "▲" : "▼";
+      $("foldBtn").title = heroOpen ? "收合" : "展開";
       if (heroOpen) {
         if (miniChart && miniChart.resize) miniChart.resize();
         miniFit36();
         drawMiniK();
       }
     }
-    let foldMoved = false;
-    $("foldUp").onclick = () => { if (!foldMoved) setHeroOpen(false); };
-    $("foldDn").onclick = () => { if (!foldMoved) setHeroOpen(true); };
-    (function bindFoldDrag() {
-      const el = $("fold");
-      try {
-        const pos = JSON.parse(localStorage.getItem("txfFold") || "null");
-        if (pos && Number.isFinite(pos.x) && Number.isFinite(pos.y)) {
-          el.style.left = pos.x + "px";
-          el.style.top = pos.y + "px";
-          el.style.right = "auto";
-        }
-      } catch (e) {}
-      let sx = 0, sy = 0, sl = 0, st = 0;
-      el.addEventListener("pointerdown", (e) => {
-        if (e.button) return;
-        foldMoved = false;
-        const r = el.getBoundingClientRect();
-        sx = e.clientX;
-        sy = e.clientY;
-        sl = r.left;
-        st = r.top;
-        el.classList.add("drag");
-        el.setPointerCapture(e.pointerId);
-      });
-      el.addEventListener("pointermove", (e) => {
-        if (!el.hasPointerCapture(e.pointerId)) return;
-        const dx = e.clientX - sx;
-        const dy = e.clientY - sy;
-        if (Math.abs(dx) + Math.abs(dy) < 4) return;
-        foldMoved = true;
-        const x = Math.max(0, Math.min(window.innerWidth - el.offsetWidth, sl + dx));
-        const y = Math.max(0, Math.min(window.innerHeight - el.offsetHeight, st + dy));
-        el.style.left = x + "px";
-        el.style.top = y + "px";
-        el.style.right = "auto";
-      });
-      function endDrag(e) {
-        if (!el.hasPointerCapture(e.pointerId)) return;
-        el.releasePointerCapture(e.pointerId);
-        el.classList.remove("drag");
-        if (foldMoved) {
-          localStorage.setItem("txfFold", JSON.stringify({
-            x: parseFloat(el.style.left), y: parseFloat(el.style.top),
-          }));
-        }
-      }
-      el.addEventListener("pointerup", endDrag);
-      el.addEventListener("pointercancel", endDrag);
-    })();
+    $("foldBtn").onclick = () => setHeroOpen(!heroOpen);
 
     function setSession(s) {
       session = s === "day" ? "day" : "night";
