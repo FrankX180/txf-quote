@@ -428,7 +428,15 @@
       return `${ds.slice(4, 6)}/${ds.slice(6, 8)} ${ts.slice(0, 2)}:${ts.slice(2, 4)}:${ts.slice(4, 6)}`;
     }
 
-    function sessKey() { return session === "day" ? "day" : "night"; }
+    function liveSess() {
+      const hm = new Date().getHours() * 100 + new Date().getMinutes();
+      return hm >= 845 && hm < 1500 ? "day" : "night";
+    }
+    function sessKey() {
+      if (session === "day") return "day";
+      if (session === "night") return "night";
+      return liveSess();
+    }
 
     function joinBars(a, b) {
       return (a || []).concat(b || []).sort((x, y) => x.timestamp - y.timestamp);
@@ -499,7 +507,7 @@
         const prev = out[out.length - 1];
         const b = bars[i];
         const hole = b.timestamp - prev.timestamp;
-        if (hole > step * 1.5 && hole <= step * 4) {
+        if (hole > step * 1.5 && hole <= 150000) {
           for (let t = prev.timestamp + step; t < b.timestamp - 30000; t += step) {
             out.push({
               timestamp: t, open: prev.close, high: prev.close, low: prev.close, close: prev.close,
@@ -537,11 +545,12 @@
       if (!rows.length) return;
       const slot = Math.floor(Date.now() / 60000) * 60000;
       const last = rows[rows.length - 1];
-      if (last.timestamp === slot) {
+      const lastSlot = Math.floor(last.timestamp / 60000) * 60000;
+      if (lastSlot === slot) {
         last.close = px;
         last.high = Math.max(last.high, px);
         last.low = Math.min(last.low, px);
-      } else if (slot > last.timestamp && slot - last.timestamp <= 180000) {
+      } else if (slot > lastSlot && slot - lastSlot <= 150000) {
         rows.push({
           timestamp: slot, open: last.close, high: Math.max(last.close, px),
           low: Math.min(last.close, px), close: px, volume: 0,
@@ -562,7 +571,8 @@
       const tRef = pts.length ? pts[pts.length - 1].time : Date.now();
       const d = new Date(tRef);
       const start = new Date(d);
-      if (session === "day") {
+      const useDay = session === "day" || (session === "merge" && liveSess() === "day");
+      if (useDay) {
         start.setHours(8, 45, 0, 0);
         const end = new Date(start);
         end.setHours(13, 45, 0, 0);
