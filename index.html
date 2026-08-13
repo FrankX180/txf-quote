@@ -91,6 +91,12 @@
       gap: 12px;
       align-items: start;
     }
+    .imb {
+      text-align: center;
+      font-size: 13px;
+      font-weight: 800;
+      margin: 0 0 8px;
+    }
     .meta {
       display: flex;
       align-items: center;
@@ -237,12 +243,13 @@
     </div>
 
     <div class="card">
+      <div class="imb" id="imb"></div>
       <div class="side-oi">
         <div class="oi" id="oi-inst"></div>
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0050</div>
+    <div class="ver">v20260814-0052</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -350,9 +357,24 @@
         $("barOut").style.width = (100 - pin2) + "%";
         $("inTxt").textContent = "內盤 " + fmt(inn);
         $("outTxt").textContent = "外盤 " + fmt(outv);
+        const net = outv - inn;
+        const imb = $("imb");
+        if (imb) {
+          if (net > 0) {
+            imb.className = "imb up";
+            imb.textContent = "外盤向上買超 +" + fmt(net) + " 口";
+          } else if (net < 0) {
+            imb.className = "imb dn";
+            imb.textContent = "內盤向下賣超 " + fmt(net) + " 口";
+          } else {
+            imb.className = "imb";
+            imb.textContent = "內外盤持平 0 口";
+          }
+        }
       } else {
         $("inTxt").textContent = "委買 " + fmt(bidTot);
         $("outTxt").textContent = "委賣 " + fmt(askTot);
+        if ($("imb")) $("imb").textContent = "";
       }
 
       let maxSz = 1;
