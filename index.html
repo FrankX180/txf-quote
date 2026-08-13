@@ -246,7 +246,7 @@
         <div class="oi" id="oi-inst"></div>
         <div class="oi" id="oi-top"></div>
       </div>
-      <div class="ver">v20260814-0038</div>
+      <div class="ver">v20260814-0040</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -718,9 +718,12 @@
       const open = daySpan >= 2 ? prices[0] : (n(qx0 && qx0.COpenPrice) || prices[0]);
       const hi = Math.max(...prices, open, n(qx0 && qx0.CHighPrice) ?? -Infinity);
       const lo = Math.min(...prices, open, n(qx0 && qx0.CLowPrice) ?? Infinity);
-      let mx = Math.ceil((hi + 100) / 100) * 100;
-      let mn = Math.floor((lo - 100) / 100) * 100;
+      let yPad = daySpan >= 2 ? 50 : 100;
+      let mx = Math.ceil((hi + yPad) / 100) * 100;
+      let mn = Math.floor((lo - yPad) / 100) * 100;
       if (!(mx > mn)) { mx = mn + 200; }
+      let yStep = 100;
+      while ((mx - mn) / yStep > 5) yStep += 100;
       const { t0, t1 } = sessRange(pts);
       const multi = daySpan >= 2;
       const padL = 56, padR = 33, padT = 10, padB = 26;
@@ -735,7 +738,7 @@
       ctx.lineWidth = 1;
       ctx.fillStyle = "#6b7280";
       ctx.font = "11px sans-serif";
-      for (let pv = mn; pv <= mx; pv += 100) {
+      for (let pv = mn; pv <= mx; pv += yStep) {
         const y = Math.round(yAt(pv)) + 0.5;
         ctx.beginPath();
         ctx.moveTo(padL, y);
@@ -746,14 +749,15 @@
       ctx.textAlign = "center";
       if (multi) {
         let lastKey = "";
+        let lastLx = -999;
         pts.forEach((p, i) => {
           const d = new Date(p.time);
-          const hm = d.getHours() * 100 + d.getMinutes();
-          const tag = (hm >= 845 && hm < 1500) ? "日" : "夜";
-          const key = (d.getMonth() + 1) + "/" + d.getDate() + tag;
+          const key = (d.getMonth() + 1) + "/" + d.getDate();
           if (key === lastKey) return;
           lastKey = key;
           const x = Math.round(xAtI(i, p.time)) + 0.5;
+          if (x - lastLx < 72 && i !== 0 && i !== pts.length - 1) return;
+          lastLx = x;
           ctx.beginPath();
           ctx.moveTo(x, padT);
           ctx.lineTo(x, padT + ch);
@@ -786,11 +790,11 @@
       ctx.stroke();
       ctx.setLineDash([]);
 
-      const gap = multi ? 1e15 : (daySpan < 1 ? 150000 : 20 * 60 * 1000);
+      const gap = multi ? Infinity : (daySpan < 1 ? 150000 : 20 * 60 * 1000);
       const runs = [];
       let run = [];
       for (let i = 0; i < pts.length; i++) {
-        if (i && pts[i].time && pts[i - 1].time && pts[i].time - pts[i - 1].time > gap) {
+        if (!multi && i && pts[i].time && pts[i - 1].time && pts[i].time - pts[i - 1].time > gap) {
           if (run.length >= 2) runs.push(run);
           run = [];
         }
