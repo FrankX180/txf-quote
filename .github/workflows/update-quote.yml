@@ -20,7 +20,7 @@ jobs:
           python-version: "3.12"
       - name: Fetch TAIFEX snapshot
         run: python scripts/fetch_quote.py
-      - name: Fetch 1-min from official ticks
+      - name: Export 1-min from CyndiTD TXF_1m.db (local only)
         run: python scripts/fetch_minute.py
         continue-on-error: true
       - name: Commit snapshot
