@@ -479,17 +479,37 @@
       return take(m5).length ? take(m5) : take(m1);
     }
 
+    function ptTs(p) {
+      if (p.ts) return p.ts;
+      const t = Date.parse(String(p.t || "").replace(/-/g, "/"));
+      return t || 0;
+    }
+
     function linePoints() {
       const keep = lastDates(daySpan < 1 ? 1 : daySpan);
       const mins = minuteSeries().filter((b) => keep.indexOf(b.date) >= 0);
       const pts = mins.map((b) => ({ px: b.close, vol: b.volume, time: b.timestamp }));
-      const livePts = session === "day" ? (hist.day || []) : (hist.night || []);
-      const lastTs = pts.length ? pts[pts.length - 1].time : 0;
-      livePts.forEach((p) => {
-        const ts = Date.parse(String(p.t).replace(/-/g, "/")) || 0;
-        if (p.px && ts > lastTs) pts.push({ px: p.px, vol: p.vol, time: ts });
+      const lastBar = pts.length ? pts[pts.length - 1].time : 0;
+      const qx = q();
+      const lastPx = n(qx && qx.CLastPrice);
+      const now = Date.now();
+      if (mins.length < 2) {
+        const livePts = session === "day" ? (hist.day || []) : (hist.night || []);
+        livePts.forEach((p) => {
+          const ts = ptTs(p);
+          if (p.px && ts) pts.push({ px: p.px, vol: p.vol, time: ts });
+        });
+      } else if (lastPx != null && now > lastBar + 20000) {
+        pts.push({ px: lastPx, vol: n(qx.CTotalVolume) || 0, time: now });
+      }
+      pts.sort((a, b) => a.time - b.time);
+      const out = [];
+      pts.forEach((p) => {
+        if (!p.time || p.px == null) return;
+        if (out.length && p.time - out[out.length - 1].time < 5000) out[out.length - 1] = p;
+        else out.push(p);
       });
-      return pts;
+      return out;
     }
 
     function sessRange(pts) {
@@ -699,9 +719,10 @@
         fills.push({ x0, y0, x1, y1, above });
         lines.push({ x0, y0, x1, y1, above });
       }
+      const gap = daySpan < 1 ? 150000 : 20 * 60 * 1000;
       for (let i = 1; i < pts.length; i++) {
         const tA = pts[i - 1].time, tB = pts[i].time;
-        if (!tA || !tB) continue;
+        if (!tA || !tB || tB - tA > gap) continue;
         paintSeg(xAtT(tA), yAt(pts[i - 1].px), pts[i - 1].px, xAtT(tB), yAt(pts[i].px), pts[i].px);
       }
       fills.forEach((s) => {
@@ -924,7 +945,7 @@
       };
       const px = n(q0.CLastPrice);
       if (px) {
-        const pt = { t: snap.fetchedAt, time: q0.CTime, px, vol: n(q0.CTotalVolume) || 0 };
+        const pt = { t: snap.fetchedAt, ts: Date.now(), time: q0.CTime, px, vol: n(q0.CTotalVolume) || 0 };
         const h = hist.night;
         if (!h.length || h[h.length - 1].px !== px || h[h.length - 1].time !== pt.time) {
           h.push(pt);
