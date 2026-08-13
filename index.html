@@ -160,8 +160,7 @@
             </div>
             <div class="chipline">
               <span class="rowlab">走勢</span>
-              <button class="chip" data-line="0" type="button">當日</button>
-              <button class="chip on" data-line="1" type="button">１日</button>
+              <button class="chip on" data-line="0" type="button">當日</button>
               <button class="chip" data-line="2" type="button">２日</button>
               <button class="chip" data-line="3" type="button">３日</button>
               <button class="chip" data-line="4" type="button">４日</button>
@@ -196,7 +195,7 @@
     let snap = null;
     let hist = { night: [], day: [] };
     let live = false;
-    let daySpan = 1;
+    let daySpan = 0;
     let chartMode = "line";
     let kInt = "1";
     let dailyPack = { night: [], day: [], daily: [], week: [], month: [] };
