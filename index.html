@@ -278,7 +278,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0058</div>
+    <div class="ver">v20260814-0060</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -337,14 +337,32 @@
       return snap[session];
     }
 
+    function sessOHLC() {
+      const rows = minuteSeries();
+      if (!rows.length) return null;
+      let o = rows[0].open, h = -Infinity, l = Infinity, c = rows[rows.length - 1].close;
+      rows.forEach((b) => {
+        const hh = b.high != null ? b.high : b.close;
+        const ll = b.low != null ? b.low : b.close;
+        if (hh > h) h = hh;
+        if (ll < l) l = ll;
+      });
+      if (!(h > -Infinity)) return null;
+      return { o: o != null ? o : rows[0].close, h, l, c };
+    }
+
     function render() {
       const x = q();
       if (!x) {
         $("stamp").textContent = "尚無資料";
         return;
       }
-      const last = n(x.CLastPrice);
+      const so = (session !== liveSess()) ? sessOHLC() : null;
+      const last = so ? so.c : n(x.CLastPrice);
       const ref = n(x.CRefPrice);
+      const openPx = so ? so.o : n(x.COpenPrice);
+      const highPx = so ? so.h : n(x.CHighPrice);
+      const lowPx = so ? so.l : n(x.CLowPrice);
       let diff = n(x.CDiff);
       let rate = n(x.CDiffRate);
       if (diff == null && last != null && ref != null) {
@@ -366,7 +384,7 @@
         `<div class="sumtxt">` +
         `股價 <b>${fmt(last, 0)}</b> <span class="${cls(diff)}">${arrow(diff)} ${fmt(diff, 0)}(${fmt(rate, 2)}%)</span>` +
         `　總口數 ${fmt(x.CTotalVolume)}<br>` +
-        `昨收 ${fmt(x.CRefPrice)}　開盤 ${fmt(x.COpenPrice)}　最高 <span class="up">${fmt(x.CHighPrice)}</span>　最低 <span class="dn">${fmt(x.CLowPrice)}</span>` +
+        `昨收 ${fmt(x.CRefPrice)}　開盤 ${fmt(openPx)}　最高 <span class="up">${fmt(highPx)}</span>　最低 <span class="dn">${fmt(lowPx)}</span>` +
         `</div>`;
 
       let bidTot = 0, askTot = 0;
@@ -596,9 +614,10 @@
     }
 
     function bumpLiveBar() {
-      const px = n(q() && q().CLastPrice);
+      const live = liveSess();
+      const px = n((snap && snap[live] && snap[live].CLastPrice) || (q() && q().CLastPrice));
       if (px == null) return;
-      const key = sessKey() + "_1m";
+      const key = live + "_1m";
       const rows = minutePack[key] || [];
       if (!rows.length) return;
       const slot = Math.floor(Date.now() / 60000) * 60000;
@@ -612,7 +631,7 @@
         rows.push({
           timestamp: slot, open: last.close, high: Math.max(last.close, px),
           low: Math.min(last.close, px), close: px, volume: 0,
-          date: last.date, session: sessKey(),
+          date: last.date, session: live,
         });
         minutePack[key] = rows;
       }
@@ -772,9 +791,11 @@
       }
       const prices = pts.map((p) => p.px);
       const qx0 = q();
-      const open = daySpan >= 2 ? prices[0] : (n(qx0 && qx0.COpenPrice) || prices[0]);
-      const hi = Math.max(...prices, open, n(qx0 && qx0.CHighPrice) ?? -Infinity);
-      const lo = Math.min(...prices, open, n(qx0 && qx0.CLowPrice) ?? Infinity);
+      const so0 = sessOHLC();
+      const useQ = session === liveSess() && daySpan < 2;
+      const open = daySpan >= 2 ? prices[0] : (useQ ? (n(qx0 && qx0.COpenPrice) || prices[0]) : (so0 ? so0.o : prices[0]));
+      const hi = Math.max(...prices, open, useQ ? (n(qx0 && qx0.CHighPrice) ?? -Infinity) : (so0 ? so0.h : -Infinity));
+      const lo = Math.min(...prices, open, useQ ? (n(qx0 && qx0.CLowPrice) ?? Infinity) : (so0 ? so0.l : Infinity));
       let yPad = daySpan >= 2 ? 50 : 100;
       let mx = Math.ceil((hi + yPad) / 100) * 100;
       let mn = Math.floor((lo - yPad) / 100) * 100;
@@ -936,7 +957,12 @@
       if (loV < Infinity) markExt(loI, loV, false);
 
       const qx = q();
-      const o = n(qx && qx.COpenPrice), barH = n(qx && qx.CHighPrice), barL = n(qx && qx.CLowPrice), cl = n(qx && qx.CLastPrice);
+      const soBar = sessOHLC();
+      const useQBar = session === liveSess() && daySpan < 2;
+      const o = useQBar ? n(qx && qx.COpenPrice) : (soBar ? soBar.o : n(qx && qx.COpenPrice));
+      const barH = useQBar ? n(qx && qx.CHighPrice) : (soBar ? soBar.h : n(qx && qx.CHighPrice));
+      const barL = useQBar ? n(qx && qx.CLowPrice) : (soBar ? soBar.l : n(qx && qx.CLowPrice));
+      const cl = useQBar ? n(qx && qx.CLastPrice) : (soBar ? soBar.c : n(qx && qx.CLastPrice));
       if ([o, barH, barL, cl].every((v) => v != null)) {
         const mid = Math.round(w - 14) + 0.5;
         const yH = yAt(barH), yL = yAt(barL);
@@ -1215,20 +1241,20 @@
       const wtx = rows.find((x) => x.symbol === "WTX&") || rows[0];
       if (!wtx) return;
       const q0 = slimYahoo(wtx);
-      snap = {
+      const liveK = liveSess();
+      snap = Object.assign({}, snap || {}, {
         fetchedAt: new Date().toLocaleString("zh-TW", { hour12: false }),
         source: "yahoo via wtx.19850926.xyz",
-        night: q0,
-        day: q0,
-      };
+      });
+      snap[liveK] = q0;
       const px = n(q0.CLastPrice);
       if (px) {
         const pt = { t: snap.fetchedAt, ts: Date.now(), time: q0.CTime, px, vol: n(q0.CTotalVolume) || 0 };
-        const h = hist.night;
+        const h = hist[liveK] || [];
         if (!h.length || h[h.length - 1].px !== px || h[h.length - 1].time !== pt.time) {
           h.push(pt);
           if (h.length > 800) h.splice(0, h.length - 800);
-          hist.day = h;
+          hist[liveK] = h;
         }
       }
       live = true;
@@ -1374,7 +1400,7 @@
       }
       renderOi();
       drawMiniK();
-      draw();
+      render();
     }
 
     window.addEventListener("resize", () => {

@@ -193,11 +193,33 @@ def main():
         slim_mini(pick(rows, "WCCF&")),
     ]
     related = [x for x in related if x]
+    day_q = dict(q)
+    kpath = DATA / "kline-minute.json"
+    if kpath.exists():
+        pack = json.loads(kpath.read_text(encoding="utf-8"))
+        drows = pack.get("day_5m") or pack.get("day_15m") or pack.get("day_1m") or []
+        dates = []
+        for b in reversed(drows):
+            if b.get("date") and b["date"] not in dates:
+                dates.append(b["date"])
+                break
+        part = [b for b in drows if dates and b.get("date") == dates[0]]
+        if part:
+            day_q = dict(q)
+            day_q["COpenPrice"] = fmt_num(part[0].get("open"))
+            day_q["CHighPrice"] = fmt_num(max(b.get("high") for b in part))
+            day_q["CLowPrice"] = fmt_num(min(b.get("low") for b in part))
+            day_q["CLastPrice"] = fmt_num(part[-1].get("close"))
+            last = raw(day_q["CLastPrice"])
+            ref = raw(day_q.get("CRefPrice"))
+            if last is not None and ref is not None:
+                day_q["CDiff"] = fmt_num(last - ref)
+                day_q["CDiffRate"] = "%.2f" % ((last - ref) / ref * 100) if ref else ""
     snap = {
         "fetchedAt": now_iso,
         "source": "yahoo tw.stock StockServices.stockList WTX& WCDF& WCCF&",
         "night": q,
-        "day": q,
+        "day": day_q,
         "related": related,
     }
     # 同一口近月：兩個分頁都吃這份五檔；盤別只影響走勢分鐘線
