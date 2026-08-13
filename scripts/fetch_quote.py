@@ -34,10 +34,20 @@ def pick_txf(quote_list):
         q
         for q in quote_list
         if str(q.get("SymbolID", "")).startswith("TXF")
-        and str(q.get("SymbolID")).endswith("-M")
+        and (
+            str(q.get("SymbolID")).endswith("-M")
+            or str(q.get("SymbolID")).endswith("-F")
+        )
     ]
-    with_px = [q for q in txf if q.get("CLastPrice")]
+    with_px = [q for q in txf if n_price(q.get("CLastPrice"))]
     return (with_px or txf or [None])[0]
+
+
+def n_price(v):
+    try:
+        return float(v) > 0
+    except (TypeError, ValueError):
+        return False
 
 
 def slim(q):

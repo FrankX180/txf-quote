@@ -1,5 +1,5 @@
 {
-  "fetchedAt": "2026-08-13 18:12:14",
+  "fetchedAt": "2026-08-13 18:12:49",
   "source": "https://mis.taifex.com.tw/futures/api/getQuoteList",
   "night": {
     "SymbolID": "TXFH6-M",
@@ -12,13 +12,31 @@
     "CRefPrice": "46025.00",
     "CDiff": "2.00",
     "CDiffRate": "0.00",
-    "CTotalVolume": "5020",
-    "CBidPrice1": "46027.00",
+    "CTotalVolume": "5024",
+    "CBidPrice1": "46025.00",
     "CBidSize1": "1",
     "CAskPrice1": "46029.00",
-    "CAskSize1": "1",
+    "CAskSize1": "2",
     "CDate": "20260813",
-    "CTime": "181158"
+    "CTime": "181231"
   },
-  "day": null
+  "day": {
+    "SymbolID": "TXFH6-F",
+    "DispCName": "臺指期086",
+    "DispEName": "TX086",
+    "CLastPrice": "46005.00",
+    "COpenPrice": "46120.00",
+    "CHighPrice": "46250.00",
+    "CLowPrice": "45840.00",
+    "CRefPrice": "45516.00",
+    "CDiff": "489.00",
+    "CDiffRate": "1.07",
+    "CTotalVolume": "73310",
+    "CBidPrice1": "46005.00",
+    "CBidSize1": "2",
+    "CAskPrice1": "46009.00",
+    "CAskSize1": "5",
+    "CDate": "20260813",
+    "CTime": "134459"
+  }
 }
