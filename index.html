@@ -164,6 +164,16 @@
     .live.on { color: #16a34a; }
     .szbar { display: block; height: 14px; background: var(--dn); max-width: 100%; }
     .szbar.r { background: var(--up); margin-left: auto; }
+    .ver {
+      position: fixed;
+      right: 10px;
+      bottom: 8px;
+      z-index: 20;
+      font-size: 11px;
+      color: #9ca3af;
+      pointer-events: none;
+      user-select: none;
+    }
   </style>
 </head>
 <body>
@@ -240,6 +250,7 @@
       </div>
     </div>
   </div>
+  <div class="ver">v20260813-2359</div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
     let session = "night";
