@@ -72,11 +72,24 @@
       font-family: "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
     }
     .side { display: flex; flex-direction: column; gap: 8px; }
-    .side-top, .side-oi {
+    .side-top {
+      display: grid;
+      grid-template-columns: 48px minmax(0, 1fr) minmax(0, 1.05fr);
+      gap: 8px;
+      align-items: stretch;
+    }
+    .side-oi {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
       gap: 10px;
       align-items: start;
+    }
+    #todayBar {
+      width: 48px;
+      height: 100%;
+      min-height: 132px;
+      background: #f3f4f6;
+      border-radius: 4px;
     }
     @media (max-width: 860px) {
       .grid { grid-template-columns: 1fr; }
@@ -94,8 +107,8 @@
     table.q { width: 100%; border-collapse: collapse; font-size: 13px; }
     table.q td { padding: 6px 0; border-bottom: 1px solid #f3f4f6; }
     table.q td:nth-child(2), table.q td:nth-child(4) { text-align: right; font-variant-numeric: tabular-nums; }
-    table.q td:nth-child(2) { padding-right: 22px; }
-    table.q td:nth-child(3) { padding-left: 22px; }
+    table.q td:nth-child(2) { padding-right: 8px; }
+    table.q td:nth-child(3) { padding-left: 8px; }
     .oi { margin-top: 0; font-size: 13px; }
     .oi h4 { margin: 0 0 4px; font-size: 13px; }
     .oi table { width: 100%; border-collapse: collapse; }
@@ -192,6 +205,7 @@
         </div>
         <div class="side">
           <div class="side-top">
+            <canvas id="todayBar" width="48" height="140"></canvas>
             <table class="q" id="stats"></table>
             <div>
               <table class="ob" id="ob"></table>
@@ -235,6 +249,37 @@
     const LIVE = "https://wtx.19850926.xyz/";
 
     const $ = (id) => document.getElementById(id);
+
+    function drawTodayBar(x) {
+      const c = $("todayBar");
+      if (!c) return;
+      const o = n(x.COpenPrice), h = n(x.CHighPrice), l = n(x.CLowPrice), cl = n(x.CLastPrice);
+      const box = c.getBoundingClientRect();
+      const w = Math.max(48, Math.round(box.width) || 48);
+      const ht = Math.max(132, Math.round(box.height) || 140);
+      if (c.width !== w) c.width = w;
+      if (c.height !== ht) c.height = ht;
+      const ctx = c.getContext("2d");
+      ctx.clearRect(0, 0, w, ht);
+      ctx.fillStyle = "#f3f4f6";
+      ctx.fillRect(0, 0, w, ht);
+      if ([o, h, l, cl].some((v) => v == null)) return;
+      const pad = 10;
+      const span = (h - l) || 1;
+      const yOf = (v) => pad + ((h - v) / span) * (ht - pad * 2);
+      const up = cl >= o;
+      ctx.strokeStyle = up ? "#d32f2f" : "#1b8a3e";
+      ctx.fillStyle = ctx.strokeStyle;
+      const mid = w / 2;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(mid, yOf(h));
+      ctx.lineTo(mid, yOf(l));
+      ctx.stroke();
+      const top = yOf(Math.max(o, cl));
+      const bot = yOf(Math.min(o, cl));
+      ctx.fillRect(mid - 8, top, 16, Math.max(bot - top, 2));
+    }
 
     function raw(v) {
       if (v && typeof v === "object") v = v.raw;
@@ -303,6 +348,7 @@
       $("stats").innerHTML = rows
         .map((r) => `<tr><td class="lab">${r[0]}</td><td>${r[1]}</td><td class="lab">${r[2]}</td><td>${r[3]}</td></tr>`)
         .join("");
+      drawTodayBar(x);
 
       let bidTot = 0, askTot = 0;
       const levels = [1, 2, 3, 4, 5];
