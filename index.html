@@ -159,14 +159,9 @@
     .live.on { color: #16a34a; }
     .szbar { display: block; height: 14px; background: var(--dn); max-width: 100%; }
     .szbar.r { background: var(--up); margin-left: auto; }
-    .card.foot {
-      position: relative;
-      padding-bottom: 22px;
-    }
     .ver {
-      position: absolute;
-      right: 10px;
-      bottom: 6px;
+      text-align: right;
+      padding: 0 2px 8px;
       font-size: 11px;
       color: #9ca3af;
       pointer-events: none;
@@ -241,13 +236,13 @@
       </div>
     </div>
 
-    <div class="card foot">
+    <div class="card">
       <div class="side-oi">
         <div class="oi" id="oi-inst"></div>
         <div class="oi" id="oi-top"></div>
       </div>
-      <div class="ver">v20260814-0040</div>
     </div>
+    <div class="ver">v20260814-0042</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -398,7 +393,7 @@
       const inst = uncover.inst || [];
       const top = uncover.top || [];
       if (inst.length) {
-        let h = `<h4>法人未平倉 ${uncover.date || ""}</h4>`;
+        let h = `<h4>${uncover.date ? uncover.date + " " : ""}法人未平倉</h4>`;
         h += `<table><tr><th></th><th>多單</th><th>空單</th><th>淨額</th></tr>`;
         inst.forEach((r) => {
           const nm = String(r.name || "")
