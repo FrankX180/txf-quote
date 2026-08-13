@@ -46,6 +46,13 @@
     @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
     .meta { font-size: 13px; line-height: 1.7; color: #374151; }
     canvas { width: 100%; height: 280px; display: block; }
+    .chips { display: flex; gap: 8px; margin: 6px 0 10px; flex-wrap: wrap; }
+    .chip, .mode {
+      background: #f3f4f6; border: 0; border-radius: 4px; padding: 4px 10px;
+      font-size: 13px; cursor: pointer; font-weight: 600; color: #374151;
+    }
+    .chip.on, .mode.on { background: #b91c1c; color: #fff; }
+    #khost { width: 100%; height: 320px; display: none; }
     table.q { width: 100%; border-collapse: collapse; font-size: 13px; }
     table.q td { padding: 6px 0; border-bottom: 1px solid #f3f4f6; }
     table.q td:nth-child(2), table.q td:nth-child(4) { text-align: right; font-variant-numeric: tabular-nums; }
@@ -87,8 +94,18 @@
       </div>
       <div class="grid">
         <div>
+          <div class="chips">
+            <button class="mode on" id="mode-line" type="button">走勢</button>
+            <button class="mode" id="mode-k" type="button">K線</button>
+            <button class="chip on" data-days="1" type="button">當日</button>
+            <button class="chip" data-days="2" type="button">二日</button>
+            <button class="chip" data-days="3" type="button">三日</button>
+            <button class="chip" data-days="4" type="button">四日</button>
+            <button class="chip" data-days="5" type="button">五日</button>
+          </div>
           <div class="meta" id="sumline"></div>
           <canvas id="chart" width="720" height="280"></canvas>
+          <div id="khost"></div>
         </div>
         <div>
           <table class="q" id="stats"></table>
@@ -101,11 +118,12 @@
         </div>
       </div>
       <div class="note">
-        即時：本機 API Manager <code>ws://127.0.0.1:8700/ws/quotes</code>（元大 TXFH6）。
-        閘道沒開時退回 Actions 快照。這台電腦開著 API Manager 才有秒級。
+        即時：API Manager <code>:8700</code>。K 線用 BLOK 同套 <code>klinecharts v9</code>（漲紅跌綠）。
+        1～5 日日K 來自 <code>futures_daily</code>；有元大 5 分 K 時走勢改用分鐘線。
       </div>
     </div>
   </div>
+  <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
     const AM_WS = "ws://127.0.0.1:8700/ws/quotes";
     const AM_SYM = ["TXFH6", "TXFG6", "TXF"];
@@ -114,6 +132,11 @@
     let hist = { night: [], day: [] };
     let live = false;
     let amCache = {};
+    let daySpan = 1;
+    let chartMode = "line";
+    let dailyPack = { night: [], day: [] };
+    let minuteBars = [];
+    let kchart = null;
 
     const $ = (id) => document.getElementById(id);
 
@@ -221,12 +244,53 @@
       return `${ds.slice(4, 6)}/${ds.slice(6, 8)} ${ts.slice(0, 2)}:${ts.slice(2, 4)}:${ts.slice(4, 6)}`;
     }
 
+    function sessKey() { return session === "night" ? "night" : "day"; }
+
+    function lastDates(nDays) {
+      const bars = dailyPack[sessKey()] || [];
+      const dates = [];
+      for (let i = bars.length - 1; i >= 0 && dates.length < nDays; i--) {
+        const d = bars[i].date;
+        if (dates.indexOf(d) < 0) dates.push(d);
+      }
+      return dates;
+    }
+
+    function linePoints() {
+      if (minuteBars.length) {
+        const keep = lastDates(daySpan);
+        return minuteBars.filter((b) => keep.indexOf(b.date) >= 0).map((b) => ({ px: b.close, vol: b.volume, time: b.timestamp }));
+      }
+      const keep = lastDates(daySpan);
+      const bars = (dailyPack[sessKey()] || []).filter((b) => keep.indexOf(b.date) >= 0);
+      const pts = bars.map((b) => ({ px: b.close, vol: b.volume, time: b.timestamp }));
+      const livePts = hist[session] || [];
+      if (daySpan === 1 && livePts.length) return livePts.map((p) => ({ px: p.px, vol: p.vol, time: p.t }));
+      return pts;
+    }
+
+    function klineData() {
+      if (minuteBars.length) {
+        const keep = lastDates(daySpan);
+        return minuteBars.filter((b) => keep.indexOf(b.date) >= 0);
+      }
+      const keep = lastDates(daySpan);
+      return (dailyPack[sessKey()] || []).filter((b) => keep.indexOf(b.date) >= 0);
+    }
+
     function draw() {
+      const lineOn = chartMode === "line";
+      $("chart").style.display = lineOn ? "block" : "none";
+      $("khost").style.display = lineOn ? "none" : "block";
+      if (!lineOn) {
+        renderK();
+        return;
+      }
       const c = $("chart");
       const ctx = c.getContext("2d");
       const w = c.width, h = c.height;
       ctx.clearRect(0, 0, w, h);
-      const pts = hist[session] || [];
+      const pts = linePoints();
       if (pts.length < 2) {
         ctx.fillStyle = "#9ca3af";
         ctx.font = "14px sans-serif";
@@ -234,7 +298,6 @@
         return;
       }
       const prices = pts.map((p) => p.px);
-      const vols = pts.map((p) => p.vol);
       const ref = n(q() && q().CRefPrice) || prices[0];
       let mn = Math.min(...prices, ref);
       let mx = Math.max(...prices, ref);
@@ -263,15 +326,37 @@
         const x = xAt(i), y = yAt(p.px);
         i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
       });
-      ctx.strokeStyle = prices[prices.length - 1] >= ref ? "#d32f2f" : "#1b8a3e";
+      ctx.strokeStyle = prices[prices.length - 1] >= ref ? "#ff4444" : "#44bb44";
       ctx.lineWidth = 1.6;
       ctx.stroke();
-      const lastY = yAt(prices[prices.length - 1]);
       ctx.lineTo(xAt(pts.length - 1), padT + ch);
       ctx.lineTo(xAt(0), padT + ch);
       ctx.closePath();
-      ctx.fillStyle = prices[prices.length - 1] >= ref ? "rgba(211,47,47,0.12)" : "rgba(27,138,62,0.12)";
+      ctx.fillStyle = prices[prices.length - 1] >= ref ? "rgba(255,68,68,0.12)" : "rgba(68,187,68,0.12)";
       ctx.fill();
+    }
+
+    function twStyles() {
+      return {
+        candle: {
+          bar: {
+            upColor: "#ff4444", downColor: "#44bb44", noChangeColor: "#888888",
+            upBorderColor: "#ff4444", downBorderColor: "#44bb44", noChangeBorderColor: "#888888",
+            upWickColor: "#ff4444", downWickColor: "#44bb44", noChangeWickColor: "#888888",
+          },
+        },
+        indicator: { bars: [{ upColor: "#ff4444", downColor: "#44bb44", noChangeColor: "#888" }] },
+      };
+    }
+
+    function renderK() {
+      if (typeof klinecharts === "undefined") return;
+      const data = klineData();
+      if (!kchart) {
+        kchart = klinecharts.init("khost", { styles: twStyles() });
+        kchart.createIndicator("VOL", false, { id: "vol_pane" });
+      }
+      kchart.applyNewData(data.length ? data : []);
     }
 
     function pickAm() {
@@ -400,8 +485,64 @@
       $("tab-day").classList.remove("on");
       render();
     };
+    $("mode-line").onclick = () => {
+      chartMode = "line";
+      $("mode-line").classList.add("on");
+      $("mode-k").classList.remove("on");
+      draw();
+    };
+    $("mode-k").onclick = () => {
+      chartMode = "k";
+      $("mode-k").classList.add("on");
+      $("mode-line").classList.remove("on");
+      draw();
+    };
+    document.querySelectorAll(".chip[data-days]").forEach((btn) => {
+      btn.onclick = () => {
+        document.querySelectorAll(".chip[data-days]").forEach((b) => b.classList.remove("on"));
+        btn.classList.add("on");
+        daySpan = Number(btn.getAttribute("data-days"));
+        draw();
+      };
+    });
+
+    function toMinute(bar) {
+      const ts = bar.ts || bar.timestamp;
+      const t = typeof ts === "number" ? ts : Date.parse(ts);
+      const d = new Date(t);
+      const date = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+      return {
+        timestamp: t > 1e12 ? t : t * 1000,
+        open: Number(bar.open),
+        high: Number(bar.high),
+        low: Number(bar.low),
+        close: Number(bar.close),
+        volume: Number(bar.volume || 0),
+        date: date,
+      };
+    }
+
+    async function loadKline() {
+      try {
+        const pack = await fetch("data/kline-daily.json?t=" + Date.now()).then((r) => r.json());
+        dailyPack.night = pack.night || [];
+        dailyPack.day = pack.day || [];
+      } catch (e) {}
+      const end = new Date();
+      const start = new Date(end.getTime() - 6 * 86400000);
+      const fmt = (d) => d.getFullYear() + "/" + String(d.getMonth() + 1).padStart(2, "0") + "/" + String(d.getDate()).padStart(2, "0");
+      const url = "http://127.0.0.1:8700/api/broker/yuanta/kline/TXFH6?kline_type=1&start_date=" +
+        encodeURIComponent(fmt(start)) + "&end_date=" + encodeURIComponent(fmt(end));
+      try {
+        const r = await fetch(url);
+        const j = await r.json();
+        if (j.ok && j.bars && j.bars.length) minuteBars = j.bars.map(toMinute);
+      } catch (e) {}
+      draw();
+    }
 
     load();
+    loadKline();
     connectWs();
     setInterval(load, 30000);
   </script>
