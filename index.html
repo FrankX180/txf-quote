@@ -339,7 +339,11 @@
         $("outTxt").textContent = "委賣 " + fmt(askTot);
       }
 
-      const maxSz = Math.max(bidTot, askTot, 1);
+      let maxSz = 1;
+      levels.forEach((i) => {
+        maxSz = Math.max(maxSz, n(x["CBidSize" + i]) || 0, n(x["CAskSize" + i]) || 0);
+      });
+      maxSz += 2;
       let ob = `<tr><td class="lab bid">買量</td><td></td><td class="pxb">買價</td><td class="pxa">賣價</td><td></td><td class="lab ask">賣量</td></tr>`;
       levels.forEach((i) => {
         const bs = n(x["CBidSize" + i]) || 0;
