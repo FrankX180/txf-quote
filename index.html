@@ -889,6 +889,53 @@
       };
     });
 
+    function classifyTs(tsSec) {
+      const dt = new Date(tsSec * 1000);
+      const hm = dt.getHours() * 100 + dt.getMinutes();
+      const iso = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+      if (hm >= 1500 || hm < 500) {
+        const d = new Date(dt);
+        if (hm < 500) d.setDate(d.getDate() - 1);
+        return { sess: "night", date: iso(d) };
+      }
+      if (hm >= 845 && hm <= 1345) return { sess: "day", date: iso(dt) };
+      return null;
+    }
+
+    function applyYahoo1m(chart) {
+      const tsList = chart.timestamp || [];
+      const q = (((chart.indicators || {}).quote) || [{}])[0] || {};
+      const opens = q.open || [], highs = q.high || [], lows = q.low || [], closes = q.close || [], vols = q.volume || [];
+      const night = [], day = [];
+      tsList.forEach((ts, i) => {
+        const c = closes[i];
+        if (c == null) return;
+        const hit = classifyTs(ts);
+        if (!hit) return;
+        const row = {
+          timestamp: ts * 1000,
+          open: opens[i] != null ? opens[i] : c,
+          high: highs[i] != null ? highs[i] : c,
+          low: lows[i] != null ? lows[i] : c,
+          close: c,
+          volume: Math.round((vols[i] || 0) * 1000),
+          date: hit.date,
+          session: hit.sess,
+        };
+        (hit.sess === "night" ? night : day).push(row);
+      });
+      if (night.length) minutePack.night_1m = night;
+      if (day.length) minutePack.day_1m = day;
+      draw();
+    }
+
+    async function poll1m() {
+      try {
+        const j = await fetch(LIVE + "?kind=1m&t=" + Date.now()).then((r) => r.json());
+        if (j && (j.timestamp || []).length) applyYahoo1m(j);
+      } catch (e) {}
+    }
+
     async function loadKline() {
       try {
         const pack = await fetch("data/kline-daily.json?t=" + Date.now()).then((r) => r.json());
@@ -926,7 +973,9 @@
     load();
     loadKline();
     pollLive();
+    poll1m();
     setInterval(pollLive, 5000);
+    setInterval(poll1m, 20000);
     setInterval(loadKline, 60000);
   </script>
 </body>
