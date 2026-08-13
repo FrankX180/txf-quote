@@ -296,9 +296,9 @@
         last == null ? "" : `${arrow(diff)} ${fmt(Math.abs(diff), 0)} (${diff >= 0 ? "" : ""}${fmt(rate, 2)}%)`;
       $("stamp").textContent = `報價 ${fmtTime(x.CDate, x.CTime)}`;
       $("sumline").innerHTML =
-        `股價 ${fmt(last, 2)} <span class="${cls(diff)}">${arrow(diff)} ${fmt(diff, 0)}(${fmt(rate, 2)}%)</span>` +
+        `股價 <b>${fmt(last, 0)}</b> <span class="${cls(diff)}">${arrow(diff)} ${fmt(diff, 0)}(${fmt(rate, 2)}%)</span>` +
         `　交易量 ${fmt(x.CTotalVolume)}<br>` +
-        `開盤 ${fmt(x.COpenPrice)}　昨收 ${fmt(x.CRefPrice)}　最高 ${fmt(x.CHighPrice)}　最低 ${fmt(x.CLowPrice)}`;
+        `開盤 ${fmt(x.COpenPrice)}　昨收 ${fmt(x.CRefPrice)}　最高 <span class="up">${fmt(x.CHighPrice)}</span>　最低 <span class="dn">${fmt(x.CLowPrice)}</span>`;
 
       const rows = [
         ["成交", fmt(x.CLastPrice), "漲跌幅", rate == null ? "—" : fmt(rate, 2) + "%"],
