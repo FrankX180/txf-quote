@@ -16,7 +16,7 @@
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: "Microsoft JhengHei", "微軟正黑體", "Noto Sans TC", sans-serif;
+      font-family: "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
       background: var(--bg);
       color: #111827;
     }
@@ -58,6 +58,9 @@
     .badge {
       font-size: 12px; background: #fef3c7; color: #92400e;
       border-radius: 4px; padding: 2px 6px; font-weight: 700;
+    }
+    .hero, .hero .px, .hero .sub {
+      font-family: "Segoe UI", "Noto Sans TC", sans-serif;
     }
     .px { font-size: 40px; font-weight: 800; letter-spacing: -1px; margin: 8px 0 4px; }
     .sub { font-size: 13px; color: var(--muted); }
@@ -101,14 +104,28 @@
     .oi td:first-child, .oi th:first-child { text-align: left; color: #6b7280; }
     table.q td.lab { color: #6b7280; }
     .ob { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 0; }
-    .ob td { padding: 0 4px; font-variant-numeric: tabular-nums; }
+    .ob td { padding: 2px 4px; font-variant-numeric: tabular-nums; }
     .ob .bid { color: var(--up); text-align: right; }
     .ob .ask { color: var(--dn); }
     .ob .lab.bid { color: var(--up); }
     .ob .lab.ask { color: var(--dn); }
-    .bar-wrap { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin: 4px 0 2px; background: #eee; }
+    .bar-wrap {
+      position: relative;
+      display: flex;
+      height: 22px;
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 4px 0 2px;
+      background: #eee;
+    }
     .bar-in { background: var(--dn); }
     .bar-out { background: var(--up); }
+    .bar-labs {
+      position: absolute; inset: 0;
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 0 8px; font-size: 12px; font-weight: 700; color: #fff;
+      pointer-events: none;
+    }
     .up { color: var(--up); }
     .dn { color: var(--dn); }
     .flat { color: #111; }
@@ -182,8 +199,11 @@
               <div class="bar-wrap">
                 <div class="bar-in" id="barIn" style="width:50%"></div>
                 <div class="bar-out" id="barOut" style="width:50%"></div>
+                <div class="bar-labs">
+                  <span id="inTxt">內盤 —</span>
+                  <span id="outTxt">外盤 —</span>
+                </div>
               </div>
-              <div class="sub" id="inoutlab">買一口數 —　賣一口數 —</div>
             </div>
           </div>
           <div class="side-oi">
@@ -300,11 +320,11 @@
         const pin2 = (inn / (inn + outv)) * 100;
         $("barIn").style.width = pin2 + "%";
         $("barOut").style.width = (100 - pin2) + "%";
-        $("inoutlab").innerHTML =
-          `<span class="dn">內盤 ${fmt(inn)}</span>　<span class="up">外盤 ${fmt(outv)}</span>`;
+        $("inTxt").textContent = "內盤 " + fmt(inn);
+        $("outTxt").textContent = "外盤 " + fmt(outv);
       } else {
-        $("inoutlab").innerHTML =
-          `<span class="dn">委買 ${fmt(bidTot)}</span>　<span class="up">委賣 ${fmt(askTot)}</span>`;
+        $("inTxt").textContent = "委買 " + fmt(bidTot);
+        $("outTxt").textContent = "委賣 " + fmt(askTot);
       }
 
       const maxSz = Math.max(bidTot, askTot, 1);
