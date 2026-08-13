@@ -109,8 +109,9 @@
 
     <div class="card">
       <div class="tabs">
+        <button class="tab on" id="tab-merge" type="button">合併</button>
         <button class="tab" id="tab-day" type="button">日盤</button>
-        <button class="tab on" id="tab-night" type="button">夜盤</button>
+        <button class="tab" id="tab-night" type="button">夜盤</button>
       </div>
       <div class="grid">
         <div>
@@ -143,7 +144,7 @@
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
-    let session = "night";
+    let session = "merge";
     let snap = null;
     let hist = { night: [], day: [] };
     let live = false;
@@ -186,7 +187,9 @@
     }
 
     function q() {
-      return snap && snap[session];
+      if (!snap) return null;
+      if (session === "merge") return snap.night || snap.day;
+      return snap[session];
     }
 
     function render() {
@@ -293,9 +296,20 @@
       return `${ds.slice(4, 6)}/${ds.slice(6, 8)} ${ts.slice(0, 2)}:${ts.slice(2, 4)}:${ts.slice(4, 6)}`;
     }
 
-    function sessKey() { return session === "night" ? "night" : "day"; }
+    function sessKey() { return session === "day" ? "day" : "night"; }
+
+    function joinBars(a, b) {
+      return (a || []).concat(b || []).sort((x, y) => x.timestamp - y.timestamp);
+    }
 
     function packBars() {
+      if (session === "merge") {
+        return {
+          m1: joinBars(minutePack.night_1m, minutePack.day_1m),
+          m5: joinBars(minutePack.night_5m, minutePack.day_5m),
+          m15: joinBars(minutePack.night_15m, minutePack.day_15m),
+        };
+      }
       const k = sessKey();
       return {
         m1: minutePack[k + "_1m"] || [],
@@ -331,7 +345,7 @@
       const keep = lastDates(daySpan);
       const mins = minuteSeries().filter((b) => keep.indexOf(b.date) >= 0);
       const pts = mins.map((b) => ({ px: b.close, vol: b.volume, time: b.timestamp }));
-      const livePts = hist[session] || [];
+      const livePts = session === "day" ? (hist.day || []) : (hist.night || []);
       const lastTs = pts.length ? pts[pts.length - 1].time : 0;
       livePts.forEach((p) => {
         const ts = Date.parse(String(p.t).replace(/-/g, "/")) || 0;
@@ -340,10 +354,43 @@
       return pts;
     }
 
+    function mergeDaily() {
+      const by = {};
+      (dailyPack.night || []).concat(dailyPack.day || []).forEach((b) => {
+        const d = b.date || b.timestamp;
+        if (!by[d]) {
+          by[d] = Object.assign({}, b);
+          return;
+        }
+        const o = by[d];
+        o.high = Math.max(o.high, b.high);
+        o.low = Math.min(o.low, b.low);
+        o.close = b.close;
+        o.volume = (o.volume || 0) + (b.volume || 0);
+        if ((b.timestamp || 0) > (o.timestamp || 0)) o.timestamp = b.timestamp;
+      });
+      return Object.keys(by).sort().map((k) => by[k]);
+    }
+
     function klineData() {
-      const m1 = minutePack[sessKey() + "_1m"] || [];
-      const keep = lastDates(1);
-      const mins = m1.filter((b) => keep.indexOf(b.date) >= 0);
+      const { m1, m5, m15 } = packBars();
+      const keep = lastDates(session === "merge" ? 2 : 1);
+      const take = (rows) => rows.filter((b) => keep.indexOf(b.date) >= 0);
+      if (session === "merge") {
+        const a = take(m1);
+        const b = take(m5);
+        const has = (rows, s) => rows.some((x) => x.session === s);
+        if (a.length && has(a, "day") && has(a, "night")) return a;
+        if (has(a, "night") && has(b, "day")) {
+          return joinBars(a.filter((x) => x.session === "night"), b.filter((x) => x.session === "day"));
+        }
+        if (b.length && has(b, "day") && has(b, "night")) return b;
+        if (a.length) return a;
+        if (b.length) return b;
+        const c = take(m15);
+        return c.length ? c : mergeDaily();
+      }
+      const mins = take(m1);
       if (mins.length) return mins;
       return dailyPack[sessKey()] || [];
     }
@@ -532,18 +579,17 @@
       }
     }
 
-    $("tab-day").onclick = () => {
-      session = "day";
-      $("tab-day").classList.add("on");
-      $("tab-night").classList.remove("on");
+    function setSession(s) {
+      session = s;
+      ["merge", "day", "night"].forEach((k) => {
+        const el = $("tab-" + k);
+        if (el) el.classList.toggle("on", k === s);
+      });
       render();
-    };
-    $("tab-night").onclick = () => {
-      session = "night";
-      $("tab-night").classList.add("on");
-      $("tab-day").classList.remove("on");
-      render();
-    };
+    }
+    $("tab-merge").onclick = () => setSession("merge");
+    $("tab-day").onclick = () => setSession("day");
+    $("tab-night").onclick = () => setSession("night");
     function syncDayChips() {
       const el = $("daychips");
       if (!el) return;
