@@ -91,12 +91,26 @@
       gap: 12px;
       align-items: start;
     }
+    .imbrow {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin: 8px 0 0;
+    }
     .imb {
+      flex: 1;
       text-align: center;
       font-size: 13px;
       font-weight: 800;
-      margin: 8px 0 0;
     }
+    .imb-l, .imb-r {
+      min-width: 4.2em;
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .imb-l { text-align: left; }
+    .imb-r { text-align: right; }
     .meta {
       display: flex;
       align-items: center;
@@ -148,6 +162,17 @@
       overflow: hidden;
       margin: 4px 0 2px;
       background: #eee;
+    }
+    .bar-wrap::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 0;
+      bottom: 0;
+      border-left: 2px dashed #fff;
+      transform: translateX(-1px);
+      pointer-events: none;
+      z-index: 2;
     }
     .bar-in { background: var(--dn); }
     .bar-out { background: var(--up); }
@@ -236,7 +261,11 @@
                   <span id="outTxt">外盤 —</span>
                 </div>
               </div>
-              <div class="imb" id="imb"></div>
+              <div class="imbrow">
+                <span class="imb-l dn" id="inPct">—</span>
+                <div class="imb" id="imb"></div>
+                <span class="imb-r up" id="outPct">—</span>
+              </div>
             </div>
           </div>
         </div>
@@ -249,7 +278,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0056</div>
+    <div class="ver">v20260814-0058</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -357,6 +386,8 @@
         $("barOut").style.width = (100 - pin2) + "%";
         $("inTxt").textContent = "內盤 " + fmt(inn);
         $("outTxt").textContent = "外盤 " + fmt(outv);
+        if ($("inPct")) $("inPct").textContent = pin2.toFixed(1) + "%";
+        if ($("outPct")) $("outPct").textContent = (100 - pin2).toFixed(1) + "%";
         const net = outv - inn;
         const imb = $("imb");
         if (imb) {
@@ -374,6 +405,8 @@
       } else {
         $("inTxt").textContent = "委買 " + fmt(bidTot);
         $("outTxt").textContent = "委賣 " + fmt(askTot);
+        if ($("inPct")) $("inPct").textContent = pin.toFixed(1) + "%";
+        if ($("outPct")) $("outPct").textContent = (100 - pin).toFixed(1) + "%";
         if ($("imb")) $("imb").textContent = "";
       }
 
