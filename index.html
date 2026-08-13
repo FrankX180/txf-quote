@@ -242,7 +242,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0048</div>
+    <div class="ver">v20260814-0050</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -924,11 +924,7 @@
         const d = new Date(hp.time);
         const ds = (d.getMonth() + 1) + "/" + d.getDate() + " "
           + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
-        const z = (v) => String(Math.round(Number(v) || 0));
-        const tip = ds + " 開" + z(hp.open != null ? hp.open : hp.px)
-          + "高" + z(hp.high != null ? hp.high : hp.px)
-          + "低" + z(hp.low != null ? hp.low : hp.px)
-          + "收" + z(hp.close != null ? hp.close : hp.px);
+        const tip = ds + " " + Math.round(Number(hp.close != null ? hp.close : hp.px) || 0);
         ctx.font = "12px sans-serif";
         const tw = ctx.measureText(tip).width;
         let tx = hx + 8;
