@@ -61,6 +61,10 @@
     .dn { color: var(--dn); }
     .flat { color: #111; }
     .note { font-size: 12px; color: var(--muted); margin-top: 10px; }
+    .live { font-size: 11px; margin-left: 8px; color: #9ca3af; }
+    .live.on { color: #16a34a; }
+    .szbar { display: inline-block; height: 10px; vertical-align: middle; background: #fecaca; }
+    .szbar.g { background: #bbf7d0; }
   </style>
 </head>
 <body>
@@ -69,6 +73,7 @@
       <div class="title-row">
         <div class="title" id="name">台指期 TXF</div>
         <span class="badge">期貨</span>
+        <span class="live" id="live">未連線</span>
       </div>
       <div class="px flat" id="last">—</div>
       <div class="sub" id="chgline"></div>
@@ -96,17 +101,17 @@
         </div>
       </div>
       <div class="note">
-        資料來源：臺灣期貨交易所 MIS <code>getQuoteList</code>（公開行情）。
-        GitHub Pages 不能直連官方（無 CORS），本頁讀 <code>data/snapshot.json</code>，由 Actions 約每 5 分鐘更新。
-        官方列表只有買一／賣一，沒有完整五檔與內外盤。
+        秒級五檔：本機中繼連期交所 SockJS，再經 Cloudflare <code>wss://txf.19850926.xyz</code>。
+        中繼沒開時退回 Actions 快照（約 5 分鐘）。
       </div>
     </div>
   </div>
   <script>
-    const TAIWAN_UP_RED = true;
+    const WS_URL = "wss://txf.19850926.xyz/";
     let session = "night";
     let snap = null;
     let hist = { night: [], day: [] };
+    let live = false;
 
     const $ = (id) => document.getElementById(id);
 
@@ -141,8 +146,13 @@
         return;
       }
       const last = n(x.CLastPrice);
-      const diff = n(x.CDiff);
-      const rate = n(x.CDiffRate);
+      const ref = n(x.CRefPrice);
+      let diff = n(x.CDiff);
+      let rate = n(x.CDiffRate);
+      if (diff == null && last != null && ref != null) {
+        diff = last - ref;
+        rate = ref ? (diff / ref) * 100 : 0;
+      }
       $("name").textContent = (x.DispCName || "台指期") + " " + (x.DispEName || "TXF");
       $("last").className = "px " + cls(diff);
       $("last").textContent = last == null ? "—" : fmt(last, 0);
@@ -167,24 +177,38 @@
         .map((r) => `<tr><td class="lab">${r[0]}</td><td>${r[1]}</td><td class="lab">${r[2]}</td><td>${r[3]}</td></tr>`)
         .join("");
 
-      const bsz = n(x.CBidSize1) || 0;
-      const asz = n(x.CAskSize1) || 0;
-      const tot = bsz + asz;
-      const pin = tot ? (bsz / tot) * 100 : 50;
+      let bidTot = 0, askTot = 0;
+      const levels = [1, 2, 3, 4, 5];
+      levels.forEach((i) => {
+        bidTot += n(x["CBidSize" + i]) || 0;
+        askTot += n(x["CAskSize" + i]) || 0;
+      });
+      const tot = bidTot + askTot;
+      const pin = tot ? (bidTot / tot) * 100 : 50;
       $("barIn").style.width = pin + "%";
       $("barOut").style.width = (100 - pin) + "%";
       $("inoutlab").innerHTML =
-        `<span class="dn">買一口數 ${fmt(bsz)}</span>　<span class="up">賣一口數 ${fmt(asz)}</span>`;
+        `<span class="dn">委買 ${fmt(bidTot)}</span>　<span class="up">委賣 ${fmt(askTot)}</span>`;
 
-      $("ob").innerHTML = `
-        <tr><td class="lab">委買量</td><td></td><td>買價</td><td>賣價</td><td class="lab">委賣量</td></tr>
-        <tr>
-          <td class="bid">${fmt(x.CBidSize1)}</td>
-          <td></td>
-          <td class="bid">${fmt(x.CBidPrice1)}</td>
-          <td class="ask">${fmt(x.CAskPrice1)}</td>
-          <td class="ask">${fmt(x.CAskSize1)}</td>
+      const maxSz = Math.max(bidTot, askTot, 1);
+      let ob = `<tr><td class="lab">委買量</td><td></td><td>買價</td><td>賣價</td><td></td><td class="lab">委賣量</td></tr>`;
+      levels.forEach((i) => {
+        const bs = n(x["CBidSize" + i]) || 0;
+        const asz = n(x["CAskSize" + i]) || 0;
+        const bw = Math.round((bs / maxSz) * 72);
+        const aw = Math.round((asz / maxSz) * 72);
+        ob += `<tr>
+          <td class="bid">${fmt(x["CBidSize" + i])}</td>
+          <td><span class="szbar g" style="width:${bw}px"></span></td>
+          <td class="bid">${fmt(x["CBidPrice" + i])}</td>
+          <td class="ask">${fmt(x["CAskPrice" + i])}</td>
+          <td><span class="szbar" style="width:${aw}px"></span></td>
+          <td class="ask">${fmt(x["CAskSize" + i])}</td>
         </tr>`;
+      });
+      $("ob").innerHTML = ob;
+      $("live").className = "live" + (live ? " on" : "");
+      $("live").textContent = live ? "LIVE" : "快照";
       draw();
     }
 
@@ -204,7 +228,7 @@
       if (pts.length < 2) {
         ctx.fillStyle = "#9ca3af";
         ctx.font = "14px sans-serif";
-        ctx.fillText("走勢會在 Actions 累積快照後出現", 16, h / 2);
+        ctx.fillText("走勢累積中…", 16, h / 2);
         return;
       }
       const prices = pts.map((p) => p.px);
@@ -248,7 +272,34 @@
       ctx.fill();
     }
 
+    function applyLive(msg) {
+      snap = { fetchedAt: msg.fetchedAt, night: msg.night, day: msg.day };
+      if (msg.histNight && msg.histNight.length) hist.night = msg.histNight;
+      if (msg.histDay && msg.histDay.length) hist.day = msg.histDay;
+      live = true;
+      render();
+    }
+
+    function connectWs() {
+      let ws;
+      const open = () => {
+        ws = new WebSocket(WS_URL);
+        ws.onmessage = (ev) => {
+          try { applyLive(JSON.parse(ev.data)); } catch (e) {}
+        };
+        ws.onclose = () => {
+          live = false;
+          $("live").className = "live";
+          $("live").textContent = "重連中";
+          setTimeout(open, 2000);
+        };
+        ws.onerror = () => { try { ws.close(); } catch (e) {} };
+      };
+      open();
+    }
+
     async function load() {
+      if (live) return;
       const [s, hn, hd] = await Promise.all([
         fetch("data/snapshot.json?t=" + Date.now()).then((r) => r.json()),
         fetch("data/history-night.json?t=" + Date.now()).then((r) => (r.ok ? r.json() : [])).catch(() => []),
@@ -274,6 +325,7 @@
     };
 
     load();
+    connectWs();
     setInterval(load, 30000);
   </script>
 </body>
