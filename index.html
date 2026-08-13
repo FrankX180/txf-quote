@@ -89,6 +89,8 @@
     table.q { width: 100%; border-collapse: collapse; font-size: 13px; }
     table.q td { padding: 6px 0; border-bottom: 1px solid #f3f4f6; }
     table.q td:nth-child(2), table.q td:nth-child(4) { text-align: right; font-variant-numeric: tabular-nums; }
+    table.q td:nth-child(2) { padding-right: 22px; }
+    table.q td:nth-child(3) { padding-left: 22px; }
     .oi { margin-top: 10px; font-size: 12px; }
     .oi h4 { margin: 10px 0 4px; font-size: 12px; }
     .oi table { width: 100%; border-collapse: collapse; }
@@ -97,8 +99,10 @@
     table.q td.lab { color: #6b7280; }
     .ob { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
     .ob td { padding: 4px 6px; font-variant-numeric: tabular-nums; }
-    .ob .bid { color: var(--dn); text-align: right; }
-    .ob .ask { color: var(--up); }
+    .ob .bid { color: var(--up); text-align: right; }
+    .ob .ask { color: var(--dn); }
+    .ob .lab.bid { color: var(--up); }
+    .ob .lab.ask { color: var(--dn); }
     .bar-wrap { display: flex; height: 10px; border-radius: 4px; overflow: hidden; margin: 8px 0; background: #eee; }
     .bar-in { background: var(--dn); }
     .bar-out { background: var(--up); }
@@ -108,8 +112,8 @@
     .note { font-size: 12px; color: var(--muted); margin-top: 10px; }
     .live { font-size: 11px; margin-left: 8px; color: #9ca3af; }
     .live.on { color: #16a34a; }
-    .szbar { display: inline-block; height: 10px; vertical-align: middle; background: #fecaca; }
-    .szbar.g { background: #bbf7d0; }
+    .szbar { display: inline-block; height: 10px; vertical-align: middle; background: var(--dn); }
+    .szbar.r { background: var(--up); }
   </style>
 </head>
 <body>
@@ -169,7 +173,10 @@
           <div id="khost"></div>
         </div>
         <div class="side">
-          <table class="q" id="stats"></table>
+          <div>
+            <table class="q" id="stats"></table>
+            <div class="oi" id="oi-inst"></div>
+          </div>
           <div>
             <table class="ob" id="ob"></table>
             <div class="bar-wrap">
@@ -177,7 +184,7 @@
               <div class="bar-out" id="barOut" style="width:50%"></div>
             </div>
             <div class="sub" id="inoutlab">買一口數 —　賣一口數 —</div>
-            <div class="oi" id="oi"></div>
+            <div class="oi" id="oi-top"></div>
           </div>
         </div>
       </div>
@@ -295,7 +302,7 @@
       }
 
       const maxSz = Math.max(bidTot, askTot, 1);
-      let ob = `<tr><td class="lab">委買量</td><td></td><td>買價</td><td>賣價</td><td></td><td class="lab">委賣量</td></tr>`;
+      let ob = `<tr><td class="lab bid">委買量</td><td></td><td class="bid">買價</td><td class="ask">賣價</td><td></td><td class="lab ask">委賣量</td></tr>`;
       levels.forEach((i) => {
         const bs = n(x["CBidSize" + i]) || 0;
         const asz = n(x["CAskSize" + i]) || 0;
@@ -303,7 +310,7 @@
         const aw = Math.round((asz / maxSz) * 72);
         ob += `<tr>
           <td class="bid">${fmt(x["CBidSize" + i])}</td>
-          <td><span class="szbar g" style="width:${bw}px"></span></td>
+          <td><span class="szbar r" style="width:${bw}px"></span></td>
           <td class="bid">${fmt(x["CBidPrice" + i])}</td>
           <td class="ask">${fmt(x["CAskPrice" + i])}</td>
           <td><span class="szbar" style="width:${aw}px"></span></td>
@@ -327,29 +334,30 @@
     }
 
     function renderOi() {
-      const box = $("oi");
-      if (!box) return;
+      const left = $("oi-inst");
+      const right = $("oi-top");
+      if (!left || !right) return;
       const inst = uncover.inst || [];
       const top = uncover.top || [];
-      if (!inst.length && !top.length) {
-        box.innerHTML = "";
-        return;
-      }
-      let h = `<h4>法人未平倉 ${uncover.date || ""}</h4>`;
-      h += `<table><tr><th>項目</th><th>多單</th><th>空單</th><th>淨額</th></tr>`;
-      inst.forEach((r) => {
-        h += `<tr><td>${r.name}</td><td class="up">${fmt(r.long)}</td><td class="dn">${fmt(r.short)}</td><td>${signed(r.net)}</td></tr>`;
-      });
-      h += `</table>`;
-      top.forEach((r) => {
-        h += `<h4>${r.type || "前十大交易人"}</h4>`;
+      if (inst.length) {
+        let h = `<h4>法人未平倉 ${uncover.date || ""}</h4>`;
+        h += `<table><tr><th>項目</th><th>多單</th><th>空單</th><th>淨額</th></tr>`;
+        inst.forEach((r) => {
+          h += `<tr><td>${r.name}</td><td class="up">${fmt(r.long)}</td><td class="dn">${fmt(r.short)}</td><td>${signed(r.net)}</td></tr>`;
+        });
+        h += `</table>`;
+        left.innerHTML = h;
+      } else left.innerHTML = "";
+      if (top.length) {
+        const r = top[0];
+        let h = `<h4>${r.type || "前十大交易人合計"}</h4>`;
         h += `<table><tr><th></th><th>部位數</th><th>百分比</th></tr>`;
         h += `<tr><td>買方</td><td>${fmt(r.long)}</td><td>${r.longPct == null ? "—" : fmt(r.longPct, 1) + "%"}</td></tr>`;
         h += `<tr><td>賣方</td><td>${fmt(r.short)}</td><td>${r.shortPct == null ? "—" : fmt(r.shortPct, 1) + "%"}</td></tr>`;
         if (r.open != null) h += `<tr><td>非沖銷部位</td><td>${fmt(r.open)}</td><td></td></tr>`;
         h += `</table>`;
-      });
-      box.innerHTML = h;
+        right.innerHTML = h;
+      } else right.innerHTML = "";
     }
 
     function renderRelated() {
@@ -589,18 +597,39 @@
         ctx.beginPath();
         ctx.moveTo(x0, y0);
         ctx.lineTo(x1, y1);
-        ctx.strokeStyle = above ? "#ff4444" : "#44bb44";
+        ctx.strokeStyle = above ? "#d32f2f" : "#1b8a3e";
         ctx.lineWidth = 1.6;
         ctx.stroke();
         ctx.lineTo(x1, yOpen);
         ctx.lineTo(x0, yOpen);
         ctx.closePath();
-        ctx.fillStyle = above ? "rgba(255,68,68,0.12)" : "rgba(68,187,68,0.12)";
+        ctx.fillStyle = above ? "rgba(211,47,47,0.12)" : "rgba(27,138,62,0.12)";
         ctx.fill();
       }
       for (let i = 1; i < pts.length; i++) {
         paintSeg(xAt(i - 1), yAt(pts[i - 1].px), pts[i - 1].px, xAt(i), yAt(pts[i].px), pts[i].px);
       }
+    }
+
+    function liveDayBar() {
+      const x = q();
+      if (!x) return null;
+      const c = n(x.CLastPrice);
+      if (c == null) return null;
+      const o = n(x.COpenPrice);
+      const h = n(x.CHighPrice);
+      const l = n(x.CLowPrice);
+      const ds = String(x.CDate || "");
+      const date = ds.length === 8 ? ds.slice(0, 4) + "-" + ds.slice(4, 6) + "-" + ds.slice(6, 8) : "";
+      return {
+        timestamp: Date.now(),
+        open: o == null ? c : o,
+        high: h == null ? c : h,
+        low: l == null ? c : l,
+        close: c,
+        volume: n(x.CTotalVolume) || 0,
+        date,
+      };
     }
 
     function drawMiniK() {
@@ -609,7 +638,13 @@
       const ctx = c.getContext("2d");
       const w = c.width, h = c.height;
       ctx.clearRect(0, 0, w, h);
-      const all = dailyBars();
+      const all = dailyBars().slice();
+      const liveBar = liveDayBar();
+      if (liveBar) {
+        const last = all[all.length - 1];
+        if (last && last.date === liveBar.date) all[all.length - 1] = liveBar;
+        else all.push(liveBar);
+      }
       const bars = all.slice(-80);
       if (bars.length < 2) {
         ctx.fillStyle = "#9ca3af";
@@ -634,8 +669,8 @@
       bars.forEach((b, i) => {
         const x = padL + (i + 0.5) * (cw / bars.length);
         const up = b.close >= b.open;
-        ctx.strokeStyle = up ? "#ff4444" : "#44bb44";
-        ctx.fillStyle = up ? "#ff4444" : "#44bb44";
+        ctx.strokeStyle = up ? "#d32f2f" : "#1b8a3e";
+        ctx.fillStyle = up ? "#d32f2f" : "#1b8a3e";
         ctx.beginPath();
         ctx.moveTo(x, yAt(b.high));
         ctx.lineTo(x, yAt(b.low));
@@ -650,12 +685,12 @@
       return {
         candle: {
           bar: {
-            upColor: "#ff4444", downColor: "#44bb44", noChangeColor: "#888888",
-            upBorderColor: "#ff4444", downBorderColor: "#44bb44", noChangeBorderColor: "#888888",
-            upWickColor: "#ff4444", downWickColor: "#44bb44", noChangeWickColor: "#888888",
+            upColor: "#d32f2f", downColor: "#1b8a3e", noChangeColor: "#888888",
+            upBorderColor: "#d32f2f", downBorderColor: "#1b8a3e", noChangeBorderColor: "#888888",
+            upWickColor: "#d32f2f", downWickColor: "#1b8a3e", noChangeWickColor: "#888888",
           },
         },
-        indicator: { bars: [{ upColor: "#ff4444", downColor: "#44bb44", noChangeColor: "#888" }] },
+        indicator: { bars: [{ upColor: "#d32f2f", downColor: "#1b8a3e", noChangeColor: "#888" }] },
       };
     }
 
