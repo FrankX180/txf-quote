@@ -126,7 +126,7 @@
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
     const AM_WS = "ws://127.0.0.1:8700/ws/quotes";
-    const AM_SYM = ["TXFH6", "TXFG6", "TXF"];
+    const FRONT = "TXFH6";
     let session = "night";
     let snap = null;
     let hist = { night: [], day: [] };
@@ -359,13 +359,18 @@
       kchart.applyNewData(data.length ? data : []);
     }
 
+    function isFront(sym) {
+      return String(sym || "") === FRONT;
+    }
+
+    function hasPx(q) {
+      const last = n(q && q.last);
+      return last != null && last > 1000;
+    }
+
     function pickAm() {
-      for (const s of AM_SYM) {
-        if (amCache[s] && amCache[s].last) return amCache[s];
-      }
-      for (const k of Object.keys(amCache)) {
-        if (k.indexOf("TX") === 0 && amCache[k] && amCache[k].last) return amCache[k];
-      }
+      const q0 = amCache[FRONT];
+      if (hasPx(q0)) return q0;
       return null;
     }
 
@@ -374,7 +379,7 @@
       const bids = q.bids || [];
       const asks = q.asks || [];
       const o = {
-        DispCName: q.name || "臺指期",
+        DispCName: q.name || "臺指期086",
         DispEName: q.symbol,
         SymbolID: q.symbol,
         CLastPrice: q.last,
@@ -432,14 +437,15 @@
     function ingestAm(msg) {
       if (!msg) return;
       if (msg.type === "snapshot_batch" && msg.data) {
-        Object.assign(amCache, msg.data);
+        if (msg.data[FRONT]) amCache[FRONT] = msg.data[FRONT];
         applyAm();
         return;
       }
       if (msg.type === "quote" && msg.data && msg.data.symbol) {
         const s = msg.data.symbol;
+        if (!isFront(s)) return;
         amCache[s] = Object.assign({}, amCache[s] || {}, msg.data);
-        if (AM_SYM.indexOf(s) >= 0 || s.indexOf("TX") === 0) applyAm();
+        applyAm();
       }
     }
 
@@ -461,7 +467,7 @@
     }
 
     async function load() {
-      if (live) return;
+      if (hasPx(amCache[FRONT])) return;
       const [s, hn, hd] = await Promise.all([
         fetch("data/snapshot.json?t=" + Date.now()).then((r) => r.json()),
         fetch("data/history-night.json?t=" + Date.now()).then((r) => (r.ok ? r.json() : [])).catch(() => []),
