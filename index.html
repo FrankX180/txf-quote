@@ -624,10 +624,13 @@
         return;
       }
       const prices = pts.map((p) => p.px);
-      const open = n(q() && q().COpenPrice) || prices[0];
-      let mn = Math.min(...prices, open);
-      let mx = Math.max(...prices, open);
-      if (mx === mn) { mx += 10; mn -= 10; }
+      const qx0 = q();
+      const open = n(qx0 && qx0.COpenPrice) || prices[0];
+      const hi = Math.max(...prices, open, n(qx0 && qx0.CHighPrice) ?? -Infinity);
+      const lo = Math.min(...prices, open, n(qx0 && qx0.CLowPrice) ?? Infinity);
+      let mx = Math.ceil((hi + 500) / 500) * 500;
+      let mn = Math.floor((lo - 500) / 500) * 500;
+      if (!(mx > mn)) { mx = mn + 1000; }
       const { t0, t1 } = sessRange(pts);
       const padL = 56, padR = 33, padT = 10, padB = 26;
       const cw = w - padL - padR;
@@ -639,14 +642,13 @@
       ctx.lineWidth = 1;
       ctx.fillStyle = "#6b7280";
       ctx.font = "11px sans-serif";
-      for (let i = 0; i < 5; i++) {
-        const pv = mn + ((mx - mn) * i) / 4;
+      for (let pv = mn; pv <= mx; pv += 500) {
         const y = Math.round(yAt(pv)) + 0.5;
         ctx.beginPath();
         ctx.moveTo(padL, y);
         ctx.lineTo(w - padR, y);
         ctx.stroke();
-        ctx.fillText(Math.round(pv).toLocaleString("zh-TW"), 4, y + 4);
+        ctx.fillText(pv.toLocaleString("zh-TW"), 4, y + 4);
       }
       const hour0 = new Date(t0);
       hour0.setMinutes(0, 0, 0);
