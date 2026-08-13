@@ -99,7 +99,7 @@
       line-height: 1.7;
       color: #374151;
     }
-    canvas { width: 100%; height: 280px; display: block; }
+    canvas { width: 100%; height: 280px; display: block; touch-action: none; }
     .chips { margin: 4px 0 8px; }
     .chip, .mode {
       background: #f3f4f6; border: 0; border-radius: 4px; padding: 4px 10px;
@@ -242,7 +242,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0044</div>
+    <div class="ver">v20260814-0046</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -262,6 +262,10 @@
     };
     let kchart = null;
     let miniChart = null;
+    let hoverIdx = null;
+    let holding = false;
+    let holdTimer = null;
+    let lineHit = null;
     const LIVE = "https://wtx.19850926.xyz/";
 
     const $ = (id) => document.getElementById(id);
@@ -563,7 +567,10 @@
     function linePoints() {
       const keep = lastDates(daySpan < 1 ? 1 : daySpan);
       const mins = fillMinutes(minuteSeries().filter((b) => keep.indexOf(b.date) >= 0));
-      return mins.map((b) => ({ px: b.close, vol: b.volume, time: b.timestamp }));
+      return mins.map((b) => ({
+        px: b.close, vol: b.volume, time: b.timestamp,
+        open: b.open, high: b.high, low: b.low, close: b.close,
+      }));
     }
 
     function sessRange(pts) {
@@ -721,7 +728,7 @@
       while ((mx - mn) / yStep > 5) yStep += 100;
       const { t0, t1 } = sessRange(pts);
       const multi = daySpan >= 2;
-      const padL = 56, padR = 33, padT = 10, padB = 26;
+      const padL = 56, padR = 33, padT = 10, padB = multi ? 8 : 26;
       const cw = w - padL - padR;
       const ch = h - padT - padB;
       const xAtI = (i, t) => multi
@@ -742,24 +749,7 @@
         ctx.fillText(pv.toLocaleString("zh-TW"), 4, y + 4);
       }
       ctx.textAlign = "center";
-      if (multi) {
-        let lastKey = "";
-        let lastLx = -999;
-        pts.forEach((p, i) => {
-          const d = new Date(p.time);
-          const key = (d.getMonth() + 1) + "/" + d.getDate();
-          if (key === lastKey) return;
-          lastKey = key;
-          const x = Math.round(xAtI(i, p.time)) + 0.5;
-          if (x - lastLx < 72 && i !== 0 && i !== pts.length - 1) return;
-          lastLx = x;
-          ctx.beginPath();
-          ctx.moveTo(x, padT);
-          ctx.lineTo(x, padT + ch);
-          ctx.stroke();
-          ctx.fillText(key, x, h - 6);
-        });
-      } else {
+      if (!multi) {
         const hour0 = new Date(t0);
         hour0.setMinutes(0, 0, 0);
         if (hour0.getTime() < t0) hour0.setHours(hour0.getHours() + 1);
@@ -878,6 +868,89 @@
         const bh = Math.max(2, yBot - yTop);
         ctx.fillRect(mid - 6.5, yTop, 13, bh);
       }
+
+      lineHit = { pts, xs: pts.map((p, i) => xAtI(i, p.time)) };
+      if (holding && hoverIdx != null && pts[hoverIdx]) {
+        const hp = pts[hoverIdx];
+        const hx = xAtI(hoverIdx, hp.time);
+        const hy = yAt(hp.px);
+        ctx.save();
+        ctx.strokeStyle = "#111827";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(hx + 0.5, padT);
+        ctx.lineTo(hx + 0.5, padT + ch);
+        ctx.moveTo(padL, hy + 0.5);
+        ctx.lineTo(padL + cw, hy + 0.5);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.arc(hx, hy, 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = "#111827";
+        ctx.fill();
+        ctx.restore();
+        const d = new Date(hp.time);
+        const ds = (d.getMonth() + 1) + "/" + d.getDate() + " "
+          + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+        const z = (v) => String(Math.round(Number(v) || 0));
+        const tip = ds + " 開" + z(hp.open != null ? hp.open : hp.px)
+          + "高" + z(hp.high != null ? hp.high : hp.px)
+          + "低" + z(hp.low != null ? hp.low : hp.px)
+          + "收" + z(hp.close != null ? hp.close : hp.px);
+        ctx.font = "12px sans-serif";
+        const tw = ctx.measureText(tip).width;
+        let tx = hx + 8;
+        if (tx + tw + 10 > w - 8) tx = hx - tw - 12;
+        if (tx < padL) tx = padL;
+        const ty = padT + 4;
+        ctx.fillStyle = "rgba(255,255,255,0.92)";
+        ctx.fillRect(tx - 4, ty, tw + 8, 18);
+        ctx.fillStyle = "#111827";
+        ctx.textAlign = "left";
+        ctx.fillText(tip, tx, ty + 13);
+      }
+    }
+
+    function nearestLine(clientX) {
+      if (!lineHit || !lineHit.xs.length) return 0;
+      const x = clientX - $("chart").getBoundingClientRect().left;
+      let best = 0, bestD = 1e15;
+      lineHit.xs.forEach((px, i) => {
+        const d = Math.abs(px - x);
+        if (d < bestD) { bestD = d; best = i; }
+      });
+      return best;
+    }
+
+    function bindLineHold() {
+      const c = $("chart");
+      if (!c || c.dataset.hold) return;
+      c.dataset.hold = "1";
+      c.addEventListener("pointerdown", (e) => {
+        if (chartMode !== "line") return;
+        clearTimeout(holdTimer);
+        holdTimer = setTimeout(() => {
+          holding = true;
+          hoverIdx = nearestLine(e.clientX);
+          try { c.setPointerCapture(e.pointerId); } catch (err) {}
+          draw();
+        }, 320);
+      });
+      c.addEventListener("pointermove", (e) => {
+        if (!holding) return;
+        hoverIdx = nearestLine(e.clientX);
+        draw();
+      });
+      function endHold() {
+        clearTimeout(holdTimer);
+        if (!holding) return;
+        holding = false;
+        hoverIdx = null;
+        draw();
+      }
+      c.addEventListener("pointerup", endHold);
+      c.addEventListener("pointercancel", endHold);
     }
 
     function liveDayBar() {
@@ -1227,6 +1300,7 @@
       if (kchart && kchart.resize) kchart.resize();
       draw();
     });
+    bindLineHold();
     session = liveSess();
     markChips();
     loadLocal1m();
