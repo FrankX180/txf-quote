@@ -68,7 +68,8 @@
     }
     .tab.on { color: #b91c1c; border-bottom: 2px solid #b91c1c; }
     .grid { display: grid; grid-template-columns: 1.35fr 0.95fr; gap: 16px; }
-    .side {
+    .side { display: flex; flex-direction: column; gap: 8px; }
+    .side-top, .side-oi {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
       gap: 10px;
@@ -98,19 +99,19 @@
     table.q td:nth-child(2), table.q td:nth-child(4) { text-align: right; font-variant-numeric: tabular-nums; }
     table.q td:nth-child(2) { padding-right: 22px; }
     table.q td:nth-child(3) { padding-left: 22px; }
-    .oi { margin-top: 10px; font-size: 12px; }
-    .oi h4 { margin: 10px 0 4px; font-size: 12px; }
+    .oi { margin-top: 0; font-size: 12px; }
+    .oi h4 { margin: 0 0 4px; font-size: 12px; }
     .oi table { width: 100%; border-collapse: collapse; }
     .oi td, .oi th { padding: 3px 2px; border-bottom: 1px solid #f3f4f6; text-align: right; font-variant-numeric: tabular-nums; }
     .oi td:first-child, .oi th:first-child { text-align: left; color: #6b7280; }
     table.q td.lab { color: #6b7280; }
-    .ob { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
-    .ob td { padding: 4px 6px; font-variant-numeric: tabular-nums; }
+    .ob { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 0; }
+    .ob td { padding: 3px 4px; font-variant-numeric: tabular-nums; }
     .ob .bid { color: var(--up); text-align: right; }
     .ob .ask { color: var(--dn); }
     .ob .lab.bid { color: var(--up); }
     .ob .lab.ask { color: var(--dn); }
-    .bar-wrap { display: flex; height: 10px; border-radius: 4px; overflow: hidden; margin: 8px 0; background: #eee; }
+    .bar-wrap { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin: 4px 0 2px; background: #eee; }
     .bar-in { background: var(--dn); }
     .bar-out { background: var(--up); }
     .up { color: var(--up); }
@@ -179,17 +180,19 @@
           <div id="khost"></div>
         </div>
         <div class="side">
-          <div>
+          <div class="side-top">
             <table class="q" id="stats"></table>
-            <div class="oi" id="oi-inst"></div>
-          </div>
-          <div>
-            <table class="ob" id="ob"></table>
-            <div class="bar-wrap">
-              <div class="bar-in" id="barIn" style="width:50%"></div>
-              <div class="bar-out" id="barOut" style="width:50%"></div>
+            <div>
+              <table class="ob" id="ob"></table>
+              <div class="bar-wrap">
+                <div class="bar-in" id="barIn" style="width:50%"></div>
+                <div class="bar-out" id="barOut" style="width:50%"></div>
+              </div>
+              <div class="sub" id="inoutlab">買一口數 —　賣一口數 —</div>
             </div>
-            <div class="sub" id="inoutlab">買一口數 —　賣一口數 —</div>
+          </div>
+          <div class="side-oi">
+            <div class="oi" id="oi-inst"></div>
             <div class="oi" id="oi-top"></div>
           </div>
         </div>
