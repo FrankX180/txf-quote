@@ -57,7 +57,22 @@
     }
     .tab.on { color: #b91c1c; border-bottom: 2px solid #b91c1c; }
     .grid { display: grid; grid-template-columns: 1.35fr 0.95fr; gap: 16px; }
-    @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+    .side { display: flex; flex-direction: column; }
+    @media (max-width: 860px) {
+      .grid { grid-template-columns: 1fr; }
+      .side {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 8px;
+        align-items: start;
+      }
+      table.q { font-size: 11px; }
+      table.q td { padding: 3px 2px; }
+      .ob { font-size: 11px; margin-top: 0; }
+      .ob td { padding: 2px 2px; }
+      .szbar { max-width: 18px; }
+      .bar-wrap { margin: 6px 0 4px; }
+    }
     .meta { font-size: 13px; line-height: 1.7; color: #374151; }
     canvas { width: 100%; height: 280px; display: block; }
     .chips { display: flex; gap: 8px; margin: 6px 0 10px; flex-wrap: wrap; }
@@ -69,7 +84,7 @@
     #khost { width: 100%; height: 320px; display: none; }
     table.q { width: 100%; border-collapse: collapse; font-size: 13px; }
     table.q td { padding: 6px 0; border-bottom: 1px solid #f3f4f6; }
-    table.q td:nth-child(2), table.q td:nth-child(4) { text-align: right; font-variant-numeric: tabular-nums; }
+    table.q td:nth-child(2) { text-align: right; font-variant-numeric: tabular-nums; }
     table.q td.lab { color: #6b7280; }
     .ob { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
     .ob td { padding: 4px 6px; font-variant-numeric: tabular-nums; }
@@ -129,13 +144,15 @@
           <canvas id="chart" width="720" height="280"></canvas>
           <div id="khost"></div>
         </div>
-        <div>
-          <table class="q" id="stats"></table>
-          <div class="bar-wrap" title="僅買一／賣一口數近似，非正式內外盤">
-            <div class="bar-in" id="barIn" style="width:50%"></div>
-            <div class="bar-out" id="barOut" style="width:50%"></div>
+        <div class="side">
+          <div>
+            <table class="q" id="stats"></table>
+            <div class="bar-wrap" title="僅買一／賣一口數近似，非正式內外盤">
+              <div class="bar-in" id="barIn" style="width:50%"></div>
+              <div class="bar-out" id="barOut" style="width:50%"></div>
+            </div>
+            <div class="sub" id="inoutlab">買一口數 —　賣一口數 —</div>
           </div>
-          <div class="sub" id="inoutlab">買一口數 —　賣一口數 —</div>
           <table class="ob" id="ob"></table>
         </div>
       </div>
@@ -218,14 +235,19 @@
         `開盤 ${fmt(x.COpenPrice)}　昨收 ${fmt(x.CRefPrice)}　最高 ${fmt(x.CHighPrice)}　最低 ${fmt(x.CLowPrice)}`;
 
       const rows = [
-        ["成交", fmt(x.CLastPrice), "漲跌幅", (rate == null ? "—" : fmt(rate, 2) + "%")],
-        ["開盤", fmt(x.COpenPrice), "漲跌", fmt(x.CDiff)],
-        ["最高", fmt(x.CHighPrice), "買價", fmt(x.CBidPrice1)],
-        ["最低", fmt(x.CLowPrice), "賣價", fmt(x.CAskPrice1)],
-        ["昨收", fmt(x.CRefPrice), "總量", fmt(x.CTotalVolume)],
+        ["成交", fmt(x.CLastPrice)],
+        ["漲跌幅", rate == null ? "—" : fmt(rate, 2) + "%"],
+        ["開盤", fmt(x.COpenPrice)],
+        ["漲跌", fmt(x.CDiff)],
+        ["最高", fmt(x.CHighPrice)],
+        ["最低", fmt(x.CLowPrice)],
+        ["昨收", fmt(x.CRefPrice)],
+        ["買價", fmt(x.CBidPrice1)],
+        ["賣價", fmt(x.CAskPrice1)],
+        ["總量", fmt(x.CTotalVolume)],
       ];
       $("stats").innerHTML = rows
-        .map((r) => `<tr><td class="lab">${r[0]}</td><td>${r[1]}</td><td class="lab">${r[2]}</td><td>${r[3]}</td></tr>`)
+        .map((r) => `<tr><td class="lab">${r[0]}</td><td>${r[1]}</td></tr>`)
         .join("");
 
       let bidTot = 0, askTot = 0;
