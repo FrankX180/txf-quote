@@ -242,7 +242,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0042</div>
+    <div class="ver">v20260814-0044</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -393,7 +393,7 @@
       const inst = uncover.inst || [];
       const top = uncover.top || [];
       if (inst.length) {
-        let h = `<h4>${uncover.date ? uncover.date + " " : ""}法人未平倉</h4>`;
+        let h = `<h4>${uncover.date ? uncover.date + "｜" : ""}法人未平倉</h4>`;
         h += `<table><tr><th></th><th>多單</th><th>空單</th><th>淨額</th></tr>`;
         inst.forEach((r) => {
           const nm = String(r.name || "")
