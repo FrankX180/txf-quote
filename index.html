@@ -51,7 +51,7 @@
     .sub { font-size: 13px; color: var(--muted); }
     .sessico {
       display: flex; align-items: center; justify-content: center;
-      flex-shrink: 0; width: 2.2em; cursor: pointer;
+      flex-shrink: 0; width: 56px; cursor: pointer;
       font-size: 30px; line-height: 1; user-select: none;
     }
     .sumtxt { flex: 1; min-width: 0; }
@@ -76,7 +76,7 @@
     .meta {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 0;
       font-size: 13px;
       line-height: 1.7;
       color: #374151;
@@ -294,12 +294,12 @@
         last == null ? "" : `${arrow(diff)} ${fmt(Math.abs(diff), 0)} (${diff >= 0 ? "" : ""}${fmt(rate, 2)}%)`;
       $("stamp").textContent = fmtTime(x.CDate, x.CTime);
       $("sumline").innerHTML =
+        `<span class="sessico" id="sessToggle" title="${session === "day" ? "日盤，點一下切夜盤" : "夜盤，點一下切日盤"}">${session === "day" ? "☀️" : "🌙"}</span>` +
         `<div class="sumtxt">` +
         `股價 <b>${fmt(last, 0)}</b> <span class="${cls(diff)}">${arrow(diff)} ${fmt(diff, 0)}(${fmt(rate, 2)}%)</span>` +
         `　總口數 ${fmt(x.CTotalVolume)}<br>` +
         `昨收 ${fmt(x.CRefPrice)}　開盤 ${fmt(x.COpenPrice)}　最高 <span class="up">${fmt(x.CHighPrice)}</span>　最低 <span class="dn">${fmt(x.CLowPrice)}</span>` +
-        `</div>` +
-        `<span class="sessico" id="sessToggle" title="${session === "day" ? "日盤，點一下切夜盤" : "夜盤，點一下切日盤"}">${session === "day" ? "☀️" : "🌙"}</span>`;
+        `</div>`;
 
       let bidTot = 0, askTot = 0;
       const levels = [1, 2, 3, 4, 5];
