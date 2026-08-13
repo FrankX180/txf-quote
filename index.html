@@ -50,10 +50,11 @@
     .px { font-size: 36px; font-weight: 800; letter-spacing: -1px; margin: 2px 0 0; }
     .sub { font-size: 13px; color: var(--muted); }
     .sessico {
-      display: inline-block; margin-left: 4px; padding: 0 3px;
-      cursor: pointer; font-size: 15px; line-height: 1; opacity: 0.35; user-select: none;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; width: 2.2em; cursor: pointer;
+      font-size: 30px; line-height: 1; user-select: none;
     }
-    .sessico.on { opacity: 1; }
+    .sumtxt { flex: 1; min-width: 0; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .side, .side table, .side .sub, .side .oi, .side .bar-labs {
       font-family: "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
@@ -72,7 +73,14 @@
     @media (max-width: 860px) {
       .grid { grid-template-columns: 1fr; }
     }
-    .meta { font-size: 13px; line-height: 1.7; color: #374151; }
+    .meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      line-height: 1.7;
+      color: #374151;
+    }
     canvas { width: 100%; height: 280px; display: block; }
     .chips { margin: 4px 0 8px; }
     .chip, .mode {
@@ -286,10 +294,12 @@
         last == null ? "" : `${arrow(diff)} ${fmt(Math.abs(diff), 0)} (${diff >= 0 ? "" : ""}${fmt(rate, 2)}%)`;
       $("stamp").textContent = fmtTime(x.CDate, x.CTime);
       $("sumline").innerHTML =
+        `<div class="sumtxt">` +
         `股價 <b>${fmt(last, 0)}</b> <span class="${cls(diff)}">${arrow(diff)} ${fmt(diff, 0)}(${fmt(rate, 2)}%)</span>` +
         `　總口數 ${fmt(x.CTotalVolume)}<br>` +
         `昨收 ${fmt(x.CRefPrice)}　開盤 ${fmt(x.COpenPrice)}　最高 <span class="up">${fmt(x.CHighPrice)}</span>　最低 <span class="dn">${fmt(x.CLowPrice)}</span>` +
-        `<span class="sessico on" id="sessToggle" title="${session === "day" ? "日盤，點一下切夜盤" : "夜盤，點一下切日盤"}">${session === "day" ? "☀️" : "🌙"}</span>`;
+        `</div>` +
+        `<span class="sessico" id="sessToggle" title="${session === "day" ? "日盤，點一下切夜盤" : "夜盤，點一下切日盤"}">${session === "day" ? "☀️" : "🌙"}</span>`;
 
       let bidTot = 0, askTot = 0;
       const levels = [1, 2, 3, 4, 5];
