@@ -492,8 +492,8 @@
         end.setHours(13, 45, 0, 0);
         return { t0: start.getTime(), t1: end.getTime() };
       }
-      if (d.getHours() < 14) start.setDate(start.getDate() - 1);
-      start.setHours(14, 0, 0, 0);
+      if (d.getHours() < 15) start.setDate(start.getDate() - 1);
+      start.setHours(15, 0, 0, 0);
       const days = daySpan < 1 ? 1 : daySpan;
       start.setDate(start.getDate() - (days - 1));
       const end = new Date(start);
@@ -704,7 +704,7 @@
         ctx.fillStyle = s.above ? "rgba(211,47,47,0.10)" : "rgba(27,138,62,0.10)";
         ctx.fill();
       });
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = 1;
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
       lines.forEach((s) => {
