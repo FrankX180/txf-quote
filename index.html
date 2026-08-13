@@ -116,6 +116,7 @@
     .oi h4 { margin: 0 0 4px; font-size: 13px; }
     .oi table { width: 100%; border-collapse: collapse; }
     .oi td, .oi th { padding: 3px 2px; border-bottom: 1px solid #f3f4f6; text-align: right; font-variant-numeric: tabular-nums; }
+    .oi tr.tot td { border-top: 1px solid #6b7280; }
     .oi td:first-child, .oi th:first-child { text-align: left; color: #6b7280; }
     table.q td.lab { color: #6b7280; }
     .ob { width: 100%; border-collapse: collapse; font-size: 15px; margin-top: 0; table-layout: fixed; font-weight: 700; }
@@ -245,7 +246,7 @@
         <div class="oi" id="oi-inst"></div>
         <div class="oi" id="oi-top"></div>
       </div>
-      <div class="ver">v20260814-0036</div>
+      <div class="ver">v20260814-0038</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -404,8 +405,8 @@
             .replace("外資及陸資", "外")
             .replace("投信", "投")
             .replace("自營商", "自")
-            .replace("三大法人合計", "合計");
-          h += `<tr><td>${nm}</td><td class="up">${fmt(r.long)}</td><td class="dn">${fmt(r.short)}</td><td>${signed(r.net)}</td></tr>`;
+            .replace("三大法人合計", "總");
+          h += `<tr class="${nm === "總" ? "tot" : ""}"><td>${nm}</td><td class="up">${fmt(r.long)}</td><td class="dn">${fmt(r.short)}</td><td>${signed(r.net)}</td></tr>`;
         });
         h += `</table>`;
         left.innerHTML = h;
