@@ -249,7 +249,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0054</div>
+    <div class="ver">v20260814-0056</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -1302,6 +1302,7 @@
       });
       if (night.length) minutePack.night_1m = mergeBarLists(minutePack.night_1m, night);
       if (day.length) minutePack.day_1m = mergeBarLists(minutePack.day_1m, day);
+      bumpLiveBar();
       save1m();
       draw();
     }
@@ -1358,7 +1359,7 @@
     pollLive();
     poll1m();
     setInterval(pollLive, 5000);
-    setInterval(poll1m, 10000);
+    setInterval(poll1m, 30000);
     setInterval(loadKline, 60000);
   </script>
 </body>
