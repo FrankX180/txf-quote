@@ -279,7 +279,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0085</div>
+    <div class="ver">v20260814-0086</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -1197,12 +1197,14 @@
       const { t0, t1 } = range;
       const wins = range.wins || [];
       const multi = daySpan >= 2;
-      const padL = 56, padR = 33, padT = 10, padB = 22;
+      // 多日不畫底部 X 文字（靠十字線讀時間），只留窄底邊
+      const padL = 56, padR = 33, padT = 10, padB = multi ? 8 : 22;
       const imbH = showImb && !multi ? 52 : 0;
       const imbGap = imbH ? 6 : 0;
       const cw = w - padL - padR;
       const ch = h - padT - padB - imbH - imbGap;
       const imbTop = padT + ch + imbGap;
+      // 多日仍用日／夜視窗映射 → 未走完的盤右側留白；不當日不塞滿
       const xAtI = (i, t) => multi && wins.length
         ? mapOnWindows(t, wins, padL, cw)
         : padL + ((t - t0) / Math.max(1, t1 - t0)) * cw;
@@ -1220,34 +1222,9 @@
         ctx.stroke();
         ctx.fillText(pv.toLocaleString("zh-TW"), 4, y + 4);
       }
+      // 僅當日畫小時刻度文字；多日不畫 X 軸文字（避免重疊）
       ctx.textAlign = "center";
-      if (multi && wins.length) {
-        wins.forEach((w, wi) => {
-          const x0 = Math.round(mapOnWindows(w.t0, wins, padL, cw)) + 0.5;
-          ctx.strokeStyle = "#e5e7eb";
-          ctx.beginPath();
-          ctx.moveTo(x0, padT);
-          ctx.lineTo(x0, padT + ch);
-          ctx.stroke();
-          const md = (w.date || "").slice(4, 6) + "/" + (w.date || "").slice(6, 8);
-          const lab = (w.kind === "night" ? "夜" : "日") + (md ? " " + md : "");
-          ctx.fillStyle = "#6b7280";
-          ctx.fillText(lab, x0 + 18, h - 6);
-          // 視窗內整點（多日用 2 小時步）
-          const hour0 = new Date(w.t0);
-          hour0.setMinutes(0, 0, 0);
-          if (hour0.getTime() < w.t0) hour0.setHours(hour0.getHours() + 1);
-          for (let t = hour0.getTime(); t < w.t1; t += 2 * 3600000) {
-            const x = Math.round(mapOnWindows(t, wins, padL, cw)) + 0.5;
-            if (x <= x0 + 8) continue;
-            ctx.strokeStyle = "#f3f4f6";
-            ctx.beginPath();
-            ctx.moveTo(x, padT);
-            ctx.lineTo(x, padT + ch);
-            ctx.stroke();
-          }
-        });
-      } else {
+      if (!multi) {
         const hour0 = new Date(t0);
         hour0.setMinutes(0, 0, 0);
         if (hour0.getTime() < t0) hour0.setHours(hour0.getHours() + 1);
