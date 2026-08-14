@@ -1625,7 +1625,7 @@
       const cw = w - padL - padR;
       const ch = h - padT - padB - imbH - imbGap;
       const imbTop = padT + ch + imbGap;
-      // 多日仍用日／夜視窗映射 → 未走完的盤右側留白；不當日不塞滿
+      // 多日：有資料段落連續拼接 + 段間小縫；不按日曆開整天空窗
       const xAtI = (i, t) => multi && wins.length
         ? mapOnWindows(t, wins, padL, cw)
         : padL + ((t - t0) / Math.max(1, t1 - t0)) * cw;
