@@ -282,7 +282,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0096</div>
+    <div class="ver">v20260814-0097</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -456,17 +456,24 @@
       // 左右：預設外左／內右；點擊可切換，顏色跟著走
       function paintImbBar(leftVal, rightVal, leftIsOut) {
         const sum = (leftVal || 0) + (rightVal || 0);
+        // 真實占比（文字用）
         const pl = sum > 0 ? (leftVal / sum) * 100 : 50;
         const pr = 100 - pl;
+        // 橫條視覺：只看 30%~70% 區間，放大中段差距（50 仍居中）
+        const lo = 30, hi = 70;
+        let plVis = ((pl - lo) / (hi - lo)) * 100;
+        if (plVis < 0) plVis = 0;
+        if (plVis > 100) plVis = 100;
+        const prVis = 100 - plVis;
         const barL = $("barL"), barR = $("barR");
         const txtL = $("txtL"), txtR = $("txtR");
         const pctL = $("pctL"), pctR = $("pctR");
         if (barL) {
-          barL.style.width = pl + "%";
+          barL.style.width = plVis + "%";
           barL.className = leftIsOut ? "bar-out" : "bar-in";
         }
         if (barR) {
-          barR.style.width = pr + "%";
+          barR.style.width = prVis + "%";
           barR.className = leftIsOut ? "bar-in" : "bar-out";
         }
         if (txtL) txtL.textContent = (leftIsOut ? "外盤 " : "內盤 ") + fmt(leftVal);
