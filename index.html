@@ -279,7 +279,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0087</div>
+    <div class="ver">v20260814-0088</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -1354,15 +1354,7 @@
         const y = yAt(val);
         ctx.fillStyle = up ? "#d32f2f" : "#1b8a3e";
         ctx.beginPath();
-        ctx.moveTo(x, y);
-        if (up) {
-          ctx.lineTo(x - 4, y + 6);
-          ctx.lineTo(x + 4, y + 6);
-        } else {
-          ctx.lineTo(x - 4, y - 6);
-          ctx.lineTo(x + 4, y - 6);
-        }
-        ctx.closePath();
+        ctx.arc(x, y, 3, 0, Math.PI * 2);
         ctx.fill();
         ctx.font = "11px sans-serif";
         ctx.textAlign = "center";
