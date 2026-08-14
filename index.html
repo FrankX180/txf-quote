@@ -279,7 +279,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0089</div>
+    <div class="ver">v20260814-0090</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -1390,44 +1390,128 @@
         ctx.fillRect(mid - 6.5, yTop, 13, bh);
       }
 
-      // 副圖：每分鐘 1 根柱，寬 1；值＝該分鐘最後一次 5 秒 外盤-內盤
+      // 副圖：內外盤差面積圖（同主圖遮罩漸層；0 軸上紅下綠）
       if (showImb && !multi && imbH > 0) {
-        const ibs = imbSeries().filter((b) => b.t >= t0 && b.t <= t1);
+        const ibs = imbSeries().filter((b) => b.t >= t0 && b.t <= t1)
+          .slice().sort((a, b) => a.t - b.t);
         const zeroY = Math.round(imbTop + imbH / 2) + 0.5;
+        // 左緣垂直「內外盤」三字
+        ctx.save();
+        ctx.fillStyle = "#6b7280";
+        ctx.font = "10px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        const labX = 12;
+        const labY0 = imbTop + imbH / 2;
+        const gapY = 12;
+        ["內", "外", "盤"].forEach((ch, i) => {
+          ctx.fillText(ch, labX, labY0 + (i - 1) * gapY);
+        });
+        ctx.restore();
+
         ctx.strokeStyle = "#e5e7eb";
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(padL, zeroY);
         ctx.lineTo(w - padR, zeroY);
         ctx.stroke();
-        ctx.fillStyle = "#9ca3af";
-        ctx.font = "10px sans-serif";
-        ctx.textAlign = "left";
-        ctx.fillText("內外差", 4, imbTop + 10);
-        let maxAbs = 1;
-        ibs.forEach((b) => {
-          if (Math.abs(b.d) > maxAbs) maxAbs = Math.abs(b.d);
-        });
-        // 略放大頭，避免貼邊
-        maxAbs = Math.max(maxAbs * 1.05, 1);
-        const half = imbH / 2 - 2;
-        ibs.forEach((b) => {
-          const x = Math.round(xAtI(0, b.t + 30000));
-          const y = zeroY - (b.d / maxAbs) * half;
-          const top = Math.min(zeroY, y);
-          const bh = Math.max(1, Math.abs(y - zeroY));
-          ctx.fillStyle = b.d >= 0 ? "#d32f2f" : "#1b8a3e";
-          ctx.fillRect(x, top, 1, bh);
-        });
-        const last = ibs.length ? ibs[ibs.length - 1] : null;
-        if (last) {
-          ctx.fillStyle = last.d >= 0 ? "#d32f2f" : "#1b8a3e";
-          ctx.font = "10px sans-serif";
-          ctx.textAlign = "right";
-          const lab = (last.d > 0 ? "+" : "") + Math.round(last.d);
-          ctx.fillText(lab, w - padR, imbTop + 10);
+
+        if (ibs.length >= 1) {
+          let maxAbs = 1;
+          ibs.forEach((b) => {
+            if (Math.abs(b.d) > maxAbs) maxAbs = Math.abs(b.d);
+          });
+          maxAbs = Math.max(maxAbs * 1.05, 1);
+          const half = imbH / 2 - 2;
+          const segs = ibs.map((b) => ({
+            x: xAtI(0, b.t + 30000),
+            y: zeroY - (b.d / maxAbs) * half,
+            d: b.d,
+          }));
+
+          function imbArea(seg) {
+            ctx.beginPath();
+            ctx.moveTo(seg[0].x, zeroY);
+            seg.forEach((p) => ctx.lineTo(p.x, p.y));
+            ctx.lineTo(seg[seg.length - 1].x, zeroY);
+            ctx.closePath();
+          }
+
+          // 正：0 軸以上紅漸層；負：0 軸以下綠漸層（遮罩同主圖）
+          const gUp = ctx.createLinearGradient(0, imbTop, 0, zeroY);
+          gUp.addColorStop(0, "rgba(211,47,47,0.40)");
+          gUp.addColorStop(1, "rgba(211,47,47,0.02)");
+          const gDn = ctx.createLinearGradient(0, zeroY, 0, imbTop + imbH);
+          gDn.addColorStop(0, "rgba(27,138,62,0.02)");
+          gDn.addColorStop(1, "rgba(27,138,62,0.40)");
+
+          if (segs.length >= 2) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(padL, imbTop, cw, Math.max(0, zeroY - imbTop));
+            ctx.clip();
+            imbArea(segs);
+            ctx.fillStyle = gUp;
+            ctx.fill();
+            ctx.restore();
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(padL, zeroY, cw, Math.max(0, imbTop + imbH - zeroY));
+            ctx.clip();
+            imbArea(segs);
+            ctx.fillStyle = gDn;
+            ctx.fill();
+            ctx.restore();
+
+            // 折線：跨 0 切色
+            ctx.lineWidth = 1.25;
+            ctx.lineJoin = "round";
+            ctx.lineCap = "round";
+            for (let i = 1; i < segs.length; i++) {
+              const a = segs[i - 1], b = segs[i];
+              if (a.d * b.d < 0 && b.d !== a.d) {
+                const t = (0 - a.d) / (b.d - a.d);
+                const xm = a.x + (b.x - a.x) * t;
+                ctx.beginPath();
+                ctx.moveTo(a.x, a.y);
+                ctx.lineTo(xm, zeroY);
+                ctx.strokeStyle = a.d >= 0 ? "#d32f2f" : "#1b8a3e";
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(xm, zeroY);
+                ctx.lineTo(b.x, b.y);
+                ctx.strokeStyle = b.d >= 0 ? "#d32f2f" : "#1b8a3e";
+                ctx.stroke();
+              } else {
+                ctx.beginPath();
+                ctx.moveTo(a.x, a.y);
+                ctx.lineTo(b.x, b.y);
+                ctx.strokeStyle = (a.d >= 0 || b.d >= 0) ? "#d32f2f" : "#1b8a3e";
+                ctx.stroke();
+              }
+            }
+          } else if (segs.length === 1) {
+            // 僅 1 點：畫小圓
+            const p = segs[0];
+            ctx.fillStyle = p.d >= 0 ? "#d32f2f" : "#1b8a3e";
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          const last = ibs[ibs.length - 1];
+          if (last) {
+            ctx.fillStyle = last.d >= 0 ? "#d32f2f" : "#1b8a3e";
+            ctx.font = "10px sans-serif";
+            ctx.textAlign = "right";
+            ctx.textBaseline = "alphabetic";
+            const lab = (last.d > 0 ? "+" : "") + Math.round(last.d);
+            ctx.fillText(lab, w - padR, imbTop + 10);
+          }
         }
         ctx.textAlign = "left";
+        ctx.textBaseline = "alphabetic";
       }
       lineHit = { pts, xs: pts.map((p, i) => xAtI(i, p.time)) };
       if (holding && hoverIdx != null && pts[hoverIdx]) {
