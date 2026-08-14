@@ -198,20 +198,26 @@
     .szbar.r { background: var(--up); margin-left: auto; }
     .foot {
       display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      gap: 12px;
+      align-items: flex-end;
+      gap: 8px;
       padding: 0 2px 8px;
     }
     .ver {
-      text-align: left;
       font-size: 11px;
       color: #9ca3af;
       user-select: none;
     }
-    .ver#traffic {
+    .foot-left {
+      flex: 1;
+      text-align: left;
+    }
+    .foot-mid {
+      flex: 0 0 auto;
+      text-align: center;
+    }
+    .foot-right {
+      flex: 1;
       text-align: right;
-      margin-left: auto;
       white-space: pre-line;
       line-height: 1.45;
     }
@@ -297,8 +303,9 @@
       </div>
     </div>
     <div class="foot">
-      <div class="ver">1.04</div>
-      <div class="ver" id="traffic" title="在線＝90秒內心跳；今日／本月／累計：次＝瀏覽、人＝不同瀏覽器">在線 — · 今日 — 次 / — 人 · 峰值 —
+      <div class="ver foot-left">By浪大</div>
+      <div class="ver foot-mid">1.05</div>
+      <div class="ver foot-right" id="traffic" title="在線＝90秒內心跳；今日／本月／累計：次＝瀏覽、人＝不同瀏覽器">在線 — · 今日 — 次 / — 人 · 峰值 —
 本月 — 次 / — 人 · 累計 — 次 / — 人</div>
     </div>
   </div>
