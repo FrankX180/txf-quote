@@ -326,8 +326,24 @@ def main():
         else:
             day_q = strip_book(day_ohlc_from_kline(dict(q)))
     else:
-        day_q = dict(prev.get("day") or strip_book(q))
-        night_q = dict(prev.get("night") or strip_book(q))
+        # 休市（日收後～夜開前等）：仍用最新一口更新「應顯示盤」收／量／五檔
+        # 舊邏輯只抄 prev，會卡在中午舊價（例 12:24=45937）
+        h = now.hour * 100 + now.minute
+        if h >= 1458 or h < 845:
+            night_q = ohlc_from_kline(dict(q), "night")
+            copy_book(night_q, q)
+            if prev.get("day"):
+                day_q = day_ohlc_from_kline(dict(prev["day"]))
+                copy_book(day_q, prev["day"])
+            else:
+                day_q = strip_book(day_ohlc_from_kline(dict(q)))
+        else:
+            day_q = day_ohlc_from_kline(dict(q))
+            copy_book(day_q, q)
+            if prev.get("night"):
+                night_q = dict(prev["night"])
+            else:
+                night_q = strip_book(dict(q))
     snap = {
         "fetchedAt": now_iso,
         "source": "yahoo tw.stock StockServices.stockList WTX& WCDF& WCCF&",

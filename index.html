@@ -303,7 +303,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-mid">1.10</div>
+      <div class="ver foot-mid">1.11</div>
       <div class="ver foot-right">浪大</div>
     </div>
   </div>
@@ -2105,7 +2105,15 @@
       const cp = d.changePercent;
       if (typeof cp === "string" && cp.endsWith("%")) rate = parseFloat(cp);
       if (rate == null && diff != null && ref) rate = (diff / ref) * 100;
-      const now = new Date();
+      // 優先用奇摩成交時間（收盤後仍是 13:44:xx），勿用本機 wall clock
+      let now = new Date();
+      const rmt = d.regularMarketTime;
+      if (typeof rmt === "string" && rmt) {
+        const p = new Date(rmt);
+        if (!isNaN(p.getTime())) now = p;
+      } else if (typeof rmt === "number" && rmt > 1e9) {
+        now = new Date(rmt < 1e12 ? rmt * 1000 : rmt);
+      }
       const q = {
         SymbolID: d.symbol || "WTX&",
         DispCName: d.symbolName || "台指期近一",
@@ -2204,12 +2212,35 @@
     }
 
     async function pollLive() {
-      if (document.visibilityState !== "visible" || !marketOpen()) {
+      if (document.visibilityState !== "visible") {
         live = false;
         if ($("live")) {
           $("live").className = "live";
           $("live").textContent = "快照";
         }
+        return;
+      }
+      // 休市仍限速拉 Worker（GitHub snapshot 可能停很久；收盤價仍在奇摩）
+      if (!marketOpen()) {
+        live = false;
+        if ($("live")) {
+          $("live").className = "live";
+          $("live").textContent = "快照";
+        }
+        const mark = window.__txfClosedPollAt || 0;
+        if (Date.now() - mark < 30000) return;
+        window.__txfClosedPollAt = Date.now();
+        try {
+          const rows = await fetch(LIVE).then((r) => r.json());
+          if (Array.isArray(rows) && rows.length) {
+            applyLive(rows);
+            live = false;
+            if ($("live")) {
+              $("live").className = "live";
+              $("live").textContent = "快照";
+            }
+          }
+        } catch (e) {}
         return;
       }
       // 探測模式：每 3 分鐘才打一次（颱風／整日無量）
@@ -2239,10 +2270,13 @@
     }
 
     async function load() {
-      const [s, hn, hd] = await Promise.all([
+      const [s, hn, hd, liveRows] = await Promise.all([
         gh("data/snapshot.json").then((r) => r.json()),
         gh("data/history-night.json").then((r) => (r.ok ? r.json() : [])).catch(() => []),
         gh("data/history-day.json").then((r) => (r.ok ? r.json() : [])).catch(() => []),
+        fetch(LIVE)
+          .then((r) => r.json())
+          .catch(() => null),
       ]);
       if (!live) {
         snap = applyStoredBooks(s);
@@ -2260,6 +2294,17 @@
           night: snap.night || s.night,
         });
         if (fixed[other]) snap[other] = fixed[other];
+      }
+      // 開頁必打 Worker：snapshot 可能停在中午；收盤後也要最新收
+      if (Array.isArray(liveRows) && liveRows.length) {
+        applyLive(liveRows);
+        if (!marketOpen()) {
+          live = false;
+          if ($("live")) {
+            $("live").className = "live";
+            $("live").textContent = "快照";
+          }
+        }
       }
     }
 
