@@ -302,8 +302,8 @@
       </div>
     </div>
     <div class="foot">
-      <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線 — · 今日 — 次 / — 人 · 峰值 —</div>
-      <div class="ver foot-mid">1.08</div>
+      <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
+      <div class="ver foot-mid">1.09</div>
       <div class="ver foot-right">浪大</div>
     </div>
   </div>
@@ -2446,14 +2446,9 @@
         el.textContent = "累計 " + tPv + " 次 / " + tUv + " 人";
       } else {
         const on = s.online != null ? s.online : "—";
-        const pv = s.pv != null ? s.pv : "—";
         const uv = s.uv != null ? s.uv : "—";
         const peak = s.peak != null ? s.peak : "—";
-        el.textContent =
-          "在線 " + on +
-          " · 今日 " + pv +
-          " 次 / " + uv +
-          " 人 · 峰值 " + peak;
+        el.textContent = "在線" + on + "，今天" + uv + "/峰值" + peak;
       }
     }
     async function trafficPing(isHit) {
