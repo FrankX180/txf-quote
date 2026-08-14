@@ -303,7 +303,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-mid">1.09</div>
+      <div class="ver foot-mid">1.10</div>
       <div class="ver foot-right">浪大</div>
     </div>
   </div>
@@ -683,8 +683,9 @@
 
     function liveSess() {
       const hm = new Date().getHours() * 100 + new Date().getMinutes();
-      if (hm >= 845 && hm <= 1345) return "day";
-      return "night";
+      // 預設盤別：14:58 起才切夜盤；08:45 前仍夜盤；13:46–14:57 維持日盤（凍結）
+      if (hm >= 1458 || hm < 845) return "night";
+      return "day";
     }
     function marketOpen() {
       const d = new Date();
@@ -692,9 +693,9 @@
       const hm = d.getHours() * 100 + d.getMinutes();
       if (dow === 0) return false;
       if (dow === 6) return hm < 510;
-      // align when.py: day 08:45-13:45, night 14:55-05:10
+      // day 08:45-13:45；夜盤預設／輪詢自 14:58 起（與 liveSess 對齊）
       if (hm >= 845 && hm <= 1345) return true;
-      if (hm >= 1455 || hm < 510) return true;
+      if (hm >= 1458 || hm < 510) return true;
       return false;
     }
     function sessionOpenAt() {
@@ -705,13 +706,13 @@
         o.setHours(8, 45, 0, 0);
         return o.getTime();
       }
-      if (hm >= 1455) {
-        o.setHours(14, 55, 0, 0);
+      if (hm >= 1458) {
+        o.setHours(14, 58, 0, 0);
         return o.getTime();
       }
-      // after midnight night session opened previous calendar day 14:55
+      // after midnight night session opened previous calendar day 14:58
       o.setDate(o.getDate() - 1);
-      o.setHours(14, 55, 0, 0);
+      o.setHours(14, 58, 0, 0);
       return o.getTime();
     }
     function saveLastBook(sk, q0) {
