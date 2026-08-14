@@ -279,7 +279,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0084</div>
+    <div class="ver">v20260814-0085</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -717,7 +717,8 @@
 
     function lastDates(nDays) {
       const { m1, m5, m15 } = packBars();
-      const bars = m15.concat(m5, m1);
+      // 日期以 1 分 K 為準（最完整）
+      const bars = m1.concat(m5, m15);
       const dates = [];
       for (let i = bars.length - 1; i >= 0 && dates.length < nDays; i--) {
         const d = dateKey(bars[i].date);
@@ -726,6 +727,7 @@
       return dates;
     }
 
+    // 走勢：當日 1 分 K；多日 5 分（缺日改 15 分／1 分抽樣），避免太密
     function minuteSeries() {
       const { m1, m5, m15 } = packBars();
       const n = daySpan < 1 ? 1 : daySpan;
@@ -733,19 +735,49 @@
       const take = (rows) => rows.filter((b) => keep.indexOf(dateKey(b.date)) >= 0);
       if (n <= 1) {
         const a = take(m1);
-        return a.length >= 2 ? a : take(m5);
+        if (a.length >= 2) return a;
+        const b = take(m5);
+        if (b.length >= 2) return b;
+        return take(m15);
       }
-      const have5 = {};
-      m5.forEach((b) => { have5[dateKey(b.date)] = true; });
       const out = [];
       keep.slice().reverse().forEach((d) => {
-        const src = have5[d] ? m5 : m15;
-        src.forEach((b) => { if (dateKey(b.date) === d) out.push(b); });
+        let rows = m5.filter((b) => dateKey(b.date) === d);
+        if (rows.length < 2) rows = m15.filter((b) => dateKey(b.date) === d);
+        if (rows.length < 2) {
+          const ones = m1.filter((b) => dateKey(b.date) === d);
+          if (ones.length) {
+            const step = 5 * 60 * 1000;
+            const sampled = [];
+            let cur = null;
+            ones.forEach((b) => {
+              const slot = Math.floor(b.timestamp / step) * step;
+              if (!cur || cur.timestamp !== slot) {
+                if (cur) sampled.push(cur);
+                cur = {
+                  timestamp: slot,
+                  open: b.open, high: b.high, low: b.low, close: b.close,
+                  volume: b.volume || 0, date: b.date, session: b.session,
+                };
+              } else {
+                cur.high = Math.max(cur.high, b.high);
+                cur.low = Math.min(cur.low, b.low);
+                cur.close = b.close;
+                cur.volume += b.volume || 0;
+              }
+            });
+            if (cur) sampled.push(cur);
+            rows = sampled;
+          }
+        }
+        rows.forEach((b) => out.push(b));
       });
       if (out.length >= 2) return out;
-      const t15 = take(m15);
-      if (t15.length >= 2) return t15;
-      return take(m5).length ? take(m5) : take(m1);
+      const b5 = take(m5);
+      if (b5.length >= 2) return b5;
+      const b15 = take(m15);
+      if (b15.length >= 2) return b15;
+      return take(m1);
     }
 
     function mergeBarLists(a, b) {
@@ -886,20 +918,23 @@
     }
 
     function linePoints() {
-      const keep = lastDates(daySpan < 1 ? 1 : daySpan);
-      const mins = fillMinutes(minuteSeries().filter((b) => keep.indexOf(b.date) >= 0));
+      const span = daySpan < 1 ? 1 : daySpan;
+      const keep = lastDates(span);
+      // 主體＝minuteSeries（當日 1 分／多日 5 或 15 分）
+      const mins = fillMinutes(
+        minuteSeries().filter((b) => keep.indexOf(dateKey(b.date)) >= 0)
+      );
       let pts = mins.map((b) => ({
         px: b.close, vol: b.volume, time: b.timestamp,
         open: b.open, high: b.high, low: b.low, close: b.close,
       }));
-      // 當日：併入 5 秒 hist 尾段（開盤第一分鐘也能畫）
+      // 當日：只在最後一根之後併 5 秒 tick，補「這一分鐘內」的即時點
       if (daySpan < 2) {
         const sk = sessKey();
         const ticks = hist[sk] || [];
         if (ticks.length) {
           const lastT = pts.length ? pts[pts.length - 1].time : 0;
           ticks.forEach((h) => {
-            // 只併即時 5 秒點（有數字 ts）；GitHub hist 的 time 是字串 HHMMSS
             const ts = h.ts;
             if (typeof ts !== "number") return;
             if (ts <= lastT) return;
@@ -911,7 +946,6 @@
             });
           });
         }
-        // 僅 1 點：用開盤價當起點，避免「走勢累積中」
         if (pts.length === 1) {
           const qx = q();
           const so = sessOHLC();
