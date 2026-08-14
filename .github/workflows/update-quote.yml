@@ -4,7 +4,7 @@ on:
     - cron: "*/5 * * * *"
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, master]
     paths:
       - "scripts/fetch_quote.py"
       - "scripts/fetch_minute.py"

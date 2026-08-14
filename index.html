@@ -282,7 +282,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0094</div>
+    <div class="ver">v20260814-0095</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -845,11 +845,11 @@
       return 15 * 60000;
     }
     // 同盤內缺棒：用前收持平補點，避免走勢破圖；跨盤（午休／日夜）不補
-    function fillMinutes(bars) {
+    function fillMinutes(bars, stepOverride) {
       if (!bars || bars.length < 2) return bars || [];
-      let step = chartStepMs();
-      // 用前幾根實際間距校正（避免 1m 資料畫 5m 時過度補點）
-      if (bars.length >= 3) {
+      let step = stepOverride || chartStepMs();
+      // 有指定 step 就不改（例如 1 分 K 強制 60 秒）；否則用前幾根間距校正
+      if (!stepOverride && bars.length >= 3) {
         const ds = [];
         for (let i = 1; i < Math.min(bars.length, 12); i++) {
           const d = bars[i].timestamp - bars[i - 1].timestamp;
@@ -1228,7 +1228,11 @@
 
     function klineData() {
       const { m1, m5, m15 } = packBars();
-      if (kInt === "1") return m1.length ? m1 : m5;
+      if (kInt === "1") {
+        const raw = m1.length ? m1 : m5;
+        // 1 分 K 同盤缺棒補平（真源缺時前收持平），避免空白斷層
+        return fillMinutes(raw, 60000);
+      }
       if (kInt === "5") return m5.length ? m5 : resample(m1, 5 * 60 * 1000);
       if (kInt === "15") return m15.length ? m15 : resample(m5.length ? m5 : m1, 15 * 60 * 1000);
       if (kInt === "30") return resample(m15.length ? m15 : (m5.length ? m5 : m1), 30 * 60 * 1000);
@@ -2027,6 +2031,56 @@
       };
     });
 
+    // Worker/Yahoo chart 1m → night_1m / day_1m（與 fetch_minute 相同盤別規則）
+    function barsFromYahooChart(chart) {
+      const tsList = (chart && chart.timestamp) || [];
+      const q0 = (((chart && chart.indicators) || {}).quote || [{}])[0] || {};
+      const opens = q0.open || [];
+      const highs = q0.high || [];
+      const lows = q0.low || [];
+      const closes = q0.close || [];
+      const vols = q0.volume || [];
+      const night = [];
+      const day = [];
+      for (let i = 0; i < tsList.length; i++) {
+        const c = closes[i];
+        if (c == null) continue;
+        const tsSec = +tsList[i];
+        const ts = tsSec < 1e12 ? tsSec * 1000 : tsSec;
+        const d = new Date(ts);
+        const hm = d.getHours() * 100 + d.getMinutes();
+        let sess = null;
+        let sdate = null;
+        if (hm >= 1500 || hm < 500) {
+          const d0 = new Date(d.getTime());
+          if (hm < 500) d0.setDate(d0.getDate() - 1);
+          sdate =
+            d0.getFullYear() +
+            String(d0.getMonth() + 1).padStart(2, "0") +
+            String(d0.getDate()).padStart(2, "0");
+          sess = "night";
+        } else if (hm >= 845 && hm <= 1345) {
+          sdate =
+            d.getFullYear() +
+            String(d.getMonth() + 1).padStart(2, "0") +
+            String(d.getDate()).padStart(2, "0");
+          sess = "day";
+        } else continue;
+        const o = opens[i] != null ? +opens[i] : +c;
+        const h = highs[i] != null ? +highs[i] : +c;
+        const l = lows[i] != null ? +lows[i] : +c;
+        const v = vols[i] != null ? Math.round(+vols[i] * 1000) : 0;
+        const row = {
+          timestamp: ts,
+          open: o, high: h, low: l, close: +c,
+          volume: v, date: sdate, session: sess,
+        };
+        if (sess === "night") night.push(row);
+        else day.push(row);
+      }
+      return { night, day };
+    }
+
     async function loadKline() {
       try {
         const pack = await gh("data/kline-daily.json").then((r) => r.json());
@@ -2046,6 +2100,18 @@
           minutePack.night_1m = m.night;
           minutePack.day_1m = m.day || [];
         }
+        // GitHub 可能落後：每 5 分併 Worker 即時 1m（非每 5 秒）
+        try {
+          const y = await fetch(LIVE + "?kind=1m", { cache: "no-cache" }).then((r) =>
+            r.ok ? r.json() : null
+          );
+          if (y && y.timestamp && y.timestamp.length) {
+            const parts = barsFromYahooChart(y);
+            minutePack.night_1m = mergeBarLists(minutePack.night_1m, parts.night);
+            minutePack.day_1m = mergeBarLists(minutePack.day_1m, parts.day);
+            save1m();
+          }
+        } catch (e2) {}
       } catch (e) {}
       try {
         uncover = await gh("data/uncovered.json").then((r) => r.json());
