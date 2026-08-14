@@ -210,8 +210,7 @@
     .foot-left {
       flex: 1;
       text-align: left;
-      white-space: pre-line;
-      line-height: 1.45;
+      cursor: pointer;
     }
     .foot-mid {
       flex: 0 0 auto;
@@ -303,9 +302,8 @@
       </div>
     </div>
     <div class="foot">
-      <div class="ver foot-left" id="traffic" title="在線＝90秒內心跳；今日／本月／累計：次＝瀏覽、人＝不同瀏覽器">在線 — · 今日 — 次 / — 人 · 峰值 —
-本月 — 次 / — 人 · 累計 — 次 / — 人</div>
-      <div class="ver foot-mid">1.06</div>
+      <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線 — · 今日 — 次 / — 人 · 峰值 —</div>
+      <div class="ver foot-mid">1.07</div>
       <div class="ver foot-right">浪大</div>
     </div>
   </div>
@@ -343,6 +341,9 @@
     const IMB_KEY = "txfImbMin";
     const IMB_SIDE_KEY = "txfImbSide";
     const SID_KEY = "txfSid";
+    const TRAFFIC_MODES = ["online", "month", "total"];
+    let trafficMode = 0;
+    let lastTraffic = null;
     // true＝左外盤右內盤（預設）；false＝左內盤右外盤
     let imbOutLeft = true;
     try {
@@ -2424,26 +2425,30 @@
       }
     }
     function paintTraffic(st) {
+      if (st) lastTraffic = st;
       const el = $("traffic");
-      if (!el || !st) return;
-      const on = st.online != null ? st.online : "—";
-      const pv = st.pv != null ? st.pv : "—";
-      const uv = st.uv != null ? st.uv : "—";
-      const peak = st.peak != null ? st.peak : "—";
-      const mPv = st.monthPv != null ? st.monthPv : "—";
-      const mUv = st.monthUv != null ? st.monthUv : "—";
-      const tPv = st.totalPv != null ? st.totalPv : "—";
-      const tUv = st.totalUv != null ? st.totalUv : "—";
-      el.textContent =
-        "在線 " + on +
-        " · 今日 " + pv +
-        " 次 / " + uv +
-        " 人 · 峰值 " + peak +
-        "\n本月 " + mPv +
-        " 次 / " + mUv +
-        " 人 · 累計 " + tPv +
-        " 次 / " + tUv +
-        " 人";
+      const s = lastTraffic;
+      if (!el || !s) return;
+      const mode = TRAFFIC_MODES[trafficMode] || "online";
+      if (mode === "month") {
+        const mPv = s.monthPv != null ? s.monthPv : "—";
+        const mUv = s.monthUv != null ? s.monthUv : "—";
+        el.textContent = "本月 " + mPv + " 次 / " + mUv + " 人";
+      } else if (mode === "total") {
+        const tPv = s.totalPv != null ? s.totalPv : "—";
+        const tUv = s.totalUv != null ? s.totalUv : "—";
+        el.textContent = "累計 " + tPv + " 次 / " + tUv + " 人";
+      } else {
+        const on = s.online != null ? s.online : "—";
+        const pv = s.pv != null ? s.pv : "—";
+        const uv = s.uv != null ? s.uv : "—";
+        const peak = s.peak != null ? s.peak : "—";
+        el.textContent =
+          "在線 " + on +
+          " · 今日 " + pv +
+          " 次 / " + uv +
+          " 人 · 峰值 " + peak;
+      }
     }
     async function trafficPing(isHit) {
       try {
@@ -2460,6 +2465,13 @@
       } catch (e) {}
     }
     function startTraffic() {
+      const el = $("traffic");
+      if (el) {
+        el.addEventListener("click", () => {
+          trafficMode = (trafficMode + 1) % TRAFFIC_MODES.length;
+          paintTraffic(null);
+        });
+      }
       trafficPing(true);
       setInterval(() => {
         if (document.visibilityState === "visible") trafficPing(false);
