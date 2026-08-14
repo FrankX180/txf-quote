@@ -131,9 +131,10 @@ def slim(d):
         "DispCName": d.get("symbolName") or "台指期近一",
         "DispEName": "WTX&",
         "CLastPrice": fmt_num(last),
-        "COpenPrice": fmt_num(d.get("regularMarketOpen")),
-        "CHighPrice": fmt_num(d.get("regularMarketDayHigh")),
-        "CLowPrice": fmt_num(d.get("regularMarketDayLow")),
+        # 奇摩 regularMarketOpen/High/Low 是混盤，勿寫入；後續用 1 分 K 覆寫
+        "COpenPrice": "",
+        "CHighPrice": "",
+        "CLowPrice": "",
         "CRefPrice": fmt_num(ref),
         "CDiff": fmt_num(diff),
         "CDiffRate": "" if rate is None else ("%.2f" % rate),
@@ -239,15 +240,16 @@ def append_hist(path: Path, q, now_iso):
     path.write_text(json.dumps(hist, ensure_ascii=False), encoding="utf-8")
 
 
-def day_ohlc_from_kline(base_q):
-    """Overlay day OHLC from minute pack; keep caller's book fields."""
+def ohlc_from_kline(base_q, sess="day"):
+    """Overlay session OHLC from 1m (fallback 5m/15m); keep caller's book fields."""
     out = dict(base_q)
     kpath = DATA / "kline-minute.json"
     if not kpath.exists():
         return out
     try:
         pack = json.loads(kpath.read_text(encoding="utf-8"))
-        drows = pack.get("day_5m") or pack.get("day_15m") or pack.get("day_1m") or []
+        prefix = "day" if sess == "day" else "night"
+        drows = pack.get(prefix + "_1m") or pack.get(prefix + "_5m") or pack.get(prefix + "_15m") or []
         dates = []
         for b in reversed(drows):
             if b.get("date") and b["date"] not in dates:
@@ -256,11 +258,17 @@ def day_ohlc_from_kline(base_q):
         part = [b for b in drows if dates and b.get("date") == dates[0]]
         if not part:
             return out
+        highs = [b.get("high") for b in part if b.get("high") is not None]
+        lows = [b.get("low") for b in part if b.get("low") is not None]
+        if not highs or not lows:
+            return out
         out["COpenPrice"] = fmt_num(part[0].get("open"))
-        out["CHighPrice"] = fmt_num(max(b.get("high") for b in part))
-        out["CLowPrice"] = fmt_num(min(b.get("low") for b in part))
-        out["CLastPrice"] = fmt_num(part[-1].get("close"))
-        last = raw(out["CLastPrice"])
+        out["CHighPrice"] = fmt_num(max(highs))
+        out["CLowPrice"] = fmt_num(min(lows))
+        # 日盤收盤後才覆寫 last；盤中保留報價 last
+        if sess == "day" and base_q.get("CLastPrice") in (None, ""):
+            out["CLastPrice"] = fmt_num(part[-1].get("close"))
+        last = raw(out.get("CLastPrice"))
         ref = raw(out.get("CRefPrice"))
         if last is not None and ref is not None:
             out["CDiff"] = fmt_num(last - ref)
@@ -268,6 +276,10 @@ def day_ohlc_from_kline(base_q):
     except Exception:
         pass
     return out
+
+
+def day_ohlc_from_kline(base_q):
+    return ohlc_from_kline(base_q, "day")
 
 
 def main():
@@ -306,7 +318,8 @@ def main():
         copy_book(day_q, q)
         night_q = keep_other(prev.get("night"), q)
     elif cur == "night":
-        night_q = dict(q)
+        night_q = ohlc_from_kline(dict(q), "night")
+        copy_book(night_q, q)
         if prev.get("day"):
             day_q = day_ohlc_from_kline(dict(prev["day"]))
             copy_book(day_q, prev["day"])

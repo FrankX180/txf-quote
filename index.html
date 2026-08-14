@@ -282,7 +282,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0098</div>
+    <div class="ver">v20260814-0099</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -1125,7 +1125,7 @@
         if (pts.length === 1) {
           const qx = q();
           const so = sessOHLC();
-          const op = n(qx && qx.COpenPrice) || (so && so.o) || pts[0].px;
+          const op = (so && so.o) || pts[0].px;
           pts = [
             {
               px: op, vol: 0, time: pts[0].time - 60000,
@@ -1542,11 +1542,11 @@
 
       const qx = q();
       const soBar = sessOHLC();
-      const useQBar = session === liveSess() && daySpan < 2;
-      const o = useQBar ? n(qx && qx.COpenPrice) : (soBar ? soBar.o : n(qx && qx.COpenPrice));
-      const barH = useQBar ? n(qx && qx.CHighPrice) : (soBar ? soBar.h : n(qx && qx.CHighPrice));
-      const barL = useQBar ? n(qx && qx.CLowPrice) : (soBar ? soBar.l : n(qx && qx.CLowPrice));
-      const cl = useQBar ? n(qx && qx.CLastPrice) : (soBar ? soBar.c : n(qx && qx.CLastPrice));
+      // 右側當日 K 棒：只用 sessOHLC，禁 snap 奇摩混盤開高低
+      const o = soBar ? soBar.o : null;
+      const barH = soBar ? soBar.h : null;
+      const barL = soBar ? soBar.l : null;
+      const cl = soBar && soBar.c != null ? soBar.c : n(qx && qx.CLastPrice);
       if ([o, barH, barL, cl].every((v) => v != null)) {
         const mid = Math.round(w - 14) + 0.5;
         const yH = yAt(barH), yL = yAt(barL);
@@ -1791,9 +1791,10 @@
       if (!x) return null;
       const c = n(x.CLastPrice);
       if (c == null) return null;
-      const o = n(x.COpenPrice);
-      const h = n(x.CHighPrice);
-      const l = n(x.CLowPrice);
+      const so = sessOHLC();
+      const o = so ? so.o : null;
+      const h = so ? so.h : null;
+      const l = so ? so.l : null;
       const ds = String(x.CDate || "");
       const date = ds.length === 8 ? ds.slice(0, 4) + "-" + ds.slice(4, 6) + "-" + ds.slice(6, 8) : "";
       if (!date) return null;
