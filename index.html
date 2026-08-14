@@ -203,15 +203,7 @@
       color: #9ca3af;
       user-select: none;
     }
-    .traffic {
-      text-align: right;
-      padding: 0 2px 4px;
-      font-size: 11px;
-      color: #6b7280;
-      line-height: 1.5;
-      user-select: none;
-    }
-    .traffic b { color: #374151; font-weight: 700; }
+    .ver#traffic { padding-bottom: 2px; }
   </style>
 </head>
 <body>
@@ -293,8 +285,8 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="traffic" id="traffic" title="同時在線＝最近 90 秒有心跳；訪客＝今日不同瀏覽器識別">在線 — · 今日 — 次 / — 人 · 峰值 —</div>
-    <div class="ver">v20260814-0104</div>
+    <div class="ver" id="traffic" title="同時在線＝最近 90 秒有心跳；訪客＝今日不同瀏覽器識別">在線 — · 今日 — 次 / — 人 · 峰值 —</div>
+    <div class="ver">1.03</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -2417,11 +2409,11 @@
       const pv = st.pv != null ? st.pv : "—";
       const uv = st.uv != null ? st.uv : "—";
       const peak = st.peak != null ? st.peak : "—";
-      el.innerHTML =
-        "在線 <b>" + on +
-        "</b> · 今日 <b>" + pv +
-        "</b> 次 / <b>" + uv +
-        "</b> 人 · 峰值 <b>" + peak + "</b>";
+      el.textContent =
+        "在線 " + on +
+        " · 今日 " + pv +
+        " 次 / " + uv +
+        " 人 · 峰值 " + peak;
     }
     async function trafficPing(isHit) {
       try {
