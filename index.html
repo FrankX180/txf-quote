@@ -282,7 +282,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0097</div>
+    <div class="ver">v20260814-0098</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -326,6 +326,8 @@
     } catch (e) {}
     // 每分鐘 1 根：該分鐘內最後一次 5 秒的 外盤-內盤
     let imbBars = { night: [], day: [] };
+    // 當盤開高低追蹤（tick）；不依賴奇摩 stockList 的混盤 OHLC
+    let sessTrack = { day: null, night: null };
 
     const $ = (id) => document.getElementById(id);
     function dateKey(d) {
@@ -364,42 +366,91 @@
       return snap[session];
     }
 
-    // 當盤開高低：用當盤 1 分 K（奇摩 stockList 的 open/high/low 常是夜盤／混盤，不可直接當日盤）
+    // 當盤開高低：只用「目前盤別」最新交易日的 1 分 K + tick 追蹤
+    // 禁：走勢 multi-day minuteSeries、奇摩 regularMarketOpen/High/Low（夜／混盤）
+    function touchSessTrack(sk, px) {
+      if (px == null || !sk) return;
+      const d = tradingDayKey();
+      let t = sessTrack[sk];
+      if (!t || t.date !== d) {
+        sessTrack[sk] = { date: d, o: px, h: px, l: px };
+      } else {
+        if (px > t.h) t.h = px;
+        if (px < t.l) t.l = px;
+      }
+    }
     function sessOHLC() {
-      const rows = minuteSeries();
-      if (!rows.length) return null;
-      let o = rows[0].open, h = -Infinity, l = Infinity, c = rows[rows.length - 1].close;
-      rows.forEach((b) => {
-        const hh = b.high != null ? b.high : b.close;
-        const ll = b.low != null ? b.low : b.close;
-        if (hh > h) h = hh;
-        if (ll < l) l = ll;
-      });
-      if (!(h > -Infinity)) return null;
-      if (o == null) o = rows[0].close;
+      const sk = sessKey();
+      const all = minutePack[sk + "_1m"] || [];
+      let rows = [];
+      if (all.length) {
+        const dLast = dateKey(all[all.length - 1].date) || tradingDayKey();
+        rows = all.filter((b) => dateKey(b.date) === dLast);
+      }
+      let o = null, h = -Infinity, l = Infinity, c = null;
+      if (rows.length) {
+        o = rows[0].open != null ? rows[0].open : rows[0].close;
+        c = rows[rows.length - 1].close;
+        rows.forEach((b) => {
+          const hh = b.high != null ? b.high : b.close;
+          const ll = b.low != null ? b.low : b.close;
+          if (hh > h) h = hh;
+          if (ll < l) l = ll;
+        });
+      }
+      const tr = sessTrack[sk];
+      if (tr && tr.date === tradingDayKey()) {
+        if (o == null) o = tr.o;
+        if (tr.h > h) h = tr.h;
+        if (tr.l < l) l = tr.l;
+      }
+      const qx = snap && snap[sk];
+      const last = n(qx && qx.CLastPrice);
+      if (last != null) {
+        if (o == null) o = last;
+        if (last > h) h = last;
+        if (last < l) l = last;
+        c = last;
+      }
+      if (!(h > -Infinity) || o == null) return null;
+      if (c == null) c = o;
       return { o, h, l, c };
     }
     function patchQuoteOHLC(sk, lastPx) {
-      const key = (sk || liveSess()) + "_1m";
-      const all = minutePack[key] || [];
-      if (!all.length || !snap || !snap[sk]) return;
-      const dLast = dateKey(all[all.length - 1].date);
-      const rows = all.filter((b) => dateKey(b.date) === dLast);
-      if (!rows.length) return;
-      let o = rows[0].open, h = -Infinity, l = Infinity;
-      rows.forEach((b) => {
-        if (b.high != null && b.high > h) h = b.high;
-        if (b.low != null && b.low < l) l = b.low;
-      });
-      if (o == null) o = rows[0].close;
-      if (lastPx != null) {
-        if (lastPx > h) h = lastPx;
-        if (lastPx < l) l = lastPx;
-      }
-      if (!(h > -Infinity)) return;
-      snap[sk].COpenPrice = o;
-      snap[sk].CHighPrice = h;
-      snap[sk].CLowPrice = l;
+      const so = (() => {
+        // 用指定 sk 算（不跟 UI session 走）
+        const all = minutePack[(sk || "day") + "_1m"] || [];
+        let rows = [];
+        if (all.length) {
+          const dLast = dateKey(all[all.length - 1].date) || tradingDayKey();
+          rows = all.filter((b) => dateKey(b.date) === dLast);
+        }
+        let o = null, h = -Infinity, l = Infinity;
+        if (rows.length) {
+          o = rows[0].open != null ? rows[0].open : rows[0].close;
+          rows.forEach((b) => {
+            if (b.high != null && b.high > h) h = b.high;
+            if (b.low != null && b.low < l) l = b.low;
+          });
+        }
+        const tr = sessTrack[sk];
+        if (tr && tr.date === tradingDayKey()) {
+          if (o == null) o = tr.o;
+          if (tr.h > h) h = tr.h;
+          if (tr.l < l) l = tr.l;
+        }
+        if (lastPx != null) {
+          if (o == null) o = lastPx;
+          if (lastPx > h) h = lastPx;
+          if (lastPx < l) l = lastPx;
+        }
+        if (!(h > -Infinity) || o == null) return null;
+        return { o, h, l };
+      })();
+      if (!so || !snap || !snap[sk]) return;
+      snap[sk].COpenPrice = so.o;
+      snap[sk].CHighPrice = so.h;
+      snap[sk].CLowPrice = so.l;
     }
 
     function render() {
@@ -408,14 +459,14 @@
         $("stamp").textContent = "尚無資料";
         return;
       }
-      // 開/高/低優先當盤 1 分；昨收、最新、量仍用報價（奇摩 open/high/low 常是夜／混盤）
+      // 開/高/低：只用 sessOHLC（當盤 1 分+tick）；絕不 fallback 奇摩混盤（否則震幅會變夜盤 696 點）
       const so = sessOHLC();
       const lastLive = n(x.CLastPrice);
       const last = lastLive != null ? lastLive : so ? so.c : null;
       const ref = n(x.CRefPrice);
-      let openPx = so ? so.o : n(x.COpenPrice);
-      let highPx = so ? so.h : n(x.CHighPrice);
-      let lowPx = so ? so.l : n(x.CLowPrice);
+      let openPx = so ? so.o : null;
+      let highPx = so ? so.h : null;
+      let lowPx = so ? so.l : null;
       if (so && last != null) {
         highPx = highPx == null ? last : Math.max(highPx, last);
         lowPx = lowPx == null ? last : Math.min(lowPx, last);
@@ -1888,9 +1939,10 @@
         DispCName: d.symbolName || "台指期近一",
         DispEName: d.symbol || "WTX&",
         CLastPrice: last,
-        COpenPrice: raw(d.regularMarketOpen),
-        CHighPrice: raw(d.regularMarketDayHigh),
-        CLowPrice: raw(d.regularMarketDayLow),
+        // 奇摩 stockList 開高低是混盤，先留空，由 patchQuoteOHLC 寫入當盤真值
+        COpenPrice: "",
+        CHighPrice: "",
+        CLowPrice: "",
         CRefPrice: ref,
         CDiff: diff,
         CDiffRate: rate,
@@ -1922,7 +1974,7 @@
       });
       // 只覆寫當盤；另一盤 lastBook 不動
       snap[liveK] = q0;
-      saveLastBook(liveK, q0);
+      // lastBook 延後到 patchQuoteOHLC 之後再存
       const px = n(q0.CLastPrice);
       const vol = n(q0.CTotalVolume) || 0;
       const inn = n(q0.inMarket);
@@ -1971,8 +2023,11 @@
         } catch (e) {}
       }
       live = true;
+      touchSessTrack(liveK, px);
       bumpLiveBar();
       patchQuoteOHLC(liveK, px);
+      // 存 lastBook 時已是修正後開高低
+      saveLastBook(liveK, snap[liveK]);
       render();
     }
 
@@ -2158,6 +2213,11 @@
         uncover = await gh("data/uncovered.json").then((r) => r.json());
       } catch (e) {
         uncover = { inst: [], top: [], date: "" };
+      }
+      // 1 分到齊後寫回當盤開高低（震幅／摘要用）
+      if (snap) {
+        patchQuoteOHLC("day", n(snap.day && snap.day.CLastPrice));
+        patchQuoteOHLC("night", n(snap.night && snap.night.CLastPrice));
       }
       renderOi();
       drawMiniK();
