@@ -279,7 +279,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0088</div>
+    <div class="ver">v20260814-0089</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -1390,7 +1390,7 @@
         ctx.fillRect(mid - 6.5, yTop, 13, bh);
       }
 
-      // 副圖：每分鐘 1 根柱，寬 2；值＝該分鐘最後一次 5 秒 外盤-內盤
+      // 副圖：每分鐘 1 根柱，寬 1；值＝該分鐘最後一次 5 秒 外盤-內盤
       if (showImb && !multi && imbH > 0) {
         const ibs = imbSeries().filter((b) => b.t >= t0 && b.t <= t1);
         const zeroY = Math.round(imbTop + imbH / 2) + 0.5;
@@ -1417,7 +1417,7 @@
           const top = Math.min(zeroY, y);
           const bh = Math.max(1, Math.abs(y - zeroY));
           ctx.fillStyle = b.d >= 0 ? "#d32f2f" : "#1b8a3e";
-          ctx.fillRect(x - 1, top, 2, bh);
+          ctx.fillRect(x, top, 1, bh);
         });
         const last = ibs.length ? ibs[ibs.length - 1] : null;
         if (last) {
