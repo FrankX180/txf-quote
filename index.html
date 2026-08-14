@@ -303,7 +303,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-mid">1.17</div>
+      <div class="ver foot-mid">1.18</div>
       <div class="ver foot-right">浪大</div>
     </div>
   </div>
@@ -1071,7 +1071,8 @@
     function sessKindAt(ts) {
       const d = new Date(ts);
       const hm = d.getHours() * 60 + d.getMinutes();
-      if (hm >= 8 * 60 + 45 && hm < 13 * 60 + 45) return "day";
+      // 日盤含 13:45 收盤棒；13:46–14:59 休市不畫線
+      if (hm >= 8 * 60 + 45 && hm <= 13 * 60 + 45) return "day";
       if (hm >= 15 * 60 || hm < 5 * 60) return "night";
       return "closed";
     }
@@ -1175,14 +1176,17 @@
       return ymd(d);
     }
     function bumpLiveBar() {
+      const slot = Math.floor(Date.now() / 60000) * 60000;
+      // 休市（含 13:46–14:59）不寫 1 分，避免收盤價水平線拖到夜盤
+      if (sessKindAt(slot) === "closed") return;
       const liveK = liveSess();
+      if (sessKindAt(slot) !== liveK) return;
       const q0 = (snap && snap[liveK]) || q();
       const px = n(q0 && q0.CLastPrice);
       if (px == null) return;
       const tot = n(q0 && q0.CTotalVolume);
       const key = liveK + "_1m";
       let rows = minutePack[key] || [];
-      const slot = Math.floor(Date.now() / 60000) * 60000;
       const dstr = barDateAt(slot) || (q0 && q0.CDate) || "";
       if (!rows.length) {
         rows = [
@@ -1257,10 +1261,12 @@
       const mins = fillMinutes(
         minuteSeries().filter((b) => keep.indexOf(dateKey(b.date)) >= 0)
       );
-      let pts = mins.map((b) => ({
-        px: b.close, vol: b.volume, time: barWallTs(b),
-        open: b.open, high: b.high, low: b.low, close: b.close,
-      }));
+      let pts = mins
+        .map((b) => ({
+          px: b.close, vol: b.volume, time: barWallTs(b),
+          open: b.open, high: b.high, low: b.low, close: b.close,
+        }))
+        .filter((p) => p.time != null && sessKindAt(p.time) !== "closed");
       pts.sort((a, b) => a.time - b.time);
       // 尾端即時：當日併當盤 5 秒 tick；多日併日+夜 tick（盤後夜盤也要接到現在）
       {
@@ -1273,6 +1279,7 @@
           ticks.forEach((h) => {
             const ts = h.ts;
             if (typeof ts !== "number") return;
+            if (sessKindAt(ts) === "closed") return;
             if (ts <= lastT) return;
             const px = h.px;
             if (px == null) return;
@@ -1295,15 +1302,13 @@
           ];
         }
       }
-      // 每 5 秒報價寫進尾端。夜盤棒可能是「下一交易日」時間軸（周五夜→周一 ts）
-      // 禁用本機 now 去 max 壞掉奇摩 ts；尾端若已在未來交易日時軸，只改價
+      // 每 5 秒報價寫進尾端（僅開盤中；休市不延展，避免 14:xx 水平線）
       {
         const livePx = n(q() && q().CLastPrice);
-        if (livePx != null && pts.length) {
-          const now = Date.now();
+        const now = Date.now();
+        if (livePx != null && pts.length && sessKindAt(now) !== "closed") {
           const last = pts[pts.length - 1];
           const lastT = last.time || 0;
-          // 同一根（2 分內）或尾端已在「未來交易日」時軸上：只更新價
           if (Math.abs(now - lastT) < 120000 || lastT > now + 3600000) {
             last.px = livePx;
             last.close = livePx;
@@ -1318,6 +1323,7 @@
           }
         }
       }
+      pts = pts.filter((p) => p && p.time != null && sessKindAt(p.time) !== "closed");
       return pts;
     }
 
@@ -2270,11 +2276,14 @@
       const vol = n(q0.CTotalVolume) || 0;
       const inn = n(q0.inMarket);
       const outv = n(q0.outMarket);
-      recordImb(liveK, inn, outv, Date.now());
-      if (px) {
+      // 休市不寫內外盤／hist，避免 13:46–14:59 水平折線
+      const nowTs = Date.now();
+      const inSess = sessKindAt(nowTs) !== "closed";
+      if (inSess) recordImb(liveK, inn, outv, nowTs);
+      if (px && inSess) {
         const pt = {
           t: snap.fetchedAt,
-          ts: Date.now(),
+          ts: nowTs,
           time: q0.CTime,
           px,
           vol,
