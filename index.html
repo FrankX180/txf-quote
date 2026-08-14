@@ -303,7 +303,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-mid">1.12</div>
+      <div class="ver foot-mid">1.13</div>
       <div class="ver foot-right">浪大</div>
     </div>
   </div>
@@ -923,23 +923,26 @@
         return take(m15);
       }
       // 2 日 → 5m；3～5 日 → 15m
+      // 有 5m/15m 也要併更細棒：GitHub 5m 常停在日收 13:45，夜盤 live 在 1m
       const want5 = n === 2;
       const primary = want5 ? m5 : m15;
       const stepMs = want5 ? 5 * 60 * 1000 : 15 * 60 * 1000;
       const out = [];
       keep.slice().reverse().forEach((d) => {
         let rows = primary.filter((b) => dateKey(b.date) === d);
-        if (rows.length < 2) {
-          // 缺檔：用更細棒重採成目標粒度
-          const fine = (want5 ? m1 : m5.concat(m1)).filter((b) => dateKey(b.date) === d);
-          if (fine.length) rows = resampleBars(fine, stepMs);
+        const fine = (want5 ? m1 : m5.concat(m1)).filter((b) => dateKey(b.date) === d);
+        if (fine.length) {
+          rows = mergeBarLists(rows, resampleBars(fine, stepMs));
         }
         if (rows.length < 2 && want5) {
           rows = m15.filter((b) => dateKey(b.date) === d);
         }
         rows.forEach((b) => out.push(b));
       });
-      if (out.length >= 2) return out;
+      if (out.length >= 2) {
+        out.sort((a, b) => a.timestamp - b.timestamp);
+        return out;
+      }
       const fb = take(primary);
       if (fb.length >= 2) return fb;
       if (want5) {
@@ -1049,6 +1052,21 @@
       } catch (e) {}
     }
 
+    function barDateAt(ts) {
+      const d = new Date(ts);
+      const hm = d.getHours() * 100 + d.getMinutes();
+      const ymd = (x) =>
+        x.getFullYear() +
+        String(x.getMonth() + 1).padStart(2, "0") +
+        String(x.getDate()).padStart(2, "0");
+      // 與 fetch_minute.classify：夜盤 date＝開盤日曆日（凌晨歸前一日）
+      if (hm >= 1500 || hm < 500) {
+        const d0 = new Date(d.getTime());
+        if (hm < 500) d0.setDate(d0.getDate() - 1);
+        return ymd(d0);
+      }
+      return ymd(d);
+    }
     function bumpLiveBar() {
       const liveK = liveSess();
       const q0 = (snap && snap[liveK]) || q();
@@ -1058,16 +1076,7 @@
       const key = liveK + "_1m";
       let rows = minutePack[key] || [];
       const slot = Math.floor(Date.now() / 60000) * 60000;
-      const dstr =
-        (q0 && q0.CDate) ||
-        (() => {
-          const d = new Date();
-          return (
-            d.getFullYear() +
-            String(d.getMonth() + 1).padStart(2, "0") +
-            String(d.getDate()).padStart(2, "0")
-          );
-        })();
+      const dstr = barDateAt(slot) || (q0 && q0.CDate) || "";
       if (!rows.length) {
         rows = [
           {
@@ -1094,6 +1103,7 @@
         last.high = Math.max(last.high, px);
         last.low = Math.min(last.low, px);
         if (dVol) last.volume = (last.volume || 0) + dVol;
+        if (!last.date) last.date = dstr;
       } else if (slot > lastSlot) {
         // 同盤缺分鐘：先用前收補平中間棒，再寫當下分鐘（避免 1 分 K 斷洞破圖）
         const sk0 = sessKindAt(lastSlot);
@@ -1116,6 +1126,7 @@
           }
         }
         const openPx = sameSess ? last.close : px;
+        // 跨盤（日→夜）必須用 slot 的交易日 date，禁沿用昨夜 date（否則 2 日走勢漏夜盤）
         rows.push({
           timestamp: slot,
           open: openPx,
@@ -1123,7 +1134,7 @@
           low: Math.min(openPx, px),
           close: px,
           volume: dVol,
-          date: last.date || dstr,
+          date: sameSess ? (last.date || dstr) : dstr,
           session: liveK,
         });
         minutePack[key] = rows;
@@ -1143,10 +1154,12 @@
         px: b.close, vol: b.volume, time: b.timestamp,
         open: b.open, high: b.high, low: b.low, close: b.close,
       }));
-      // 當日：只在最後一根之後併 5 秒 tick，補「這一分鐘內」的即時點
-      if (daySpan < 2) {
-        const sk = sessKey();
-        const ticks = hist[sk] || [];
+      // 尾端即時：當日併當盤 5 秒 tick；多日併日+夜 tick（盤後夜盤也要接到現在）
+      {
+        const ticks =
+          daySpan < 2
+            ? hist[sessKey()] || []
+            : (hist.day || []).concat(hist.night || []);
         if (ticks.length) {
           const lastT = pts.length ? pts[pts.length - 1].time : 0;
           ticks.forEach((h) => {
@@ -1161,7 +1174,7 @@
             });
           });
         }
-        if (pts.length === 1) {
+        if (daySpan < 2 && pts.length === 1) {
           const qx = q();
           const so = sessOHLC();
           const op = (so && so.o) || pts[0].px;
@@ -1174,8 +1187,8 @@
           ];
         }
       }
-      // 每 5 秒報價：強制把最新價寫進尾端，確保走勢圖跟 LIVE 同步重畫
-      if (daySpan < 2) {
+      // 每 5 秒報價：強制把最新價寫進尾端（含 2～5 日走勢的夜盤）
+      {
         const livePx = n(q() && q().CLastPrice);
         if (livePx != null && pts.length) {
           const now = Date.now();
