@@ -285,7 +285,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0101</div>
+    <div class="ver">v20260814-0102</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -1653,8 +1653,13 @@
         }
       });
 
-      // 當日走勢：36 期移動平均（對應圖上每一根點）
-      if (!multi && pts.length >= 2) {
+      // 當日走勢 36MA：暖機取「圖上第一點之前」的 1 分收（跨日／跨盤接前一 Session）
+      if (!multi && pts.length >= 1) {
+        const t0pt = pts[0].time;
+        const seedBars = joinBars(minutePack.night_1m, minutePack.day_1m)
+          .filter((b) => b && b.timestamp < t0pt && b.close != null)
+          .sort((a, b) => a.timestamp - b.timestamp);
+        const seed = seedBars.map((b) => b.close).slice(-35);
         ctx.save();
         ctx.strokeStyle = "#2563eb";
         ctx.lineWidth = 1.25;
@@ -1662,19 +1667,20 @@
         ctx.beginPath();
         let started = false;
         for (let i = 0; i < pts.length; i++) {
-          let s = 0, c = 0;
-          const from = Math.max(0, i - 35);
-          for (let j = from; j <= i; j++) {
-            s += pts[j].px;
-            c++;
-          }
-          const ma = s / c;
+          const win = seed.concat(pts.slice(0, i + 1).map((p) => p.px));
+          const take = win.slice(-36);
+          if (!take.length) continue;
+          let s = 0;
+          for (let j = 0; j < take.length; j++) s += take[j];
+          const ma = s / take.length;
           const x = xAtI(i, pts[i].time);
           const y = yAt(ma);
-          if (!started) { ctx.moveTo(x, y); started = true; }
-          else ctx.lineTo(x, y);
+          if (!started) {
+            ctx.moveTo(x, y);
+            started = true;
+          } else ctx.lineTo(x, y);
         }
-        ctx.stroke();
+        if (started) ctx.stroke();
         ctx.restore();
       }
 
