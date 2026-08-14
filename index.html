@@ -279,7 +279,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0081</div>
+    <div class="ver">v20260814-0082</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -644,6 +644,43 @@
     }
     function imbSeries() {
       return imbBars[sessKey()] || [];
+    }
+    function mergeImbSide(localArr, cloudArr) {
+      const map = {};
+      (localArr || []).forEach((b) => {
+        if (b && b.t != null) map[b.t] = b;
+      });
+      (cloudArr || []).forEach((b) => {
+        if (!b || b.t == null) return;
+        const cur = map[b.t];
+        if (!cur || (b.ts || 0) >= (cur.ts || 0)) map[b.t] = b;
+      });
+      return Object.keys(map)
+        .map(Number)
+        .sort((a, b) => a - b)
+        .map((k) => map[k]);
+    }
+    async function loadImbCloud() {
+      try {
+        const dk = tradingDayKey();
+        const pack = await fetch(LIVE + "?kind=imb&day=" + dk, { cache: "no-cache" }).then((r) =>
+          r.ok ? r.json() : null
+        );
+        if (!pack) {
+          // 冷備：GitHub 當日檔
+          const ghPack = await gh("data/imb-" + dk + ".json")
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null);
+          if (!ghPack) return;
+          imbBars.day = mergeImbSide(imbBars.day, ghPack.day);
+          imbBars.night = mergeImbSide(imbBars.night, ghPack.night);
+          saveImbBars();
+          return;
+        }
+        imbBars.day = mergeImbSide(imbBars.day, pack.day);
+        imbBars.night = mergeImbSide(imbBars.night, pack.night);
+        saveImbBars();
+      } catch (e) {}
     }
     function gh(path) {
       return fetch(path, { cache: "no-cache" });
@@ -1610,6 +1647,14 @@
       try {
         const rows = await fetch(LIVE).then((r) => r.json());
         if (Array.isArray(rows) && rows.length) applyLive(rows);
+        // 約每 30 秒從雲端補齊完整當日分鐘柱（多人共用同一 R2）
+        const mark = window.__txfImbCloudAt || 0;
+        if (Date.now() - mark > 30000) {
+          window.__txfImbCloudAt = Date.now();
+          loadImbCloud().then(() => {
+            if (chartMode === "line") draw();
+          });
+        }
       } catch (e) {
         live = false;
         if ($("live")) {
@@ -1745,6 +1790,9 @@
     loadLocal1m();
     loadImbBars();
     load();
+    loadImbCloud().then(() => {
+      if (chartMode === "line") draw();
+    });
     loadKline();
     startPoll();
     klineTimer = setInterval(loadKline, 300000);

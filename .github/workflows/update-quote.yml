@@ -11,6 +11,7 @@ on:
       - "scripts/fetch_uncovered.py"
       - "scripts/fetch_kline.py"
       - "scripts/when.py"
+      - "scripts/fetch_imb.py"
       - ".github/workflows/update-quote.yml"
 permissions:
   contents: write
@@ -33,11 +34,14 @@ jobs:
       - name: Fetch MoneyDJ FITX daily/week/month K
         run: python scripts/fetch_kline.py
         continue-on-error: true
+      - name: Fetch cloud imb (R2 via Worker)
+        run: python scripts/fetch_imb.py
+        continue-on-error: true
       - name: Commit snapshot
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/snapshot.json data/history-night.json data/history-day.json data/kline-minute.json data/uncovered.json data/kline-daily.json
+          git add data/snapshot.json data/history-night.json data/history-day.json data/kline-minute.json data/uncovered.json data/kline-daily.json data/imb-*.json data/imb-latest.json
           git diff --cached --quiet && echo "no change" && exit 0
           git commit -m "行情快照 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           git push
