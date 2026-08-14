@@ -196,14 +196,23 @@
     .live.on { color: #16a34a; }
     .szbar { display: block; height: 14px; background: var(--dn); max-width: 100%; }
     .szbar.r { background: var(--up); margin-left: auto; }
-    .ver {
-      text-align: right;
+    .foot {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
       padding: 0 2px 8px;
+    }
+    .ver {
+      text-align: left;
       font-size: 11px;
       color: #9ca3af;
       user-select: none;
     }
-    .ver#traffic { padding-bottom: 2px; }
+    .ver#traffic {
+      text-align: right;
+      margin-left: auto;
+    }
   </style>
 </head>
 <body>
@@ -285,8 +294,10 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver" id="traffic" title="同時在線＝最近 90 秒有心跳；訪客＝今日不同瀏覽器識別">在線 — · 今日 — 次 / — 人 · 峰值 —</div>
-    <div class="ver">1.03</div>
+    <div class="foot">
+      <div class="ver">1.03</div>
+      <div class="ver" id="traffic" title="同時在線＝最近 90 秒有心跳；訪客＝今日不同瀏覽器識別">在線 — · 今日 — 次 / — 人 · 峰值 —</div>
+    </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
