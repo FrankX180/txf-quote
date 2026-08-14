@@ -154,6 +154,64 @@ def slim(d):
     return q
 
 
+def book_fields(q):
+    if not q:
+        return {}
+    out = {}
+    for i in range(1, 6):
+        for k in ("CBidPrice", "CBidSize", "CAskPrice", "CAskSize"):
+            key = k + str(i)
+            if key in q:
+                out[key] = q[key]
+    for k in ("inMarket", "outMarket"):
+        if k in q:
+            out[k] = q[k]
+    return out
+
+
+def copy_book(dst, src):
+    if not dst or not src:
+        return dst
+    for k, v in book_fields(src).items():
+        dst[k] = v
+    return dst
+
+
+def strip_book(q):
+    if not q:
+        return q
+    o = dict(q)
+    for i in range(1, 6):
+        for k in ("CBidPrice", "CBidSize", "CAskPrice", "CAskSize"):
+            o.pop(k + str(i), None)
+    return o
+
+
+def sess_now(dt=None):
+    d = dt or datetime.now(TZ)
+    h = d.hour * 100 + d.minute
+    wd = d.weekday()
+    if wd == 6:
+        return None
+    if wd == 5 and h >= 510:
+        return None
+    if 845 <= h <= 1345:
+        return "day"
+    if h >= 1455 or h < 510:
+        return "night"
+    return None
+
+
+def load_prev_snap():
+    p = DATA / "snapshot.json"
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
 def append_hist(path: Path, q, now_iso):
     hist = []
     if path.exists():
@@ -181,6 +239,37 @@ def append_hist(path: Path, q, now_iso):
     path.write_text(json.dumps(hist, ensure_ascii=False), encoding="utf-8")
 
 
+def day_ohlc_from_kline(base_q):
+    """Overlay day OHLC from minute pack; keep caller's book fields."""
+    out = dict(base_q)
+    kpath = DATA / "kline-minute.json"
+    if not kpath.exists():
+        return out
+    try:
+        pack = json.loads(kpath.read_text(encoding="utf-8"))
+        drows = pack.get("day_5m") or pack.get("day_15m") or pack.get("day_1m") or []
+        dates = []
+        for b in reversed(drows):
+            if b.get("date") and b["date"] not in dates:
+                dates.append(b["date"])
+                break
+        part = [b for b in drows if dates and b.get("date") == dates[0]]
+        if not part:
+            return out
+        out["COpenPrice"] = fmt_num(part[0].get("open"))
+        out["CHighPrice"] = fmt_num(max(b.get("high") for b in part))
+        out["CLowPrice"] = fmt_num(min(b.get("low") for b in part))
+        out["CLastPrice"] = fmt_num(part[-1].get("close"))
+        last = raw(out["CLastPrice"])
+        ref = raw(out.get("CRefPrice"))
+        if last is not None and ref is not None:
+            out["CDiff"] = fmt_num(last - ref)
+            out["CDiffRate"] = "%.2f" % ((last - ref) / ref * 100) if ref else ""
+    except Exception:
+        pass
+    return out
+
+
 def main():
     from when import want_yahoo_quote
     if not want_yahoo_quote():
@@ -197,51 +286,63 @@ def main():
         slim_mini(pick(rows, "WCCF&")),
     ]
     related = [x for x in related if x]
-    day_q = dict(q)
-    kpath = DATA / "kline-minute.json"
-    if kpath.exists():
-        pack = json.loads(kpath.read_text(encoding="utf-8"))
-        drows = pack.get("day_5m") or pack.get("day_15m") or pack.get("day_1m") or []
-        dates = []
-        for b in reversed(drows):
-            if b.get("date") and b["date"] not in dates:
-                dates.append(b["date"])
-                break
-        part = [b for b in drows if dates and b.get("date") == dates[0]]
-        if part:
-            day_q = dict(q)
-            day_q["COpenPrice"] = fmt_num(part[0].get("open"))
-            day_q["CHighPrice"] = fmt_num(max(b.get("high") for b in part))
-            day_q["CLowPrice"] = fmt_num(min(b.get("low") for b in part))
-            day_q["CLastPrice"] = fmt_num(part[-1].get("close"))
-            last = raw(day_q["CLastPrice"])
-            ref = raw(day_q.get("CRefPrice"))
-            if last is not None and ref is not None:
-                day_q["CDiff"] = fmt_num(last - ref)
-                day_q["CDiffRate"] = "%.2f" % ((last - ref) / ref * 100) if ref else ""
+    prev = load_prev_snap()
+    cur = sess_now(now)
+    # 日／夜五檔分開：只寫當盤 orderbook；另一盤沿用上一版（且拒絕與當盤同價的污染本）
+    def keep_other(prev_q, live_q):
+        if not prev_q:
+            return strip_book(dict(live_q))
+        o = dict(prev_q)
+        if (
+            o.get("CBidPrice1")
+            and o.get("CBidPrice1") == live_q.get("CBidPrice1")
+            and o.get("CAskPrice1") == live_q.get("CAskPrice1")
+        ):
+            return strip_book(o)
+        return o
+
+    if cur == "day":
+        day_q = day_ohlc_from_kline(dict(q))
+        copy_book(day_q, q)
+        night_q = keep_other(prev.get("night"), q)
+    elif cur == "night":
+        night_q = dict(q)
+        if prev.get("day"):
+            day_q = day_ohlc_from_kline(dict(prev["day"]))
+            copy_book(day_q, prev["day"])
+        else:
+            day_q = strip_book(day_ohlc_from_kline(dict(q)))
+    else:
+        day_q = dict(prev.get("day") or strip_book(q))
+        night_q = dict(prev.get("night") or strip_book(q))
     snap = {
         "fetchedAt": now_iso,
         "source": "yahoo tw.stock StockServices.stockList WTX& WCDF& WCCF&",
-        "night": q,
+        "session": cur or "",
+        "night": night_q,
         "day": day_q,
         "related": related,
     }
-    # 同一口近月：兩個分頁都吃這份五檔；盤別只影響走勢分鐘線
     (DATA / "snapshot.json").write_text(
         json.dumps(snap, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    append_hist(DATA / "history-night.json", q, now_iso)
-    append_hist(DATA / "history-day.json", q, now_iso)
+    if cur == "night":
+        append_hist(DATA / "history-night.json", night_q, now_iso)
+    elif cur == "day":
+        append_hist(DATA / "history-day.json", day_q, now_iso)
+    active = night_q if cur == "night" else day_q
     print(
         "OK",
         now_iso,
+        "sess",
+        cur or "-",
         q.get("CLastPrice"),
         "bid1",
-        q.get("CBidPrice1"),
+        active.get("CBidPrice1"),
         "ask1",
-        q.get("CAskPrice1"),
+        active.get("CAskPrice1"),
         "levels",
-        sum(1 for i in range(1, 6) if q.get("CBidPrice" + str(i))),
+        sum(1 for i in range(1, 6) if active.get("CBidPrice" + str(i))),
         q.get("marketStatus"),
         "related",
         len(related),

@@ -279,7 +279,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0074</div>
+    <div class="ver">v20260814-0080</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -306,7 +306,12 @@
     let lastTot = null;
     let liveTimer = null;
     let klineTimer = null;
+    let staleHits = 0;
+    let probeOnly = false;
+    let lastSig = "";
     const LIVE = "https://wtx.19850926.xyz/";
+    const LB_KEY = "txfLastBook";
+    const STALE_KEY = "txfStalePause";
 
     const $ = (id) => document.getElementById(id);
 
@@ -513,7 +518,8 @@
 
     function liveSess() {
       const hm = new Date().getHours() * 100 + new Date().getMinutes();
-      return hm >= 845 && hm < 1500 ? "day" : "night";
+      if (hm >= 845 && hm <= 1345) return "day";
+      return "night";
     }
     function marketOpen() {
       const d = new Date();
@@ -521,9 +527,72 @@
       const hm = d.getHours() * 100 + d.getMinutes();
       if (dow === 0) return false;
       if (dow === 6) return hm < 510;
+      // align when.py: day 08:45-13:45, night 14:55-05:10
       if (hm >= 845 && hm <= 1345) return true;
-      if (hm >= 1500 || hm < 510) return true;
+      if (hm >= 1455 || hm < 510) return true;
       return false;
+    }
+    function sessionOpenAt() {
+      const d = new Date();
+      const hm = d.getHours() * 100 + d.getMinutes();
+      const o = new Date(d);
+      if (hm >= 845 && hm <= 1345) {
+        o.setHours(8, 45, 0, 0);
+        return o.getTime();
+      }
+      if (hm >= 1455) {
+        o.setHours(14, 55, 0, 0);
+        return o.getTime();
+      }
+      // after midnight night session opened previous calendar day 14:55
+      o.setDate(o.getDate() - 1);
+      o.setHours(14, 55, 0, 0);
+      return o.getTime();
+    }
+    function saveLastBook(sk, q0) {
+      if (!q0 || !sk) return;
+      try {
+        const all = JSON.parse(localStorage.getItem(LB_KEY) || "{}");
+        all[sk] = Object.assign({}, q0, { _savedAt: Date.now() });
+        localStorage.setItem(LB_KEY, JSON.stringify(all));
+      } catch (e) {}
+    }
+    function loadLastBooks() {
+      try {
+        return JSON.parse(localStorage.getItem(LB_KEY) || "{}");
+      } catch (e) {
+        return {};
+      }
+    }
+    function mergeBookOnto(dst, src) {
+      if (!dst || !src) return;
+      for (let i = 1; i <= 5; i++) {
+        ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach((k) => {
+          const key = k + i;
+          if (src[key] != null && src[key] !== "") dst[key] = src[key];
+        });
+      }
+      if (src.inMarket != null) dst.inMarket = src.inMarket;
+      if (src.outMarket != null) dst.outMarket = src.outMarket;
+    }
+    function applyStoredBooks(s) {
+      if (!s) return s;
+      const lb = loadLastBooks();
+      ["day", "night"].forEach((sk) => {
+        if (!s[sk]) s[sk] = {};
+        const local = lb[sk];
+        if (!local) return;
+        const ghBid = s[sk].CBidPrice1;
+        const other = sk === "day" ? s.night : s.day;
+        const polluted =
+          other &&
+          ghBid &&
+          other.CBidPrice1 === ghBid &&
+          other.CAskPrice1 === s[sk].CAskPrice1;
+        const missing = !ghBid;
+        if (polluted || missing) mergeBookOnto(s[sk], local);
+      });
+      return s;
     }
     function gh(path) {
       return fetch(path, { cache: "no-cache" });
@@ -656,9 +725,36 @@
       if (px == null) return;
       const tot = n(q0 && q0.CTotalVolume);
       const key = liveK + "_1m";
-      const rows = minutePack[key] || [];
-      if (!rows.length) return;
+      let rows = minutePack[key] || [];
       const slot = Math.floor(Date.now() / 60000) * 60000;
+      const dstr =
+        (q0 && q0.CDate) ||
+        (() => {
+          const d = new Date();
+          return (
+            d.getFullYear() +
+            String(d.getMonth() + 1).padStart(2, "0") +
+            String(d.getDate()).padStart(2, "0")
+          );
+        })();
+      if (!rows.length) {
+        rows = [
+          {
+            timestamp: slot,
+            open: px,
+            high: px,
+            low: px,
+            close: px,
+            volume: 0,
+            date: dstr,
+            session: liveK,
+          },
+        ];
+        minutePack[key] = rows;
+        if (tot != null) lastTot = tot;
+        save1m();
+        return;
+      }
       const last = rows[rows.length - 1];
       const lastSlot = Math.floor(last.timestamp / 60000) * 60000;
       const dVol = tot != null && lastTot != null && tot >= lastTot ? tot - lastTot : 0;
@@ -669,9 +765,27 @@
         if (dVol) last.volume = (last.volume || 0) + dVol;
       } else if (slot > lastSlot && slot - lastSlot <= 150000) {
         rows.push({
-          timestamp: slot, open: last.close, high: Math.max(last.close, px),
-          low: Math.min(last.close, px), close: px, volume: dVol,
-          date: last.date, session: liveK,
+          timestamp: slot,
+          open: last.close,
+          high: Math.max(last.close, px),
+          low: Math.min(last.close, px),
+          close: px,
+          volume: dVol,
+          date: last.date || dstr,
+          session: liveK,
+        });
+        minutePack[key] = rows;
+      } else if (slot > lastSlot) {
+        // gap too large: still seed current minute so line continues
+        rows.push({
+          timestamp: slot,
+          open: px,
+          high: px,
+          low: px,
+          close: px,
+          volume: 0,
+          date: dstr,
+          session: liveK,
         });
         minutePack[key] = rows;
       }
@@ -682,10 +796,44 @@
     function linePoints() {
       const keep = lastDates(daySpan < 1 ? 1 : daySpan);
       const mins = fillMinutes(minuteSeries().filter((b) => keep.indexOf(b.date) >= 0));
-      return mins.map((b) => ({
+      let pts = mins.map((b) => ({
         px: b.close, vol: b.volume, time: b.timestamp,
         open: b.open, high: b.high, low: b.low, close: b.close,
       }));
+      // 當日：併入 5 秒 hist 尾段（開盤第一分鐘也能畫）
+      if (daySpan < 2) {
+        const sk = sessKey();
+        const ticks = hist[sk] || [];
+        if (ticks.length) {
+          const lastT = pts.length ? pts[pts.length - 1].time : 0;
+          ticks.forEach((h) => {
+            // 只併即時 5 秒點（有數字 ts）；GitHub hist 的 time 是字串 HHMMSS
+            const ts = h.ts;
+            if (typeof ts !== "number") return;
+            if (ts <= lastT) return;
+            const px = h.px;
+            if (px == null) return;
+            pts.push({
+              px, vol: h.vol || 0, time: ts,
+              open: px, high: px, low: px, close: px,
+            });
+          });
+        }
+        // 僅 1 點：用開盤價當起點，避免「走勢累積中」
+        if (pts.length === 1) {
+          const qx = q();
+          const so = sessOHLC();
+          const op = n(qx && qx.COpenPrice) || (so && so.o) || pts[0].px;
+          pts = [
+            {
+              px: op, vol: 0, time: pts[0].time - 60000,
+              open: op, high: op, low: op, close: op,
+            },
+            pts[0],
+          ];
+        }
+      }
+      return pts;
     }
 
     function sessRange(pts) {
@@ -1294,16 +1442,38 @@
         fetchedAt: new Date().toLocaleString("zh-TW", { hour12: false }),
         source: "yahoo via wtx.19850926.xyz",
       });
+      // 只覆寫當盤；另一盤 lastBook 不動
       snap[liveK] = q0;
+      saveLastBook(liveK, q0);
       const px = n(q0.CLastPrice);
+      const vol = n(q0.CTotalVolume) || 0;
       if (px) {
-        const pt = { t: snap.fetchedAt, ts: Date.now(), time: q0.CTime, px, vol: n(q0.CTotalVolume) || 0 };
+        const pt = { t: snap.fetchedAt, ts: Date.now(), time: q0.CTime, px, vol };
         const h = hist[liveK] || [];
         if (!h.length || h[h.length - 1].px !== px || h[h.length - 1].time !== pt.time) {
           h.push(pt);
           if (h.length > 800) h.splice(0, h.length - 800);
           hist[liveK] = h;
         }
+      }
+      // 颱風／停市：開盤 3 分鐘後，價+量+時間都不變連續 10 次 → 改探測
+      const sig = [px, vol, q0.CTime || ""].join("|");
+      const grace = Date.now() - sessionOpenAt() >= 3 * 60 * 1000;
+      if (grace && lastSig && sig === lastSig) {
+        staleHits++;
+      } else if (sig !== lastSig) {
+        staleHits = 0;
+        probeOnly = false;
+      }
+      lastSig = sig;
+      if (staleHits >= 10) {
+        probeOnly = true;
+        try {
+          localStorage.setItem(
+            STALE_KEY,
+            JSON.stringify({ date: new Date().toDateString(), sess: liveK, at: Date.now() })
+          );
+        } catch (e) {}
       }
       live = true;
       bumpLiveBar();
@@ -1318,6 +1488,12 @@
           $("live").textContent = "快照";
         }
         return;
+      }
+      // 探測模式：每 3 分鐘才打一次（颱風／整日無量）
+      if (probeOnly) {
+        const mark = window.__txfProbeAt || 0;
+        if (Date.now() - mark < 3 * 60 * 1000) return;
+        window.__txfProbeAt = Date.now();
       }
       try {
         const rows = await fetch(LIVE).then((r) => r.json());
@@ -1338,10 +1514,21 @@
         gh("data/history-day.json").then((r) => (r.ok ? r.json() : [])).catch(() => []),
       ]);
       if (!live) {
-        snap = s;
+        snap = applyStoredBooks(s);
         hist.night = hn;
         hist.day = hd;
         render();
+      } else if (s) {
+        // live 已起：只回填另一盤五檔，不蓋當盤；污染則用本機 lastBook
+        const sk = liveSess();
+        const other = sk === "day" ? "night" : "day";
+        snap = snap || {};
+        if (!snap[other] && s[other]) snap[other] = Object.assign({}, s[other]);
+        const fixed = applyStoredBooks({
+          day: snap.day || s.day,
+          night: snap.night || s.night,
+        });
+        if (fixed[other]) snap[other] = fixed[other];
       }
     }
 
@@ -1413,6 +1600,13 @@
 
     function startPoll() {
       if (liveTimer) return;
+      try {
+        const st = JSON.parse(localStorage.getItem(STALE_KEY) || "null");
+        if (st && st.date === new Date().toDateString() && st.sess === liveSess()) {
+          probeOnly = true;
+          staleHits = 10;
+        }
+      } catch (e) {}
       pollLive();
       liveTimer = setInterval(pollLive, 5000);
     }
