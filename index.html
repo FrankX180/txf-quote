@@ -1403,8 +1403,8 @@
       if (idx >= 0) {
         hist[idx] = Object.assign({}, hist[idx], {
           open: synth.open,
-          high: Math.max(hist[idx].high, synth.high),
-          low: Math.min(hist[idx].low, synth.low),
+          high: synth.high,
+          low: synth.low,
           close: synth.close,
           volume: synth.volume || hist[idx].volume,
           live: true,
