@@ -282,7 +282,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0099</div>
+    <div class="ver">v20260814-0100</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -1363,13 +1363,15 @@
       const prices = pts.map((p) => p.px);
       const qx0 = q();
       const so0 = sessOHLC();
-      // 開高低用當盤 1 分，勿用奇摩混盤 open/high/low
+      // 開高低用當盤 1 分；平盤線／紅綠分界用該盤昨收（CRefPrice），不是開盤
       const open = daySpan >= 2 ? prices[0] : (so0 && so0.o != null ? so0.o : prices[0]);
+      const refPx = daySpan >= 2 ? null : n(qx0 && qx0.CRefPrice);
+      const flat = refPx != null ? refPx : open;
       const lastPx = n(qx0 && qx0.CLastPrice);
       let hiBase = so0 && so0.h != null ? so0.h : -Infinity;
       let loBase = so0 && so0.l != null ? so0.l : Infinity;
-      const hi = Math.max(...prices, open, hiBase, lastPx != null ? lastPx : -Infinity);
-      const lo = Math.min(...prices, open, loBase, lastPx != null ? lastPx : Infinity);
+      const hi = Math.max(...prices, open, flat, hiBase, lastPx != null ? lastPx : -Infinity);
+      const lo = Math.min(...prices, open, flat, loBase, lastPx != null ? lastPx : Infinity);
       let yPad = daySpan >= 2 ? 50 : 100;
       let mx = Math.ceil((hi + yPad) / 100) * 100;
       let mn = Math.floor((lo - yPad) / 100) * 100;
@@ -1424,12 +1426,13 @@
       }
       ctx.textAlign = "left";
 
-      const yOpen = Math.round(yAt(open)) + 0.5;
+      // 平盤虛線＝昨收（日／夜各自 snap 的 CRefPrice）
+      const yFlat = Math.round(yAt(flat)) + 0.5;
       ctx.setLineDash([5, 4]);
       ctx.strokeStyle = "#9ca3af";
       ctx.beginPath();
-      ctx.moveTo(padL, yOpen);
-      ctx.lineTo(w - padR, yOpen);
+      ctx.moveTo(padL, yFlat);
+      ctx.lineTo(w - padR, yFlat);
       ctx.stroke();
       ctx.setLineDash([]);
 
@@ -1455,24 +1458,24 @@
       }
       if (run.length >= 2) runs.push(run);
 
-      const gUp = ctx.createLinearGradient(0, padT, 0, yOpen);
+      const gUp = ctx.createLinearGradient(0, padT, 0, yFlat);
       gUp.addColorStop(0, "rgba(211,47,47,0.32)");
       gUp.addColorStop(1, "rgba(211,47,47,0.00)");
-      const gDn = ctx.createLinearGradient(0, yOpen, 0, padT + ch);
+      const gDn = ctx.createLinearGradient(0, yFlat, 0, padT + ch);
       gDn.addColorStop(0, "rgba(27,138,62,0.00)");
       gDn.addColorStop(1, "rgba(27,138,62,0.32)");
 
       function areaPath(seg) {
         ctx.beginPath();
-        ctx.moveTo(seg[0].x, yOpen);
+        ctx.moveTo(seg[0].x, yFlat);
         seg.forEach((p) => ctx.lineTo(p.x, p.y));
-        ctx.lineTo(seg[seg.length - 1].x, yOpen);
+        ctx.lineTo(seg[seg.length - 1].x, yFlat);
         ctx.closePath();
       }
       runs.forEach((seg) => {
         ctx.save();
         ctx.beginPath();
-        ctx.rect(padL, padT, w - padL - padR, Math.max(0, yOpen - padT));
+        ctx.rect(padL, padT, w - padL - padR, Math.max(0, yFlat - padT));
         ctx.clip();
         areaPath(seg);
         ctx.fillStyle = gUp;
@@ -1480,7 +1483,7 @@
         ctx.restore();
         ctx.save();
         ctx.beginPath();
-        ctx.rect(padL, yOpen, w - padL - padR, Math.max(0, padT + ch - yOpen));
+        ctx.rect(padL, yFlat, w - padL - padR, Math.max(0, padT + ch - yFlat));
         ctx.clip();
         areaPath(seg);
         ctx.fillStyle = gDn;
@@ -1494,24 +1497,24 @@
       runs.forEach((seg) => {
         for (let i = 1; i < seg.length; i++) {
           const a = seg[i - 1], b = seg[i];
-          if ((a.px - open) * (b.px - open) < 0 && b.px !== a.px) {
-            const t = (open - a.px) / (b.px - a.px);
+          if ((a.px - flat) * (b.px - flat) < 0 && b.px !== a.px) {
+            const t = (flat - a.px) / (b.px - a.px);
             const xm = a.x + (b.x - a.x) * t;
             ctx.beginPath();
             ctx.moveTo(a.x, a.y);
-            ctx.lineTo(xm, yOpen);
-            ctx.strokeStyle = a.px >= open ? "#d32f2f" : "#1b8a3e";
+            ctx.lineTo(xm, yFlat);
+            ctx.strokeStyle = a.px >= flat ? "#d32f2f" : "#1b8a3e";
             ctx.stroke();
             ctx.beginPath();
-            ctx.moveTo(xm, yOpen);
+            ctx.moveTo(xm, yFlat);
             ctx.lineTo(b.x, b.y);
-            ctx.strokeStyle = b.px >= open ? "#d32f2f" : "#1b8a3e";
+            ctx.strokeStyle = b.px >= flat ? "#d32f2f" : "#1b8a3e";
             ctx.stroke();
           } else {
             ctx.beginPath();
             ctx.moveTo(a.x, a.y);
             ctx.lineTo(b.x, b.y);
-            ctx.strokeStyle = (a.px >= open || b.px >= open) ? "#d32f2f" : "#1b8a3e";
+            ctx.strokeStyle = (a.px >= flat || b.px >= flat) ? "#d32f2f" : "#1b8a3e";
             ctx.stroke();
           }
         }
