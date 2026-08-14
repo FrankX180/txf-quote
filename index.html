@@ -119,7 +119,7 @@
       line-height: 1.7;
       color: #374151;
     }
-    canvas { width: 100%; height: 280px; display: block; touch-action: none; }
+    canvas { width: 100%; height: 320px; display: block; touch-action: none; }
     .chips { margin: 4px 0 8px; }
     .chip, .mode {
       background: #f3f4f6; border: 0; border-radius: 4px; padding: 4px 10px;
@@ -279,7 +279,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0080</div>
+    <div class="ver">v20260814-0081</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -312,6 +312,9 @@
     const LIVE = "https://wtx.19850926.xyz/";
     const LB_KEY = "txfLastBook";
     const STALE_KEY = "txfStalePause";
+    const IMB_KEY = "txfImbMin";
+    // 每分鐘 1 根：該分鐘內最後一次 5 秒的 外盤-內盤
+    let imbBars = { night: [], day: [] };
 
     const $ = (id) => document.getElementById(id);
 
@@ -593,6 +596,54 @@
         if (polluted || missing) mergeBookOnto(s[sk], local);
       });
       return s;
+    }
+    function tradingDayKey(ts) {
+      const d = new Date(ts || Date.now());
+      // 夜盤 00:00-05:10 歸前一曆日交易夜
+      if (d.getHours() < 6) d.setDate(d.getDate() - 1);
+      return d.getFullYear() + String(d.getMonth() + 1).padStart(2, "0") + String(d.getDate()).padStart(2, "0");
+    }
+    function saveImbBars() {
+      try {
+        localStorage.setItem(
+          IMB_KEY,
+          JSON.stringify({ dayKey: tradingDayKey(), bars: imbBars })
+        );
+      } catch (e) {}
+    }
+    function loadImbBars() {
+      try {
+        const o = JSON.parse(localStorage.getItem(IMB_KEY) || "null");
+        if (!o || !o.bars) return;
+        if (o.dayKey !== tradingDayKey()) return;
+        imbBars = {
+          day: Array.isArray(o.bars.day) ? o.bars.day : [],
+          night: Array.isArray(o.bars.night) ? o.bars.night : [],
+        };
+      } catch (e) {}
+    }
+    /** 每 5 秒寫入；同一分鐘覆寫為最新差值 d=外-內 */
+    function recordImb(sk, inn, outv, ts) {
+      if (!sk) return;
+      if (inn == null || outv == null || isNaN(inn) || isNaN(outv)) return;
+      const t = ts || Date.now();
+      const slot = Math.floor(t / 60000) * 60000;
+      const d = outv - inn;
+      const arr = imbBars[sk] || (imbBars[sk] = []);
+      const last = arr.length ? arr[arr.length - 1] : null;
+      if (last && last.t === slot) {
+        last.d = d;
+        last.in = inn;
+        last.out = outv;
+        last.ts = t;
+      } else {
+        arr.push({ t: slot, d: d, in: inn, out: outv, ts: t });
+        if (arr.length > 900) arr.splice(0, arr.length - 900);
+      }
+      saveImbBars();
+    }
+    function imbSeries() {
+      return imbBars[sessKey()] || [];
     }
     function gh(path) {
       return fetch(path, { cache: "no-cache" });
@@ -969,7 +1020,9 @@
         return;
       }
       const c = $("chart");
-      const { ctx, w, h } = fitCanvas(c, 280);
+      const multi0 = daySpan >= 2;
+      const showImb = !multi0;
+      const { ctx, w, h } = fitCanvas(c, showImb ? 320 : 280);
       ctx.clearRect(0, 0, w, h);
       const pts = linePoints();
       if (pts.length < 2) {
@@ -993,9 +1046,12 @@
       while ((mx - mn) / yStep > 5) yStep += 100;
       const { t0, t1 } = sessRange(pts);
       const multi = daySpan >= 2;
-      const padL = 56, padR = 33, padT = 10, padB = multi ? 8 : 26;
+      const padL = 56, padR = 33, padT = 10, padB = multi ? 8 : 22;
+      const imbH = showImb && !multi ? 52 : 0;
+      const imbGap = imbH ? 6 : 0;
       const cw = w - padL - padR;
-      const ch = h - padT - padB;
+      const ch = h - padT - padB - imbH - imbGap;
+      const imbTop = padT + ch + imbGap;
       const xAtI = (i, t) => multi
         ? padL + (i / Math.max(1, pts.length - 1)) * cw
         : padL + ((t - t0) / (t1 - t0)) * cw;
@@ -1177,6 +1233,45 @@
         ctx.fillRect(mid - 6.5, yTop, 13, bh);
       }
 
+      // 副圖：每分鐘 1 根柱，寬 2；值＝該分鐘最後一次 5 秒 外盤-內盤
+      if (showImb && !multi && imbH > 0) {
+        const ibs = imbSeries().filter((b) => b.t >= t0 && b.t <= t1);
+        const zeroY = Math.round(imbTop + imbH / 2) + 0.5;
+        ctx.strokeStyle = "#e5e7eb";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(padL, zeroY);
+        ctx.lineTo(w - padR, zeroY);
+        ctx.stroke();
+        ctx.fillStyle = "#9ca3af";
+        ctx.font = "10px sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText("內外差", 4, imbTop + 10);
+        let maxAbs = 1;
+        ibs.forEach((b) => {
+          if (Math.abs(b.d) > maxAbs) maxAbs = Math.abs(b.d);
+        });
+        // 略放大頭，避免貼邊
+        maxAbs = Math.max(maxAbs * 1.05, 1);
+        const half = imbH / 2 - 2;
+        ibs.forEach((b) => {
+          const x = Math.round(xAtI(0, b.t + 30000));
+          const y = zeroY - (b.d / maxAbs) * half;
+          const top = Math.min(zeroY, y);
+          const bh = Math.max(1, Math.abs(y - zeroY));
+          ctx.fillStyle = b.d >= 0 ? "#d32f2f" : "#1b8a3e";
+          ctx.fillRect(x - 1, top, 2, bh);
+        });
+        const last = ibs.length ? ibs[ibs.length - 1] : null;
+        if (last) {
+          ctx.fillStyle = last.d >= 0 ? "#d32f2f" : "#1b8a3e";
+          ctx.font = "10px sans-serif";
+          ctx.textAlign = "right";
+          const lab = (last.d > 0 ? "+" : "") + Math.round(last.d);
+          ctx.fillText(lab, w - padR, imbTop + 10);
+        }
+        ctx.textAlign = "left";
+      }
       lineHit = { pts, xs: pts.map((p, i) => xAtI(i, p.time)) };
       if (holding && hoverIdx != null && pts[hoverIdx]) {
         const hp = pts[hoverIdx];
@@ -1447,10 +1542,27 @@
       saveLastBook(liveK, q0);
       const px = n(q0.CLastPrice);
       const vol = n(q0.CTotalVolume) || 0;
+      const inn = n(q0.inMarket);
+      const outv = n(q0.outMarket);
+      recordImb(liveK, inn, outv, Date.now());
       if (px) {
-        const pt = { t: snap.fetchedAt, ts: Date.now(), time: q0.CTime, px, vol };
+        const pt = {
+          t: snap.fetchedAt,
+          ts: Date.now(),
+          time: q0.CTime,
+          px,
+          vol,
+          in: inn,
+          out: outv,
+          d: inn != null && outv != null ? outv - inn : null,
+        };
         const h = hist[liveK] || [];
-        if (!h.length || h[h.length - 1].px !== px || h[h.length - 1].time !== pt.time) {
+        if (
+          !h.length ||
+          h[h.length - 1].px !== px ||
+          h[h.length - 1].time !== pt.time ||
+          h[h.length - 1].d !== pt.d
+        ) {
           h.push(pt);
           if (h.length > 800) h.splice(0, h.length - 800);
           hist[liveK] = h;
@@ -1631,6 +1743,7 @@
     session = liveSess();
     markChips();
     loadLocal1m();
+    loadImbBars();
     load();
     loadKline();
     startPoll();
