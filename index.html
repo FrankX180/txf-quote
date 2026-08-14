@@ -282,7 +282,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0091</div>
+    <div class="ver">v20260814-0092</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -1427,18 +1427,13 @@
         const ibs = imbSeries().filter((b) => b.t >= t0 && b.t <= t1)
           .slice().sort((a, b) => a.t - b.t);
         const zeroY = Math.round(imbTop + imbH / 2) + 0.5;
-        // 左緣垂直「內外盤」三字
+        // 左緣水平「內外盤」10pt
         ctx.save();
         ctx.fillStyle = "#6b7280";
-        ctx.font = "10px sans-serif";
-        ctx.textAlign = "center";
+        ctx.font = "10pt sans-serif";
+        ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        const labX = 12;
-        const labY0 = imbTop + imbH / 2;
-        const gapY = 12;
-        ["內", "外", "盤"].forEach((ch, i) => {
-          ctx.fillText(ch, labX, labY0 + (i - 1) * gapY);
-        });
+        ctx.fillText("內外盤", 2, imbTop + imbH / 2);
         ctx.restore();
 
         ctx.strokeStyle = "#e5e7eb";
@@ -1532,14 +1527,37 @@
             ctx.fill();
           }
 
+          // 最新差值標在「最後一點」旁（非角落）
           const last = ibs[ibs.length - 1];
-          if (last) {
+          const lp = segs[segs.length - 1];
+          if (last && lp) {
+            const lab = (last.d > 0 ? "+" : "") + Math.round(last.d) + "口";
+            ctx.font = "10pt sans-serif";
             ctx.fillStyle = last.d >= 0 ? "#d32f2f" : "#1b8a3e";
-            ctx.font = "10px sans-serif";
-            ctx.textAlign = "right";
-            ctx.textBaseline = "alphabetic";
-            const lab = (last.d > 0 ? "+" : "") + Math.round(last.d);
-            ctx.fillText(lab, w - padR, imbTop + 10);
+            ctx.textBaseline = "middle";
+            const tw = ctx.measureText(lab).width;
+            let tx = lp.x + 6;
+            let ty = lp.y;
+            // 右側空間不足 → 標在點左側
+            if (tx + tw > w - padR - 2) {
+              tx = lp.x - 6;
+              ctx.textAlign = "right";
+            } else {
+              ctx.textAlign = "left";
+            }
+            // 勿超出副圖上下
+            ty = Math.min(imbTop + imbH - 2, Math.max(imbTop + 8, ty));
+            // 小白底避免貼線看不清
+            const padX = 2;
+            const bx = ctx.textAlign === "right" ? tx - tw - padX : tx - padX;
+            ctx.fillStyle = "rgba(255,255,255,0.85)";
+            ctx.fillRect(bx, ty - 7, tw + padX * 2, 14);
+            ctx.fillStyle = last.d >= 0 ? "#d32f2f" : "#1b8a3e";
+            ctx.fillText(lab, tx, ty);
+            // 端點小圓
+            ctx.beginPath();
+            ctx.arc(lp.x, lp.y, 2.5, 0, Math.PI * 2);
+            ctx.fill();
           }
         }
         ctx.textAlign = "left";
