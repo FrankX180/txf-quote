@@ -303,7 +303,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-mid">1.14</div>
+      <div class="ver foot-mid">1.15</div>
       <div class="ver foot-right">浪大</div>
     </div>
   </div>
@@ -848,8 +848,34 @@
       }
       saveImbBars();
     }
+    // 內外盤 t 用牆鐘；夜盤價格軸用奇摩「下一交易日」（周五夜 8/14 牆鐘 vs 8/16 棒）
+    // 繪圖前把牆鐘對齊到圖軸，否則 t0/t1 一濾全空
+    function nightWallOpenMs(ts) {
+      const d = new Date(ts);
+      const hm = d.getHours() * 100 + d.getMinutes();
+      if (hm < 500) d.setDate(d.getDate() - 1);
+      d.setHours(15, 0, 0, 0);
+      return d.getTime();
+    }
+    function nightChartOpenMs() {
+      const ymd = liveTradingYmd();
+      const d0 = parseYmd(ymd);
+      if (!d0) return nightWallOpenMs(Date.now());
+      return atHm(d0, 15, 0);
+    }
+    function alignImbChartT(t, sk) {
+      if (sk !== "night" || t == null) return t;
+      const delta = nightChartOpenMs() - nightWallOpenMs(t);
+      if (!delta) return t;
+      return t + delta;
+    }
     function imbSeries() {
-      return imbBars[sessKey()] || [];
+      const sk = sessKey();
+      const arr = imbBars[sk] || [];
+      if (sk !== "night") return arr;
+      return arr.map((b) =>
+        b && b.t != null ? Object.assign({}, b, { t: alignImbChartT(b.t, sk) }) : b
+      );
     }
     function mergeImbSide(localArr, cloudArr) {
       const map = {};
@@ -1839,7 +1865,7 @@
 
       // 副圖：內外盤差面積圖（同主圖遮罩漸層；0 軸上紅下綠）
       if (showImb && !multi && imbH > 0) {
-        const ibs = imbSeries().filter((b) => b.t >= t0 && b.t <= t1)
+        const ibs = imbSeries().filter((b) => b && b.t >= t0 && b.t <= t1)
           .slice().sort((a, b) => a.t - b.t);
         const zeroY = Math.round(imbTop + imbH / 2) + 0.5;
         // 左緣水平「內外盤」10pt
