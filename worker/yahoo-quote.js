@@ -112,6 +112,132 @@ async function ensureSchema(db) {
         ")"
     )
     .run();
+  await db
+    .prepare(
+      "CREATE TABLE IF NOT EXISTS presence (" +
+        "sid TEXT PRIMARY KEY," +
+        "last_seen INTEGER NOT NULL," +
+        "day_key TEXT" +
+        ")"
+    )
+    .run();
+  await db
+    .prepare(
+      "CREATE TABLE IF NOT EXISTS traffic_day (" +
+        "day_key TEXT PRIMARY KEY," +
+        "pv INTEGER NOT NULL DEFAULT 0," +
+        "uv INTEGER NOT NULL DEFAULT 0," +
+        "peak INTEGER NOT NULL DEFAULT 0" +
+        ")"
+    )
+    .run();
+  await db
+    .prepare(
+      "CREATE TABLE IF NOT EXISTS traffic_sid (" +
+        "day_key TEXT NOT NULL," +
+        "sid TEXT NOT NULL," +
+        "PRIMARY KEY (day_key, sid)" +
+        ")"
+    )
+    .run();
+}
+
+const ONLINE_MS = 90 * 1000;
+
+async function handlePing(env, url) {
+  if (!env.IMB_DB) return { ok: false, reason: "no-db" };
+  const sid = (url.searchParams.get("sid") || "").slice(0, 64);
+  if (!sid || !/^[a-zA-Z0-9_-]{8,64}$/.test(sid)) {
+    return { ok: false, reason: "bad-sid" };
+  }
+  const hit = url.searchParams.get("hit") === "1";
+  const now = Date.now();
+  const dayKey = tradingDayKey(now);
+  await ensureSchema(env.IMB_DB);
+  await env.IMB_DB.prepare(
+    "INSERT INTO presence (sid, last_seen, day_key) VALUES (?, ?, ?) " +
+      "ON CONFLICT(sid) DO UPDATE SET last_seen=excluded.last_seen, day_key=excluded.day_key"
+  )
+    .bind(sid, now, dayKey)
+    .run();
+  // 清超過 1 小時沒心跳
+  await env.IMB_DB.prepare("DELETE FROM presence WHERE last_seen < ?")
+    .bind(now - 3600 * 1000)
+    .run();
+
+  if (hit) {
+    await env.IMB_DB.prepare(
+      "INSERT INTO traffic_day (day_key, pv, uv, peak) VALUES (?, 0, 0, 0) " +
+        "ON CONFLICT(day_key) DO NOTHING"
+    )
+      .bind(dayKey)
+      .run();
+    await env.IMB_DB.prepare(
+      "UPDATE traffic_day SET pv = pv + 1 WHERE day_key = ?"
+    )
+      .bind(dayKey)
+      .run();
+    const existed = await env.IMB_DB.prepare(
+      "SELECT 1 AS x FROM traffic_sid WHERE day_key = ? AND sid = ?"
+    )
+      .bind(dayKey, sid)
+      .first();
+    if (!existed) {
+      await env.IMB_DB.prepare(
+        "INSERT INTO traffic_sid (day_key, sid) VALUES (?, ?)"
+      )
+        .bind(dayKey, sid)
+        .run();
+      await env.IMB_DB.prepare(
+        "UPDATE traffic_day SET uv = uv + 1 WHERE day_key = ?"
+      )
+        .bind(dayKey)
+        .run();
+    }
+  }
+
+  const onlineRow = await env.IMB_DB.prepare(
+    "SELECT COUNT(*) AS n FROM presence WHERE last_seen >= ?"
+  )
+    .bind(now - ONLINE_MS)
+    .first();
+  const online = Number(onlineRow && onlineRow.n) || 0;
+  await env.IMB_DB.prepare(
+    "INSERT INTO traffic_day (day_key, pv, uv, peak) VALUES (?, 0, 0, ?) " +
+      "ON CONFLICT(day_key) DO UPDATE SET peak = MAX(traffic_day.peak, excluded.peak)"
+  )
+    .bind(dayKey, online)
+    .run();
+
+  return loadStats(env, dayKey, now);
+}
+
+async function loadStats(env, dayKey, nowMs) {
+  const now = nowMs || Date.now();
+  const dk = dayKey || tradingDayKey(now);
+  if (!env.IMB_DB) {
+    return { ok: false, dayKey: dk, online: 0, pv: 0, uv: 0, peak: 0 };
+  }
+  await ensureSchema(env.IMB_DB);
+  const onlineRow = await env.IMB_DB.prepare(
+    "SELECT COUNT(*) AS n FROM presence WHERE last_seen >= ?"
+  )
+    .bind(now - ONLINE_MS)
+    .first();
+  const dayRow = await env.IMB_DB.prepare(
+    "SELECT pv, uv, peak FROM traffic_day WHERE day_key = ?"
+  )
+    .bind(dk)
+    .first();
+  return {
+    ok: true,
+    dayKey: dk,
+    online: Number(onlineRow && onlineRow.n) || 0,
+    pv: Number(dayRow && dayRow.pv) || 0,
+    uv: Number(dayRow && dayRow.uv) || 0,
+    peak: Number(dayRow && dayRow.peak) || 0,
+    windowSec: ONLINE_MS / 1000,
+  };
 }
 
 async function appendImb(env, rows, nowMs) {
@@ -202,6 +328,36 @@ export default {
 
     const url = new URL(request.url);
     const kind = url.searchParams.get("kind");
+
+    if (kind === "ping") {
+      try {
+        const st = await handlePing(env, url);
+        return jsonResp(st, 200, {
+          "Cache-Control": "no-store",
+          "CDN-Cache-Control": "no-store",
+          "Cloudflare-CDN-Cache-Control": "no-store",
+        });
+      } catch (e) {
+        return jsonResp({ ok: false, error: String(e && e.message || e) }, 500, {
+          "Cache-Control": "no-store",
+        });
+      }
+    }
+
+    if (kind === "stats") {
+      try {
+        const st = await loadStats(env);
+        return jsonResp(st, 200, {
+          "Cache-Control": "public, max-age=0",
+          "CDN-Cache-Control": "public, max-age=5",
+          "Cloudflare-CDN-Cache-Control": "public, max-age=5",
+        });
+      } catch (e) {
+        return jsonResp({ ok: false, error: String(e && e.message || e) }, 500, {
+          "Cache-Control": "no-store",
+        });
+      }
+    }
 
     if (kind === "imb") {
       const now = Date.now();

@@ -201,9 +201,17 @@
       padding: 0 2px 8px;
       font-size: 11px;
       color: #9ca3af;
-      pointer-events: none;
       user-select: none;
     }
+    .traffic {
+      text-align: right;
+      padding: 0 2px 4px;
+      font-size: 11px;
+      color: #6b7280;
+      line-height: 1.5;
+      user-select: none;
+    }
+    .traffic b { color: #374151; font-weight: 700; }
   </style>
 </head>
 <body>
@@ -285,7 +293,8 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0103</div>
+    <div class="traffic" id="traffic" title="同時在線＝最近 90 秒有心跳；訪客＝今日不同瀏覽器識別">在線 — · 今日 — 次 / — 人 · 峰值 —</div>
+    <div class="ver">v20260814-0104</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -320,6 +329,7 @@
     const STALE_KEY = "txfStalePause";
     const IMB_KEY = "txfImbMin";
     const IMB_SIDE_KEY = "txfImbSide";
+    const SID_KEY = "txfSid";
     // true＝左外盤右內盤（預設）；false＝左內盤右外盤
     let imbOutLeft = true;
     try {
@@ -2386,6 +2396,56 @@
       render();
     }
 
+    function visitorSid() {
+      try {
+        let s = localStorage.getItem(SID_KEY);
+        if (s && /^[a-zA-Z0-9_-]{8,64}$/.test(s)) return s;
+        s =
+          "t" +
+          Date.now().toString(36) +
+          Math.random().toString(36).slice(2, 10);
+        localStorage.setItem(SID_KEY, s);
+        return s;
+      } catch (e) {
+        return "t" + Date.now().toString(36) + "x";
+      }
+    }
+    function paintTraffic(st) {
+      const el = $("traffic");
+      if (!el || !st) return;
+      const on = st.online != null ? st.online : "—";
+      const pv = st.pv != null ? st.pv : "—";
+      const uv = st.uv != null ? st.uv : "—";
+      const peak = st.peak != null ? st.peak : "—";
+      el.innerHTML =
+        "在線 <b>" + on +
+        "</b> · 今日 <b>" + pv +
+        "</b> 次 / <b>" + uv +
+        "</b> 人 · 峰值 <b>" + peak + "</b>";
+    }
+    async function trafficPing(isHit) {
+      try {
+        const sid = visitorSid();
+        const q =
+          LIVE +
+          "?kind=ping&sid=" +
+          encodeURIComponent(sid) +
+          (isHit ? "&hit=1" : "");
+        const st = await fetch(q, { cache: "no-store" }).then((r) =>
+          r.ok ? r.json() : null
+        );
+        if (st && st.ok) paintTraffic(st);
+      } catch (e) {}
+    }
+    function startTraffic() {
+      trafficPing(true);
+      setInterval(() => {
+        if (document.visibilityState === "visible") trafficPing(false);
+      }, 30000);
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") trafficPing(false);
+      });
+    }
     function startPoll() {
       if (liveTimer) return;
       try {
@@ -2439,6 +2499,7 @@
     });
     loadKline();
     startPoll();
+    startTraffic();
     klineTimer = setInterval(loadKline, 300000);
   </script>
 </body>
