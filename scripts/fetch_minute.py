@@ -31,11 +31,13 @@ def get(url: str) -> dict:
 def classify(ts: int):
     dt = datetime.fromtimestamp(int(ts), TZ)
     hm = dt.hour * 100 + dt.minute
+    # date 一律 YYYYMMDD，與報價 CDate／前端一致
     if hm >= 1500 or hm < 500:
-        sdate = (dt.date() - timedelta(days=1)).isoformat() if hm < 500 else dt.date().isoformat()
+        d0 = dt.date() - timedelta(days=1) if hm < 500 else dt.date()
+        sdate = d0.strftime("%Y%m%d")
         return "night", sdate, dt
     if 845 <= hm <= 1345:
-        return "day", dt.date().isoformat(), dt
+        return "day", dt.strftime("%Y%m%d"), dt
     return None, None, dt
 
 

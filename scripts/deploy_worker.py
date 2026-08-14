@@ -137,6 +137,13 @@ def main():
         (dom or {}).get("errors") or (dom or {}).get("result"),
     )
     print("OK d1", db_id)
+    # Cron：每分鐘自打（CF 最短 1 分；真 5 秒另用本機守護）
+    sched = call(
+        "PUT",
+        f"https://api.cloudflare.com/client/v4/accounts/{AID}/workers/scripts/{NAME}/schedules",
+        [{"cron": "* * * * *"}],
+    )
+    print("cron", sched and sched.get("success"), (sched or {}).get("errors") or (sched or {}).get("result"))
 
 
 if __name__ == "__main__":

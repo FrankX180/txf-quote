@@ -61,6 +61,14 @@ function twParts(ms) {
 function sessionOf(ms) {
   const p = twParts(ms);
   const hm = p.hm;
+  // 週六 05:10 後、週日：不寫
+  const wdFmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Taipei",
+    weekday: "short",
+  });
+  const wd = wdFmt.format(new Date(ms)); // Sun Mon ...
+  if (wd === "Sun") return null;
+  if (wd === "Sat" && hm >= 510) return null;
   if (hm >= 845 && hm <= 1345) return "day";
   if (hm >= 1455 || hm < 510) return "night";
   return null;
@@ -107,11 +115,11 @@ async function ensureSchema(db) {
 }
 
 async function appendImb(env, rows, nowMs) {
-  if (!env.IMB_DB) return;
+  if (!env.IMB_DB) return { ok: false, reason: "no-db" };
   const sess = sessionOf(nowMs);
-  if (!sess) return;
+  if (!sess) return { ok: false, reason: "closed" };
   const w = extractWtx(rows);
-  if (!w || w.inn == null || w.outv == null) return;
+  if (!w || w.inn == null || w.outv == null) return { ok: false, reason: "no-imb" };
   const dayKey = tradingDayKey(nowMs);
   const slot = minuteSlot(nowMs);
   const d = w.outv - w.inn;
@@ -122,6 +130,7 @@ async function appendImb(env, rows, nowMs) {
   )
     .bind(dayKey, sess, slot, d, w.inn, w.outv, nowMs)
     .run();
+  return { ok: true, dayKey, sess, d, slot };
 }
 
 async function loadPack(env, dayKey) {
@@ -160,6 +169,28 @@ async function loadPack(env, dayKey) {
   }
 }
 
+async function fetchYahooQuote() {
+  const r = await fetch(YAHOO, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
+      Referer: "https://tw.stock.yahoo.com/",
+    },
+  });
+  const body = await r.text();
+  return { ok: r.ok, status: r.status, body };
+}
+
+/** 無人看盤也寫：Cron 觸發（CF 最短 1 分） */
+async function pollAndStore(env) {
+  const nowMs = Date.now();
+  if (!sessionOf(nowMs)) return { skipped: true, reason: "closed" };
+  const { ok, body } = await fetchYahooQuote();
+  if (!ok) return { skipped: true, reason: "yahoo-fail" };
+  const rows = JSON.parse(body);
+  return await appendImb(env, rows, nowMs);
+}
+
 export default {
   async fetch(request, env, ctx) {
     if (request.method === "OPTIONS") {
@@ -193,6 +224,16 @@ export default {
           "Cloudflare-CDN-Cache-Control": "public, max-age=3",
         }
       );
+    }
+
+    // 手動／外部守護：強制打奇摩並寫 D1（不走 5 秒 CDN 快取語意）
+    if (kind === "poll") {
+      const res = await pollAndStore(env);
+      return jsonResp({ ok: true, ...res, at: new Date().toISOString() }, 200, {
+        "Cache-Control": "no-store",
+        "CDN-Cache-Control": "no-store",
+        "Cloudflare-CDN-Cache-Control": "no-store",
+      });
     }
 
     const target = kind === "1m" ? CHART1M : YAHOO;
@@ -229,5 +270,9 @@ export default {
         ...CORS,
       },
     });
+  },
+
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(pollAndStore(env));
   },
 };
