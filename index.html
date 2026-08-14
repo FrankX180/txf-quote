@@ -282,7 +282,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0092</div>
+    <div class="ver">v20260814-0093</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -830,19 +830,57 @@
       return Object.keys(by).sort((x, y) => x - y).map((k) => by[k]);
     }
 
+    // 盤別：日 08:45–13:45、夜 15:00–次日 05:00；休市中不當同盤
+    function sessKindAt(ts) {
+      const d = new Date(ts);
+      const hm = d.getHours() * 60 + d.getMinutes();
+      if (hm >= 8 * 60 + 45 && hm < 13 * 60 + 45) return "day";
+      if (hm >= 15 * 60 || hm < 5 * 60) return "night";
+      return "closed";
+    }
+    function chartStepMs() {
+      const n = daySpan < 1 ? 1 : daySpan;
+      if (n <= 1) return 60000;
+      if (n === 2) return 5 * 60000;
+      return 15 * 60000;
+    }
+    // 同盤內缺棒：用前收持平補點，避免走勢破圖；跨盤（午休／日夜）不補
     function fillMinutes(bars) {
       if (!bars || bars.length < 2) return bars || [];
-      const step = 60000;
+      let step = chartStepMs();
+      // 用前幾根實際間距校正（避免 1m 資料畫 5m 時過度補點）
+      if (bars.length >= 3) {
+        const ds = [];
+        for (let i = 1; i < Math.min(bars.length, 12); i++) {
+          const d = bars[i].timestamp - bars[i - 1].timestamp;
+          if (d > 0 && d <= 20 * 60000) ds.push(d);
+        }
+        if (ds.length) {
+          ds.sort((a, b) => a - b);
+          const med = ds[Math.floor(ds.length / 2)];
+          if (med >= 50000) step = Math.max(step, Math.round(med / 60000) * 60000 || med);
+        }
+      }
+      const maxFill = 3 * 60 * 60 * 1000; // 同盤最多補 3 小時洞
       const out = [bars[0]];
       for (let i = 1; i < bars.length; i++) {
         const prev = out[out.length - 1];
         const b = bars[i];
         const hole = b.timestamp - prev.timestamp;
-        if (hole > step * 1.5 && hole <= 150000) {
-          for (let t = prev.timestamp + step; t < b.timestamp - 30000; t += step) {
+        const sk0 = sessKindAt(prev.timestamp);
+        const sk1 = sessKindAt(b.timestamp);
+        const sameSess = sk0 !== "closed" && sk0 === sk1;
+        if (sameSess && hole > step * 1.5 && hole <= maxFill) {
+          const px = prev.close;
+          for (let t = prev.timestamp + step; t < b.timestamp - step * 0.4; t += step) {
+            if (sessKindAt(t) !== sk0) break;
             out.push({
-              timestamp: t, open: prev.close, high: prev.close, low: prev.close, close: prev.close,
-              volume: 0, date: prev.date, session: prev.session,
+              timestamp: t,
+              open: px, high: px, low: px, close: px,
+              volume: 0,
+              date: prev.date,
+              session: prev.session,
+              filled: true,
             });
           }
         }
@@ -929,32 +967,39 @@
         last.high = Math.max(last.high, px);
         last.low = Math.min(last.low, px);
         if (dVol) last.volume = (last.volume || 0) + dVol;
-      } else if (slot > lastSlot && slot - lastSlot <= 150000) {
+      } else if (slot > lastSlot) {
+        // 同盤缺分鐘：先用前收補平中間棒，再寫當下分鐘（避免 1 分 K 斷洞破圖）
+        const sk0 = sessKindAt(lastSlot);
+        const sk1 = sessKindAt(slot);
+        const sameSess = sk0 !== "closed" && sk0 === sk1;
+        if (sameSess && slot - lastSlot > 60000) {
+          for (let t = lastSlot + 60000; t < slot; t += 60000) {
+            if (sessKindAt(t) !== sk0) break;
+            rows.push({
+              timestamp: t,
+              open: last.close,
+              high: last.close,
+              low: last.close,
+              close: last.close,
+              volume: 0,
+              date: last.date || dstr,
+              session: liveK,
+              filled: true,
+            });
+          }
+        }
+        const openPx = sameSess ? last.close : px;
         rows.push({
           timestamp: slot,
-          open: last.close,
-          high: Math.max(last.close, px),
-          low: Math.min(last.close, px),
+          open: openPx,
+          high: Math.max(openPx, px),
+          low: Math.min(openPx, px),
           close: px,
           volume: dVol,
           date: last.date || dstr,
           session: liveK,
         });
         minutePack[key] = rows;
-      } else if (slot > lastSlot) {
-        // gap too large: still seed current minute so line continues
-        rows.push({
-          timestamp: slot,
-          open: px,
-          high: px,
-          low: px,
-          close: px,
-          volume: 0,
-          date: dstr,
-          session: liveK,
-        });
-        minutePack[key] = rows;
-      }
       if (tot != null) lastTot = tot;
       save1m();
     }
@@ -1292,14 +1337,16 @@
       ctx.stroke();
       ctx.setLineDash([]);
 
+      // 斷線只留給跨盤／跨日大洞；同盤缺棒已由 fillMinutes 補平
       let gap = Infinity;
       {
-        let step = 60000;
+        let step = chartStepMs();
         if (pts.length >= 2 && pts[1].time && pts[0].time) {
-          step = Math.max(60000, pts[1].time - pts[0].time);
+          const d0 = pts[1].time - pts[0].time;
+          if (d0 > 0) step = Math.max(step, d0);
         }
-        // 多日用 5/15 分棒時 step 更大；跨日夜斷線門檻放寬到 20 分
-        gap = multi ? Math.max(step * 2.5, 20 * 60000) : step * 2.5;
+        // 午休約 75 分、夜→日約 3.75 時；門檻 45 分即可切開跨盤，又不會因 7 分缺棒破圖
+        gap = Math.max(step * 3, 45 * 60000);
       }
       const runs = [];
       let run = [];
