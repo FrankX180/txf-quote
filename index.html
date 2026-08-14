@@ -282,7 +282,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0095</div>
+    <div class="ver">v20260814-0096</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -364,6 +364,7 @@
       return snap[session];
     }
 
+    // 當盤開高低：用當盤 1 分 K（奇摩 stockList 的 open/high/low 常是夜盤／混盤，不可直接當日盤）
     function sessOHLC() {
       const rows = minuteSeries();
       if (!rows.length) return null;
@@ -375,7 +376,30 @@
         if (ll < l) l = ll;
       });
       if (!(h > -Infinity)) return null;
-      return { o: o != null ? o : rows[0].close, h, l, c };
+      if (o == null) o = rows[0].close;
+      return { o, h, l, c };
+    }
+    function patchQuoteOHLC(sk, lastPx) {
+      const key = (sk || liveSess()) + "_1m";
+      const all = minutePack[key] || [];
+      if (!all.length || !snap || !snap[sk]) return;
+      const dLast = dateKey(all[all.length - 1].date);
+      const rows = all.filter((b) => dateKey(b.date) === dLast);
+      if (!rows.length) return;
+      let o = rows[0].open, h = -Infinity, l = Infinity;
+      rows.forEach((b) => {
+        if (b.high != null && b.high > h) h = b.high;
+        if (b.low != null && b.low < l) l = b.low;
+      });
+      if (o == null) o = rows[0].close;
+      if (lastPx != null) {
+        if (lastPx > h) h = lastPx;
+        if (lastPx < l) l = lastPx;
+      }
+      if (!(h > -Infinity)) return;
+      snap[sk].COpenPrice = o;
+      snap[sk].CHighPrice = h;
+      snap[sk].CLowPrice = l;
     }
 
     function render() {
@@ -384,12 +408,18 @@
         $("stamp").textContent = "尚無資料";
         return;
       }
-      const so = (session !== liveSess()) ? sessOHLC() : null;
-      const last = so ? so.c : n(x.CLastPrice);
+      // 開/高/低優先當盤 1 分；昨收、最新、量仍用報價（奇摩 open/high/low 常是夜／混盤）
+      const so = sessOHLC();
+      const lastLive = n(x.CLastPrice);
+      const last = lastLive != null ? lastLive : so ? so.c : null;
       const ref = n(x.CRefPrice);
-      const openPx = so ? so.o : n(x.COpenPrice);
-      const highPx = so ? so.h : n(x.CHighPrice);
-      const lowPx = so ? so.l : n(x.CLowPrice);
+      let openPx = so ? so.o : n(x.COpenPrice);
+      let highPx = so ? so.h : n(x.CHighPrice);
+      let lowPx = so ? so.l : n(x.CLowPrice);
+      if (so && last != null) {
+        highPx = highPx == null ? last : Math.max(highPx, last);
+        lowPx = lowPx == null ? last : Math.min(lowPx, last);
+      }
       let diff = n(x.CDiff);
       let rate = n(x.CDiffRate);
       if (diff == null && last != null && ref != null) {
@@ -1275,10 +1305,13 @@
       const prices = pts.map((p) => p.px);
       const qx0 = q();
       const so0 = sessOHLC();
-      const useQ = session === liveSess() && daySpan < 2;
-      const open = daySpan >= 2 ? prices[0] : (useQ ? (n(qx0 && qx0.COpenPrice) || prices[0]) : (so0 ? so0.o : prices[0]));
-      const hi = Math.max(...prices, open, useQ ? (n(qx0 && qx0.CHighPrice) ?? -Infinity) : (so0 ? so0.h : -Infinity));
-      const lo = Math.min(...prices, open, useQ ? (n(qx0 && qx0.CLowPrice) ?? Infinity) : (so0 ? so0.l : Infinity));
+      // 開高低用當盤 1 分，勿用奇摩混盤 open/high/low
+      const open = daySpan >= 2 ? prices[0] : (so0 && so0.o != null ? so0.o : prices[0]);
+      const lastPx = n(qx0 && qx0.CLastPrice);
+      let hiBase = so0 && so0.h != null ? so0.h : -Infinity;
+      let loBase = so0 && so0.l != null ? so0.l : Infinity;
+      const hi = Math.max(...prices, open, hiBase, lastPx != null ? lastPx : -Infinity);
+      const lo = Math.min(...prices, open, loBase, lastPx != null ? lastPx : Infinity);
       let yPad = daySpan >= 2 ? 50 : 100;
       let mx = Math.ceil((hi + yPad) / 100) * 100;
       let mn = Math.floor((lo - yPad) / 100) * 100;
@@ -1932,6 +1965,7 @@
       }
       live = true;
       bumpLiveBar();
+      patchQuoteOHLC(liveK, px);
       render();
     }
 
