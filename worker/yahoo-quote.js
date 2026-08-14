@@ -215,9 +215,22 @@ async function handlePing(env, url) {
 async function loadStats(env, dayKey, nowMs) {
   const now = nowMs || Date.now();
   const dk = dayKey || tradingDayKey(now);
-  if (!env.IMB_DB) {
-    return { ok: false, dayKey: dk, online: 0, pv: 0, uv: 0, peak: 0 };
-  }
+  const monthKey = dk.slice(0, 6);
+  const empty = {
+    ok: false,
+    dayKey: dk,
+    monthKey,
+    online: 0,
+    pv: 0,
+    uv: 0,
+    peak: 0,
+    monthPv: 0,
+    monthUv: 0,
+    totalPv: 0,
+    totalUv: 0,
+    windowSec: ONLINE_MS / 1000,
+  };
+  if (!env.IMB_DB) return empty;
   await ensureSchema(env.IMB_DB);
   const onlineRow = await env.IMB_DB.prepare(
     "SELECT COUNT(*) AS n FROM presence WHERE last_seen >= ?"
@@ -229,13 +242,34 @@ async function loadStats(env, dayKey, nowMs) {
   )
     .bind(dk)
     .first();
+  const monthRow = await env.IMB_DB.prepare(
+    "SELECT COALESCE(SUM(pv), 0) AS pv FROM traffic_day WHERE day_key LIKE ?"
+  )
+    .bind(monthKey + "%")
+    .first();
+  const monthUvRow = await env.IMB_DB.prepare(
+    "SELECT COUNT(DISTINCT sid) AS n FROM traffic_sid WHERE day_key LIKE ?"
+  )
+    .bind(monthKey + "%")
+    .first();
+  const totalRow = await env.IMB_DB.prepare(
+    "SELECT COALESCE(SUM(pv), 0) AS pv FROM traffic_day"
+  ).first();
+  const totalUvRow = await env.IMB_DB.prepare(
+    "SELECT COUNT(DISTINCT sid) AS n FROM traffic_sid"
+  ).first();
   return {
     ok: true,
     dayKey: dk,
+    monthKey,
     online: Number(onlineRow && onlineRow.n) || 0,
     pv: Number(dayRow && dayRow.pv) || 0,
     uv: Number(dayRow && dayRow.uv) || 0,
     peak: Number(dayRow && dayRow.peak) || 0,
+    monthPv: Number(monthRow && monthRow.pv) || 0,
+    monthUv: Number(monthUvRow && monthUvRow.n) || 0,
+    totalPv: Number(totalRow && totalRow.pv) || 0,
+    totalUv: Number(totalUvRow && totalUvRow.n) || 0,
     windowSec: ONLINE_MS / 1000,
   };
 }

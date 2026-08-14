@@ -1,0 +1,8 @@
+name = "txf-yahoo"
+main = "yahoo-quote.js"
+compatibility_date = "2024-11-01"
+
+[[d1_databases]]
+binding = "IMB_DB"
+database_name = "txf-imb"
+database_id = "71a91db6-be1a-4770-ad5b-ca4123f9226b"

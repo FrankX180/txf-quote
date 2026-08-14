@@ -212,6 +212,8 @@
     .ver#traffic {
       text-align: right;
       margin-left: auto;
+      white-space: pre-line;
+      line-height: 1.45;
     }
   </style>
 </head>
@@ -295,8 +297,9 @@
       </div>
     </div>
     <div class="foot">
-      <div class="ver">1.03</div>
-      <div class="ver" id="traffic" title="同時在線＝最近 90 秒有心跳；訪客＝今日不同瀏覽器識別">在線 — · 今日 — 次 / — 人 · 峰值 —</div>
+      <div class="ver">1.04</div>
+      <div class="ver" id="traffic" title="在線＝90秒內心跳；今日／本月／累計：次＝瀏覽、人＝不同瀏覽器">在線 — · 今日 — 次 / — 人 · 峰值 —
+本月 — 次 / — 人 · 累計 — 次 / — 人</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2420,11 +2423,20 @@
       const pv = st.pv != null ? st.pv : "—";
       const uv = st.uv != null ? st.uv : "—";
       const peak = st.peak != null ? st.peak : "—";
+      const mPv = st.monthPv != null ? st.monthPv : "—";
+      const mUv = st.monthUv != null ? st.monthUv : "—";
+      const tPv = st.totalPv != null ? st.totalPv : "—";
+      const tUv = st.totalUv != null ? st.totalUv : "—";
       el.textContent =
         "在線 " + on +
         " · 今日 " + pv +
         " 次 / " + uv +
-        " 人 · 峰值 " + peak;
+        " 人 · 峰值 " + peak +
+        "\n本月 " + mPv +
+        " 次 / " + mUv +
+        " 人 · 累計 " + tPv +
+        " 次 / " + tUv +
+        " 人";
     }
     async function trafficPing(isHit) {
       try {
