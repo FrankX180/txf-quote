@@ -303,7 +303,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-mid">1.15</div>
+      <div class="ver foot-mid">1.16</div>
       <div class="ver foot-right">浪大</div>
     </div>
   </div>
@@ -1292,68 +1292,35 @@
       d.setHours(h, m, 0, 0);
       return d.getTime();
     }
-    // 多日 X 軸：只串「有資料或正在進行」的盤段，依時間相鄰鋪滿（連續日）
-    // 規則：周五夜盤＝下一交易日（如 8/16）開端；勿為曆日周五夜／下周一上午開空窗
+    // 多日 X 軸：依實際有資料的段落連續拼接，中間只留小縫
+    // 禁用日曆整段日／夜窗（跨六日會空一整天；未走完夜盤 14 小時也會大片留白）
+    const MULTI_SEG_GAP_MS = 30 * 60000; // 段間視覺縫 ≈ 30 分寬
+    const MULTI_RUN_BREAK_MS = 90 * 60000; // 點距 >90 分視為新段（跨盤／跨周末）
     function sessWindows(pts) {
-      const n = daySpan < 1 ? 1 : daySpan;
-      let dates = lastDates(n).slice().reverse();
-      if (!dates.length && pts && pts.length) {
-        const seen = {};
-        pts.forEach((p) => {
-          const d = new Date(p.time);
-          const ymd = dateKey(
-            d.getFullYear() +
-              String(d.getMonth() + 1).padStart(2, "0") +
-              String(d.getDate()).padStart(2, "0")
-          );
-          if (d.getHours() < 5) {
-            // 凌晨棒：交易日＝夜盤歸屬的下一交易日（周五夜→周一）
-            const td = nightTradingYmd(p.time);
-            if (td) seen[td] = 1;
-          } else if (d.getHours() >= 15) {
-            const td = nightTradingYmd(p.time);
-            if (td) seen[td] = 1;
-          } else if (ymd) seen[ymd] = 1;
-        });
-        dates = Object.keys(seen).sort();
-      }
-      // 進行中的交易日一定納入（周五夜 → 下周一 ymd）
-      const liveTd = liveTradingYmd();
-      if (liveTd && dates.indexOf(liveTd) < 0) dates.push(liveTd);
-      dates.sort();
-      const now = Date.now();
+      if (!pts || pts.length < 2) return [];
+      const sorted = pts.slice().sort((a, b) => a.time - b.time);
       const wins = [];
-      dates.forEach((ymd) => {
-        const d0 = parseYmd(ymd);
-        if (!d0) return;
-        const day0 = atHm(d0, 8, 45);
-        const day1 = atHm(d0, 13, 45);
-        // 夜盤時間軸：與棒的 timestamp／奇摩一致——交易日 D 的夜＝D 日 15:00～次日 05:00
-        // （周五實體開盤在周五晚，但棒 date/ts 已是下周一）
-        const n0 = atHm(d0, 15, 0);
-        const n1base = new Date(d0.getTime());
-        n1base.setDate(n1base.getDate() + 1);
-        const n1 = atHm(n1base, 5, 0);
-        const dayWin = { t0: day0, t1: day1, kind: "day", date: ymd };
-        const nightWin = { t0: n0, t1: n1, kind: "night", date: ymd };
-        const hasPts = (w) =>
-          !!(pts && pts.some((p) => p.time >= w.t0 && p.time <= w.t1 + 60000));
-        // LIVE 以交易日對齊（周五夜 now 在周五、窗在周一 ts）→ 不要求 now>=t0
-        const liveHere = (w) => liveSess() === w.kind && liveTd === ymd;
-        // 有點或 LIVE 交易日對上就留；禁 n0<=now（周五夜窗在周一 ts，now 仍在周五）
-        if (hasPts(dayWin) || liveHere(dayWin)) wins.push(dayWin);
-        if (hasPts(nightWin) || liveHere(nightWin)) wins.push(nightWin);
-      });
-      wins.sort((a, b) => a.t0 - b.t0);
-      if (!wins.length && pts && pts.length >= 2) {
-        return [{ t0: pts[0].time, t1: pts[pts.length - 1].time, kind: "mix", date: "" }];
+      let t0 = sorted[0].time;
+      let t1 = sorted[0].time;
+      for (let i = 1; i < sorted.length; i++) {
+        const t = sorted[i].time;
+        if (t - t1 > MULTI_RUN_BREAK_MS) {
+          wins.push({ t0: t0, t1: Math.max(t0 + 60000, t1), kind: "run", date: "" });
+          t0 = t;
+        }
+        t1 = t;
       }
+      wins.push({ t0: t0, t1: Math.max(t0 + 60000, t1), kind: "run", date: "" });
       return wins;
     }
     function mapOnWindows(t, wins, padL, cw) {
       if (!wins.length) return padL;
+      const gapMs = MULTI_SEG_GAP_MS;
       let total = 0;
-      wins.forEach((w) => { total += Math.max(1, w.t1 - w.t0); });
+      for (let i = 0; i < wins.length; i++) {
+        total += Math.max(1, wins[i].t1 - wins[i].t0);
+        if (i < wins.length - 1) total += gapMs;
+      }
       let acc = 0;
       for (let i = 0; i < wins.length; i++) {
         const w = wins[i];
@@ -1361,6 +1328,11 @@
         if (t < w.t0) return padL + (acc / total) * cw;
         if (t <= w.t1) return padL + ((acc + (t - w.t0)) / total) * cw;
         acc += dur;
+        // 落在段間縫：壓到縫的中點，避免跳到下一段起點造成大跳
+        if (i < wins.length - 1 && t < wins[i + 1].t0) {
+          return padL + ((acc + gapMs * 0.5) / total) * cw;
+        }
+        if (i < wins.length - 1) acc += gapMs;
       }
       return padL + cw;
     }
