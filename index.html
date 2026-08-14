@@ -177,6 +177,9 @@
     }
     .bar-in { background: var(--dn); }
     .bar-out { background: var(--up); }
+    .bar-wrap { cursor: pointer; user-select: none; }
+    .bar-wrap:active { opacity: 0.92; }
+    .imbrow { cursor: pointer; user-select: none; }
     .bar-labs {
       position: absolute; inset: 0;
       display: flex; justify-content: space-between; align-items: center;
@@ -254,18 +257,18 @@
           <div class="side-top">
             <div>
               <table class="ob" id="ob"></table>
-              <div class="bar-wrap">
-                <div class="bar-in" id="barIn" style="width:50%"></div>
-                <div class="bar-out" id="barOut" style="width:50%"></div>
+              <div class="bar-wrap" id="barWrap" title="點一下：內外盤左右對調">
+                <div id="barL" class="bar-out" style="width:50%"></div>
+                <div id="barR" class="bar-in" style="width:50%"></div>
                 <div class="bar-labs">
-                  <span id="inTxt">內盤 —</span>
-                  <span id="outTxt">外盤 —</span>
+                  <span id="txtL">外盤 —</span>
+                  <span id="txtR">內盤 —</span>
                 </div>
               </div>
-              <div class="imbrow">
-                <span class="imb-l dn" id="inPct">—</span>
+              <div class="imbrow" id="imbRow" title="點一下：內外盤左右對調">
+                <span class="imb-l up" id="pctL">—</span>
                 <div class="imb" id="imb"></div>
-                <span class="imb-r up" id="outPct">—</span>
+                <span class="imb-r dn" id="pctR">—</span>
               </div>
             </div>
           </div>
@@ -279,7 +282,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0090</div>
+    <div class="ver">v20260814-0091</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -313,6 +316,14 @@
     const LB_KEY = "txfLastBook";
     const STALE_KEY = "txfStalePause";
     const IMB_KEY = "txfImbMin";
+    const IMB_SIDE_KEY = "txfImbSide";
+    // true＝左外盤右內盤（預設）；false＝左內盤右外盤
+    let imbOutLeft = true;
+    try {
+      const s = localStorage.getItem(IMB_SIDE_KEY);
+      if (s === "in-left") imbOutLeft = false;
+      else if (s === "out-left") imbOutLeft = true;
+    } catch (e) {}
     // 每分鐘 1 根：該分鐘內最後一次 5 秒的 外盤-內盤
     let imbBars = { night: [], day: [] };
 
@@ -410,18 +421,38 @@
         askTot += n(x["CAskSize" + i]) || 0;
       });
       const tot = bidTot + askTot;
-      const pin = tot ? (bidTot / tot) * 100 : 50;
-      $("barIn").style.width = pin + "%";
-      $("barOut").style.width = (100 - pin) + "%";
+      const pinBid = tot ? (bidTot / tot) * 100 : 50;
       const inn = n(x.inMarket), outv = n(x.outMarket);
+      // 左右：預設外左／內右；點擊可切換，顏色跟著走
+      function paintImbBar(leftVal, rightVal, leftIsOut) {
+        const sum = (leftVal || 0) + (rightVal || 0);
+        const pl = sum > 0 ? (leftVal / sum) * 100 : 50;
+        const pr = 100 - pl;
+        const barL = $("barL"), barR = $("barR");
+        const txtL = $("txtL"), txtR = $("txtR");
+        const pctL = $("pctL"), pctR = $("pctR");
+        if (barL) {
+          barL.style.width = pl + "%";
+          barL.className = leftIsOut ? "bar-out" : "bar-in";
+        }
+        if (barR) {
+          barR.style.width = pr + "%";
+          barR.className = leftIsOut ? "bar-in" : "bar-out";
+        }
+        if (txtL) txtL.textContent = (leftIsOut ? "外盤 " : "內盤 ") + fmt(leftVal);
+        if (txtR) txtR.textContent = (leftIsOut ? "內盤 " : "外盤 ") + fmt(rightVal);
+        if (pctL) {
+          pctL.textContent = pl.toFixed(1) + "%";
+          pctL.className = leftIsOut ? "imb-l up" : "imb-l dn";
+        }
+        if (pctR) {
+          pctR.textContent = pr.toFixed(1) + "%";
+          pctR.className = leftIsOut ? "imb-r dn" : "imb-r up";
+        }
+      }
       if (inn != null && outv != null && inn + outv > 0) {
-        const pin2 = (inn / (inn + outv)) * 100;
-        $("barIn").style.width = pin2 + "%";
-        $("barOut").style.width = (100 - pin2) + "%";
-        $("inTxt").textContent = "內盤 " + fmt(inn);
-        $("outTxt").textContent = "外盤 " + fmt(outv);
-        if ($("inPct")) $("inPct").textContent = pin2.toFixed(1) + "%";
-        if ($("outPct")) $("outPct").textContent = (100 - pin2).toFixed(1) + "%";
+        if (imbOutLeft) paintImbBar(outv, inn, true);
+        else paintImbBar(inn, outv, false);
         const net = outv - inn;
         const imb = $("imb");
         if (imb) {
@@ -437,10 +468,11 @@
           }
         }
       } else {
-        $("inTxt").textContent = "委買 " + fmt(bidTot);
-        $("outTxt").textContent = "委賣 " + fmt(askTot);
-        if ($("inPct")) $("inPct").textContent = pin.toFixed(1) + "%";
-        if ($("outPct")) $("outPct").textContent = (100 - pin).toFixed(1) + "%";
+        // 無內外盤時用委買／委賣佔位（委買當內、委賣當外）
+        if (imbOutLeft) paintImbBar(askTot, bidTot, true);
+        else paintImbBar(bidTot, askTot, false);
+        if ($("txtL")) $("txtL").textContent = (imbOutLeft ? "委賣 " : "委買 ") + fmt(imbOutLeft ? askTot : bidTot);
+        if ($("txtR")) $("txtR").textContent = (imbOutLeft ? "委買 " : "委賣 ") + fmt(imbOutLeft ? bidTot : askTot);
         if ($("imb")) $("imb").textContent = "";
       }
 
@@ -1989,6 +2021,19 @@
       draw();
     });
     bindLineHold();
+    (function bindImbSideToggle() {
+      function flip() {
+        imbOutLeft = !imbOutLeft;
+        try {
+          localStorage.setItem(IMB_SIDE_KEY, imbOutLeft ? "out-left" : "in-left");
+        } catch (e) {}
+        render();
+      }
+      const w = $("barWrap");
+      const r = $("imbRow");
+      if (w) w.addEventListener("click", flip);
+      if (r) r.addEventListener("click", flip);
+    })();
     session = liveSess();
     markChips();
     loadLocal1m();
