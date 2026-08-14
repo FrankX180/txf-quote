@@ -48,6 +48,8 @@
       overflow: hidden;
     }
     .chipline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 0; }
+    .chip-group { display: contents; }
+    .chip-group[hidden] { display: none !important; }
     .rowlab { font-size: 13px; font-weight: 800; color: #111; min-width: 2.4em; }
     .hero {
       display: grid;
@@ -231,22 +233,23 @@
       <div class="grid">
         <div>
           <div class="chips">
-            <div class="chipline">
-              <span class="rowlab">Ｋ線</span>
-              <button class="chip" data-k="1" type="button">１分</button>
-              <button class="chip" data-k="5" type="button">５分</button>
-              <button class="chip" data-k="15" type="button">１５</button>
-              <button class="chip" data-k="30" type="button">３０</button>
-              <button class="chip" data-k="d" type="button">日Ｋ</button>
-              <button class="chip" data-k="w" type="button">週Ｋ</button>
-            </div>
-            <div class="chipline">
-              <span class="rowlab">走勢</span>
-              <button class="chip on" data-line="0" type="button">當日</button>
-              <button class="chip" data-line="2" type="button">２日</button>
-              <button class="chip" data-line="3" type="button">３日</button>
-              <button class="chip" data-line="4" type="button">４日</button>
-              <button class="chip" data-line="5" type="button">５日</button>
+            <div class="chipline" id="chipRow">
+              <button class="chip" id="btnKMode" type="button" title="切換 K 線／走勢">Ｋ線</button>
+              <span class="chip-group" id="lineGroup">
+                <button class="chip on" data-line="0" type="button">當日</button>
+                <button class="chip" data-line="2" type="button">２日</button>
+                <button class="chip" data-line="3" type="button">３日</button>
+                <button class="chip" data-line="4" type="button">４日</button>
+                <button class="chip" data-line="5" type="button">５日</button>
+              </span>
+              <span class="chip-group" id="kGroup" hidden>
+                <button class="chip" data-k="1" type="button">１分</button>
+                <button class="chip" data-k="5" type="button">５分</button>
+                <button class="chip" data-k="15" type="button">１５</button>
+                <button class="chip" data-k="30" type="button">３０</button>
+                <button class="chip" data-k="d" type="button">日Ｋ</button>
+                <button class="chip" data-k="w" type="button">週Ｋ</button>
+              </span>
             </div>
           </div>
           <div class="meta" id="sumline"></div>
@@ -282,7 +285,7 @@
         <div class="oi" id="oi-top"></div>
       </div>
     </div>
-    <div class="ver">v20260814-0100</div>
+    <div class="ver">v20260814-0101</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
   <script>
@@ -333,6 +336,11 @@
     function dateKey(d) {
       if (d == null || d === "") return "";
       return String(d).replace(/-/g, "").slice(0, 8);
+    }
+    function ymdDash(d) {
+      const s = dateKey(d);
+      if (s.length < 8) return "";
+      return s.slice(0, 4) + "-" + s.slice(4, 6) + "-" + s.slice(6, 8);
     }
 
     function raw(v) {
@@ -1135,6 +1143,26 @@
           ];
         }
       }
+      // 每 5 秒報價：強制把最新價寫進尾端，確保走勢圖跟 LIVE 同步重畫
+      if (daySpan < 2) {
+        const livePx = n(q() && q().CLastPrice);
+        if (livePx != null && pts.length) {
+          const now = Date.now();
+          const last = pts[pts.length - 1];
+          if (now - last.time < 120000) {
+            last.px = livePx;
+            last.close = livePx;
+            last.high = Math.max(last.high != null ? last.high : livePx, livePx);
+            last.low = Math.min(last.low != null ? last.low : livePx, livePx);
+            last.time = Math.max(last.time, now - 500);
+          } else {
+            pts.push({
+              px: livePx, vol: 0, time: now,
+              open: livePx, high: livePx, low: livePx, close: livePx,
+            });
+          }
+        }
+      }
       return pts;
     }
 
@@ -1314,18 +1342,123 @@
       return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
     }
 
+    // 日／夜 1 分合併 → 30 分（含未走完的當根）
+    function all1mBars() {
+      return joinBars(minutePack.night_1m, minutePack.day_1m);
+    }
+    function bars30m() {
+      const m1 = all1mBars();
+      if (m1.length) return resample(m1, 30 * 60 * 1000);
+      const m5 = joinBars(minutePack.night_5m, minutePack.day_5m);
+      if (m5.length) return resample(m5, 30 * 60 * 1000);
+      const m15 = joinBars(minutePack.night_15m, minutePack.day_15m);
+      if (m15.length) return resample(m15, 30 * 60 * 1000);
+      return [];
+    }
+    function liveLastPx() {
+      const d = n(snap && snap.day && snap.day.CLastPrice);
+      const n0 = n(snap && snap.night && snap.night.CLastPrice);
+      const sk = liveSess();
+      if (sk === "day" && d != null) return d;
+      if (sk === "night" && n0 != null) return n0;
+      return d != null ? d : n0;
+    }
+    // 用 30 分合成指定交易日的日 K（開＝首根；高／低／收跟最新；盤中未完也出棒）
+    function synthDayBar(ymd8) {
+      const want = dateKey(ymd8 || tradingDayKey());
+      if (!want) return null;
+      let rows = bars30m().filter((b) => dateKey(b.date) === want);
+      if (!rows.length) rows = all1mBars().filter((b) => dateKey(b.date) === want);
+      if (!rows.length) return null;
+      let o = rows[0].open != null ? rows[0].open : rows[0].close;
+      let h = -Infinity, l = Infinity, c = rows[rows.length - 1].close, v = 0;
+      rows.forEach((b) => {
+        const hh = b.high != null ? b.high : b.close;
+        const ll = b.low != null ? b.low : b.close;
+        if (hh > h) h = hh;
+        if (ll < l) l = ll;
+        c = b.close;
+        v += b.volume || 0;
+      });
+      const px = liveLastPx();
+      if (px != null) {
+        if (px > h) h = px;
+        if (px < l) l = px;
+        c = px;
+      }
+      if (!(h > -Infinity) || o == null) return null;
+      const dash = ymdDash(want);
+      const p = dash.split("-");
+      const ts = Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2]), 5, 45);
+      return { timestamp: ts, open: o, high: h, low: l, close: c, volume: v, date: dash, live: true };
+    }
+    // 日 K：收盤前用 30 分合成當日；收盤後冷備有該日則用冷備
+    function dayBarsLive() {
+      const hist = dailyBars().slice();
+      const today8 = tradingDayKey();
+      const synth = synthDayBar(today8);
+      if (!synth) return hist;
+      const idx = hist.findIndex((b) => dateKey(b.date) === today8);
+      if (!marketOpen() && idx >= 0 && !hist[idx].live) return hist;
+      if (idx >= 0) {
+        hist[idx] = Object.assign({}, hist[idx], {
+          open: synth.open,
+          high: Math.max(hist[idx].high, synth.high),
+          low: Math.min(hist[idx].low, synth.low),
+          close: synth.close,
+          volume: synth.volume || hist[idx].volume,
+          live: true,
+        });
+      } else hist.push(synth);
+      return hist;
+    }
+    // 週 K：冷備 + 本週 30 分合成（未完週也更新上下影）
+    function weekBarsLive() {
+      let weeks =
+        dailyPack.week && dailyPack.week.length
+          ? dailyPack.week.slice()
+          : foldDaily(dailyBars(), weekKey);
+      const m30 = bars30m();
+      const src = m30.length ? m30 : all1mBars();
+      if (!src.length) return weeks;
+      const from30 = foldDaily(src, weekKey);
+      if (!from30.length) return weeks;
+      const cur = Object.assign({}, from30[from30.length - 1]);
+      const px = liveLastPx();
+      if (px != null) {
+        cur.high = Math.max(cur.high, px);
+        cur.low = Math.min(cur.low, px);
+        cur.close = px;
+      }
+      const wk = weekKey(cur);
+      const i = weeks.findIndex((b) => weekKey(b) === wk);
+      if (i >= 0) {
+        weeks[i] = {
+          timestamp: weeks[i].timestamp,
+          open: weeks[i].open,
+          high: Math.max(weeks[i].high, cur.high),
+          low: Math.min(weeks[i].low, cur.low),
+          close: cur.close,
+          volume: weeks[i].volume || 0,
+          date: weeks[i].date || cur.date,
+        };
+      } else weeks.push(cur);
+      return weeks;
+    }
     function klineData() {
       const { m1, m5, m15 } = packBars();
       if (kInt === "1") {
         const raw = m1.length ? m1 : m5;
-        // 1 分 K 同盤缺棒補平（真源缺時前收持平），避免空白斷層
         return fillMinutes(raw, 60000);
       }
       if (kInt === "5") return m5.length ? m5 : resample(m1, 5 * 60 * 1000);
       if (kInt === "15") return m15.length ? m15 : resample(m5.length ? m5 : m1, 15 * 60 * 1000);
-      if (kInt === "30") return resample(m15.length ? m15 : (m5.length ? m5 : m1), 30 * 60 * 1000);
-      if (kInt === "w") return dailyPack.week && dailyPack.week.length ? dailyPack.week : foldDaily(dailyBars(), weekKey);
-      return dailyBars();
+      if (kInt === "30") {
+        const src = m1.length ? m1 : m5.length ? m5 : m15;
+        return resample(src, 30 * 60 * 1000);
+      }
+      if (kInt === "w") return weekBarsLive();
+      return dayBarsLive();
     }
 
     function fitCanvas(c, cssH) {
@@ -1519,6 +1652,31 @@
           }
         }
       });
+
+      // 當日走勢：36 期移動平均（對應圖上每一根點）
+      if (!multi && pts.length >= 2) {
+        ctx.save();
+        ctx.strokeStyle = "#2563eb";
+        ctx.lineWidth = 1.25;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        let started = false;
+        for (let i = 0; i < pts.length; i++) {
+          let s = 0, c = 0;
+          const from = Math.max(0, i - 35);
+          for (let j = from; j <= i; j++) {
+            s += pts[j].px;
+            c++;
+          }
+          const ma = s / c;
+          const x = xAtI(i, pts[i].time);
+          const y = yAt(ma);
+          if (!started) { ctx.moveTo(x, y); started = true; }
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
 
       let hiI = 0, loI = 0, hiV = -Infinity, loV = Infinity;
       pts.forEach((p, i) => {
@@ -1790,39 +1948,12 @@
     }
 
     function liveDayBar() {
-      const x = q();
-      if (!x) return null;
-      const c = n(x.CLastPrice);
-      if (c == null) return null;
-      const so = sessOHLC();
-      const o = so ? so.o : null;
-      const h = so ? so.h : null;
-      const l = so ? so.l : null;
-      const ds = String(x.CDate || "");
-      const date = ds.length === 8 ? ds.slice(0, 4) + "-" + ds.slice(4, 6) + "-" + ds.slice(6, 8) : "";
-      if (!date) return null;
-      const p = date.split("-");
-      const ts = Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2]), 5, 45);
-      return {
-        timestamp: ts,
-        open: o == null ? c : o,
-        high: h == null ? c : h,
-        low: l == null ? c : l,
-        close: c,
-        volume: n(x.CTotalVolume) || 0,
-        date,
-      };
+      // 迷你日 K 與主圖日 K 同源：30 分合成當日（含夜／日）
+      return synthDayBar(tradingDayKey());
     }
 
     function miniBars() {
-      const all = dailyBars().slice();
-      const liveBar = liveDayBar();
-      if (liveBar) {
-        const last = all[all.length - 1];
-        if (last && last.date === liveBar.date) all[all.length - 1] = Object.assign({}, last, liveBar, { timestamp: last.timestamp });
-        else all.push(liveBar);
-      }
-      return all;
+      return dayBarsLive();
     }
 
     function miniFit36() {
@@ -2106,12 +2237,33 @@
       }
     };
     function markChips() {
+      const kOn = chartMode === "k";
+      const btnK = $("btnKMode");
+      if (btnK) btnK.classList.toggle("on", kOn);
+      const lg = $("lineGroup");
+      const kg = $("kGroup");
+      if (lg) lg.hidden = kOn;
+      if (kg) kg.hidden = !kOn;
       document.querySelectorAll(".chip[data-k]").forEach((b) => {
-        b.classList.toggle("on", chartMode === "k" && b.getAttribute("data-k") === kInt);
+        b.classList.toggle("on", kOn && b.getAttribute("data-k") === kInt);
       });
       document.querySelectorAll(".chip[data-line]").forEach((b) => {
-        b.classList.toggle("on", chartMode === "line" && Number(b.getAttribute("data-line")) === daySpan);
+        b.classList.toggle("on", !kOn && Number(b.getAttribute("data-line")) === daySpan);
       });
+    }
+
+    const btnKMode = $("btnKMode");
+    if (btnKMode) {
+      btnKMode.onclick = () => {
+        if (chartMode === "k") {
+          chartMode = "line";
+        } else {
+          chartMode = "k";
+          if (!kInt) kInt = "1";
+        }
+        markChips();
+        draw();
+      };
     }
 
     document.querySelectorAll(".chip[data-k]").forEach((btn) => {
