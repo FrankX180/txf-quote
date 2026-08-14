@@ -303,7 +303,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線 — · 今日 — 次 / — 人 · 峰值 —</div>
-      <div class="ver foot-mid">1.07</div>
+      <div class="ver foot-mid">1.08</div>
       <div class="ver foot-right">浪大</div>
     </div>
   </div>
@@ -382,6 +382,12 @@
       const x = Number(v);
       if (!Number.isFinite(x)) return String(v);
       return x.toLocaleString("zh-TW", { minimumFractionDigits: d, maximumFractionDigits: d });
+    }
+    function fmtPlain(v) {
+      if (v == null || v === "") return "—";
+      const x = Number(v);
+      if (!Number.isFinite(x)) return String(v);
+      return String(Math.round(x));
     }
     function cls(diff) {
       if (diff == null || diff === 0) return "flat";
@@ -524,7 +530,7 @@
         `<div class="sumtxt">` +
         `股價 <b>${fmt(last, 0)}</b> <span class="${cls(diff)}">${arrow(diff)} ${fmt(diff, 0)}(${fmt(rate, 2)}%)</span>` +
         `　總口數 ${fmt(x.CTotalVolume)}<br>` +
-        `昨收 ${fmt(x.CRefPrice)}　開盤 ${fmt(openPx)}　最高 <span class="up">${fmt(highPx)}</span>　最低 <span class="dn">${fmt(lowPx)}</span>` +
+        `昨 ${fmtPlain(x.CRefPrice)}　開 ${fmtPlain(openPx)}　高 <span class="up">${fmtPlain(highPx)}</span>　低 <span class="dn">${fmtPlain(lowPx)}</span>` +
         `</div>`;
 
       let bidTot = 0, askTot = 0;
@@ -1540,7 +1546,7 @@
       const wins = range.wins || [];
       const multi = daySpan >= 2;
       // 多日不畫底部 X 文字（靠十字線讀時間），只留窄底邊
-      const padL = 56, padR = 33, padT = 10, padB = multi ? 8 : 22;
+      const padL = 48, padR = 33, padT = 10, padB = multi ? 8 : 22;
       const imbH = showImb && !multi ? 52 : 0;
       const imbGap = imbH ? 6 : 0;
       const cw = w - padL - padR;
@@ -1562,7 +1568,7 @@
         ctx.moveTo(padL, y);
         ctx.lineTo(w - padR, y);
         ctx.stroke();
-        ctx.fillText(pv.toLocaleString("zh-TW"), 4, y + 4);
+        ctx.fillText(String(Math.round(pv)), 4, y + 4);
       }
       // 僅當日畫小時刻度文字；多日不畫 X 軸文字（避免重疊）
       ctx.textAlign = "center";
@@ -1724,7 +1730,7 @@
         ctx.fill();
         ctx.font = "11px sans-serif";
         ctx.textAlign = "center";
-        const lab = Math.round(val).toLocaleString("zh-TW");
+        const lab = String(Math.round(val));
         const ty = up ? Math.max(padT + 11, y - 8) : Math.min(padT + ch - 2, y + 14);
         ctx.fillText(lab, Math.min(padL + cw - 20, Math.max(padL + 20, x)), ty);
       }
