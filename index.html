@@ -303,7 +303,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-mid">1.11</div>
+      <div class="ver foot-mid">1.12</div>
       <div class="ver foot-right">浪大</div>
     </div>
   </div>
@@ -1476,8 +1476,12 @@
       } else weeks.push(cur);
       return weeks;
     }
+    // 分 K：永遠日夜併時間軸（不跟 UI ☀️/🌙 過濾）。只畫夜盤會把 05:00→15:00 連成斷崖。
+    // 報價列開高低仍用 sessOHLC（當盤）；此處只影響 K 圖資料。
     function klineData() {
-      const { m1, m5, m15 } = packBars();
+      const m1 = joinBars(minutePack.night_1m, minutePack.day_1m);
+      const m5 = joinBars(minutePack.night_5m, minutePack.day_5m);
+      const m15 = joinBars(minutePack.night_15m, minutePack.day_15m);
       if (kInt === "1") {
         const raw = m1.length ? m1 : m5;
         return fillMinutes(raw, 60000);
