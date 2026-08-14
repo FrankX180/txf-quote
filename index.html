@@ -303,7 +303,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-mid">1.16</div>
+      <div class="ver foot-mid">1.17</div>
       <div class="ver foot-right">浪大</div>
     </div>
   </div>
@@ -774,6 +774,46 @@
       while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
       return ymdOf(d);
     }
+    // 上一交易日曆日（跳過六日）
+    function prevTradingYmd(ymd) {
+      const d0 = parseYmd(ymd);
+      if (!d0) return null;
+      d0.setDate(d0.getDate() - 1);
+      while (d0.getDay() === 0 || d0.getDay() === 6) d0.setDate(d0.getDate() - 1);
+      return ymdOf(d0);
+    }
+    // 奇摩夜盤：Mon–Thu ts 已是牆鐘；僅「周五夜」會標到下一交易日（如 8/16）
+    // 還原為實際開盤曆日 15:00～次日 05:00（8/14 15:00～8/15 05:00）
+    function barWallTs(b) {
+      if (!b || b.timestamp == null) return b && b.timestamp;
+      const ts = +b.timestamp;
+      const ymd = dateKey(b.date);
+      if (!ymd) return ts;
+      const d = new Date(ts);
+      const hm = d.getHours() * 100 + d.getMinutes();
+      const isNight = b.session === "night" || hm >= 1500 || hm < 500;
+      if (!isNight) return ts;
+      const openYmd = prevTradingYmd(ymd);
+      if (!openYmd || openYmd === ymd) return ts;
+      const tradeD = parseYmd(ymd);
+      const openD = parseYmd(openYmd);
+      if (!tradeD || !openD) return ts;
+      const gapDays = (tradeD.getTime() - openD.getTime()) / 86400000;
+      if (gapDays <= 1.5) return ts; // 一般隔夜
+      // 跨周末：開盤日有日盤、卻沒有「開盤日 date」的夜盤 → 此 ymd 夜盤實為開盤日夜
+      const nightDates = {};
+      (minutePack.night_1m || []).forEach((x) => {
+        const k = dateKey(x && x.date);
+        if (k) nightDates[k] = 1;
+      });
+      const dayDates = {};
+      (minutePack.day_1m || []).forEach((x) => {
+        const k = dateKey(x && x.date);
+        if (k) dayDates[k] = 1;
+      });
+      if (!dayDates[openYmd] || nightDates[openYmd]) return ts;
+      return ts + (atHm(openD, 15, 0) - atHm(tradeD, 15, 0));
+    }
     // 曆日交易日 key（僅凌晨夜盤歸前一曆日；周五夜盤不在此處理）
     function tradingDayKey(ts) {
       const d = new Date(ts || Date.now());
@@ -864,10 +904,8 @@
       return atHm(d0, 15, 0);
     }
     function alignImbChartT(t, sk) {
-      if (sk !== "night" || t == null) return t;
-      const delta = nightChartOpenMs() - nightWallOpenMs(t);
-      if (!delta) return t;
-      return t + delta;
+      // 走勢改牆鐘後，內外盤 t 本即牆鐘，不再偏移到奇摩下一交易日
+      return t;
     }
     function imbSeries() {
       const sk = sessKey();
@@ -1220,9 +1258,10 @@
         minuteSeries().filter((b) => keep.indexOf(dateKey(b.date)) >= 0)
       );
       let pts = mins.map((b) => ({
-        px: b.close, vol: b.volume, time: b.timestamp,
+        px: b.close, vol: b.volume, time: barWallTs(b),
         open: b.open, high: b.high, low: b.low, close: b.close,
       }));
+      pts.sort((a, b) => a.time - b.time);
       // 尾端即時：當日併當盤 5 秒 tick；多日併日+夜 tick（盤後夜盤也要接到現在）
       {
         const ticks =
@@ -1295,7 +1334,7 @@
     // 多日 X 軸：依實際有資料的段落連續拼接，中間只留小縫
     // 禁用日曆整段日／夜窗（跨六日會空一整天；未走完夜盤 14 小時也會大片留白）
     const MULTI_SEG_GAP_MS = 30 * 60000; // 段間視覺縫 ≈ 30 分寬
-    const MULTI_RUN_BREAK_MS = 90 * 60000; // 點距 >90 分視為新段（跨盤／跨周末）
+    const MULTI_RUN_BREAK_MS = 60 * 60000; // >60 分新段（日 13:45→夜 15:00＝75 分切開，只留小縫）
     function sessWindows(pts) {
       if (!pts || pts.length < 2) return [];
       const sorted = pts.slice().sort((a, b) => a.time - b.time);
