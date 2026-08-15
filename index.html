@@ -129,6 +129,19 @@
     }
     .chip.on, .mode.on { background: #b91c1c; color: #fff; }
     #khost { width: 100%; height: 320px; display: none; }
+    #kWrap { position: relative; width: 100%; }
+    #kMonthNote {
+      position: absolute;
+      left: 8px;
+      top: 22px;
+      z-index: 6;
+      font-size: 12px;
+      font-weight: 600;
+      color: #d32f2f;
+      pointer-events: none;
+      display: none;
+      line-height: 1.2;
+    }
     table.q { width: 100%; border-collapse: collapse; font-size: 13px; }
     table.q td { padding: 6px 0; border-bottom: 1px solid #f3f4f6; }
     table.q td:nth-child(2), table.q td:nth-child(4) { text-align: right; font-variant-numeric: tabular-nums; }
@@ -270,7 +283,10 @@
           </div>
           <div class="meta" id="sumline"></div>
           <canvas id="chart" width="720" height="280"></canvas>
-          <div id="khost"></div>
+          <div id="kWrap">
+            <div id="khost"></div>
+            <div id="kMonthNote">以結算日繪製月收盤日</div>
+          </div>
         </div>
         <div class="side">
           <div class="side-top">
@@ -303,7 +319,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.21</div>
+      <div class="ver foot-right">1.22</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1728,10 +1744,19 @@
       return { ctx, w, h };
     }
 
+    function syncKMonthNote() {
+      const el = $("kMonthNote");
+      if (!el) return;
+      const show = chartMode === "k" && kInt === "m";
+      el.style.display = show ? "block" : "none";
+    }
     function draw() {
       const lineOn = chartMode === "line";
       $("chart").style.display = lineOn ? "block" : "none";
       $("khost").style.display = lineOn ? "none" : "block";
+      const kw = $("kWrap");
+      if (kw) kw.style.display = lineOn ? "none" : "block";
+      syncKMonthNote();
       if (!lineOn) {
         renderK();
         return;
