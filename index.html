@@ -156,7 +156,7 @@
     .ob .bar-ask { text-align: left; }
     .ob .pxb { color: var(--up); text-align: right; white-space: nowrap; font-size: 14px; font-weight: 700; }
     .ob .pxa { color: var(--dn); text-align: left; white-space: nowrap; font-size: 14px; font-weight: 700; }
-    .ob .rng { text-align: right; font-size: 12px; font-weight: 400; color: #374151; white-space: nowrap; }
+    .ob .rng { text-align: right; font-size: 12px; font-weight: 700; color: #374151; white-space: nowrap; }
     .bar-wrap {
       position: relative;
       display: flex;
@@ -303,8 +303,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-mid">1.19</div>
-      <div class="ver foot-right">浪大</div>
+      <div class="ver foot-right">1.20</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -837,6 +836,25 @@
       if (d.getHours() < 6) d.setDate(d.getDate() - 1);
       return ymdOf(d);
     }
+    // 內外盤檔日：夜盤用「夜盤開盤曆日」（周五夜→20260814）；週末勿落到空的次日檔
+    function nightImbDayKey(ts) {
+      let t = ts || Date.now();
+      if (sessKindAt(t) !== "night") {
+        for (let i = 1; i <= 168; i++) {
+          const t2 = t - i * 3600000;
+          if (sessKindAt(t2) === "night") {
+            t = t2;
+            break;
+          }
+        }
+      }
+      const d = new Date(t);
+      if (d.getHours() * 60 + d.getMinutes() < 5 * 60) d.setDate(d.getDate() - 1);
+      return ymdOf(d);
+    }
+    function imbDayKey() {
+      return sessKey() === "night" ? nightImbDayKey() : tradingDayKey();
+    }
     // 台指期規則：夜盤交易日＝「下一交易日」
     // 例：周五 15:00 起的夜盤 date／奇摩時間軸＝下周一（8/14 周五夜 → 8/16）
     // 多日走勢必須用此 key 對齊 LIVE，禁把周五夜當成曆日 8/14 的空窗
@@ -870,7 +888,7 @@
       try {
         localStorage.setItem(
           IMB_KEY,
-          JSON.stringify({ dayKey: tradingDayKey(), bars: imbBars })
+          JSON.stringify({ dayKey: imbDayKey(), bars: imbBars })
         );
       } catch (e) {}
     }
@@ -878,7 +896,18 @@
       try {
         const o = JSON.parse(localStorage.getItem(IMB_KEY) || "null");
         if (!o || !o.bars) return;
-        if (o.dayKey !== tradingDayKey()) return;
+        const hasN = Array.isArray(o.bars.night) && o.bars.night.length;
+        const hasD = Array.isArray(o.bars.day) && o.bars.day.length;
+        if (!hasN && !hasD) return;
+        // 有資料就用；空 dayKey 或對得上夜盤／日盤檔日即可
+        if (
+          o.dayKey &&
+          o.dayKey !== imbDayKey() &&
+          o.dayKey !== tradingDayKey() &&
+          o.dayKey !== nightImbDayKey() &&
+          !hasN
+        )
+          return;
         imbBars = {
           day: Array.isArray(o.bars.day) ? o.bars.day : [],
           night: Array.isArray(o.bars.night) ? o.bars.night : [],
@@ -949,21 +978,34 @@
     }
     async function loadImbCloud() {
       try {
-        const dk = tradingDayKey();
-        const pack = await fetch(LIVE + "?kind=imb&day=" + dk, { cache: "no-cache" }).then((r) =>
+        const dk = imbDayKey();
+        let pack = await fetch(LIVE + "?kind=imb&day=" + dk, { cache: "no-cache" }).then((r) =>
           r.ok ? r.json() : null
         );
-        if (!pack) {
+        const packEmpty =
+          !pack ||
+          (!(pack.night && pack.night.length) && !(pack.day && pack.day.length));
+        if (packEmpty) {
           // 冷備：GitHub 當日檔
           const ghPack = await gh("data/imb-" + dk + ".json")
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null);
-          if (!ghPack) return;
-          imbBars.day = mergeImbSide(imbBars.day, ghPack.day);
-          imbBars.night = mergeImbSide(imbBars.night, ghPack.night);
-          saveImbBars();
-          return;
+          if (ghPack) pack = ghPack;
         }
+        // 夜盤仍空：再抓 GitHub 日檔（Worker 可能回空）與 latest
+        if (sessKey() === "night" && !(pack && pack.night && pack.night.length)) {
+          const ghN = await gh("data/imb-" + dk + ".json")
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null);
+          if (ghN && ghN.night && ghN.night.length) pack = ghN;
+        }
+        if (sessKey() === "night" && !(pack && pack.night && pack.night.length)) {
+          const latest = await gh("data/imb-latest.json")
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null);
+          if (latest && latest.night && latest.night.length) pack = latest;
+        }
+        if (!pack) return;
         imbBars.day = mergeImbSide(imbBars.day, pack.day);
         imbBars.night = mergeImbSide(imbBars.night, pack.night);
         saveImbBars();
