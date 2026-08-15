@@ -261,7 +261,7 @@
               <span class="chip-group" id="kGroup" hidden>
                 <button class="chip" data-k="1" type="button">１分</button>
                 <button class="chip" data-k="5" type="button">５分</button>
-                <button class="chip" data-k="15" type="button">１５</button>
+                <button class="chip" data-k="m" type="button">月Ｋ</button>
                 <button class="chip" data-k="30" type="button">３０</button>
                 <button class="chip" data-k="d" type="button">日Ｋ</button>
                 <button class="chip" data-k="w" type="button">週Ｋ</button>
@@ -303,7 +303,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-mid">1.18</div>
+      <div class="ver foot-mid">1.19</div>
       <div class="ver foot-right">浪大</div>
     </div>
   </div>
@@ -316,7 +316,7 @@
     let daySpan = 0;
     let chartMode = "line";
     let kInt = "1";
-    let dailyPack = { night: [], day: [], daily: [], week: [] };
+    let dailyPack = { night: [], day: [], daily: [], week: [], month: [] };
     let uncover = { inst: [], top: [], date: "" };
     let minutePack = {
       night_1m: [], day_1m: [],
@@ -682,7 +682,12 @@
     }
 
     function liveSess() {
-      const hm = new Date().getHours() * 100 + new Date().getMinutes();
+      const d = new Date();
+      const dow = d.getDay();
+      const hm = d.getHours() * 100 + d.getMinutes();
+      // 周末／周日：凍結在夜盤（上周五夜為最後一盤）
+      if (dow === 0) return "night";
+      if (dow === 6 && hm >= 510) return "night";
       // 預設盤別：14:58 起才切夜盤；08:45 前仍夜盤；13:46–14:57 維持日盤（凍結）
       if (hm >= 1458 || hm < 845) return "night";
       return "day";
@@ -693,10 +698,22 @@
       const hm = d.getHours() * 100 + d.getMinutes();
       if (dow === 0) return false;
       if (dow === 6) return hm < 510;
-      // day 08:45-13:45；夜盤預設／輪詢自 14:58 起（與 liveSess 對齊）
-      if (hm >= 845 && hm <= 1345) return true;
+      // 日盤含 08:30 盤前（五檔可更新）；正式成交 08:45；夜盤 14:58 起
+      if (hm >= 830 && hm <= 1345) return true;
       if (hm >= 1458 || hm < 510) return true;
       return false;
+    }
+    // 可覆寫五檔的盤：日 08:30–13:45、夜 14:58–05:09（周末除外）
+    function bookSessNow() {
+      if (!marketOpen()) return null;
+      const d = new Date();
+      const dow = d.getDay();
+      const hm = d.getHours() * 100 + d.getMinutes();
+      if (dow === 0) return null;
+      if (dow === 6) return hm < 510 ? "night" : null;
+      if (hm >= 830 && hm <= 1345) return "day";
+      if (hm >= 1458 || hm < 510) return "night";
+      return null;
     }
     function sessionOpenAt() {
       const d = new Date();
@@ -1067,13 +1084,27 @@
       return Object.keys(by).sort((x, y) => x - y).map((k) => by[k]);
     }
 
-    // 盤別：日 08:45–13:45、夜 15:00–次日 05:00；休市中不當同盤
+    // 盤別：日 08:45–13:45、夜 15:00–次日 05:00；休市／周末不當同盤
+    // 夜盤：周一～周五晚（周五夜→周六 05:00）；周一凌晨與周日無夜盤
     function sessKindAt(ts) {
       const d = new Date(ts);
+      const dow = d.getDay(); // 0=日 … 6=六
       const hm = d.getHours() * 60 + d.getMinutes();
-      // 日盤含 13:45 收盤棒；13:46–14:59 休市不畫線
-      if (hm >= 8 * 60 + 45 && hm <= 13 * 60 + 45) return "day";
-      if (hm >= 15 * 60 || hm < 5 * 60) return "night";
+      // 凌晨 00:00–04:59：僅周二～周六（接前一晚夜盤）
+      if (hm < 5 * 60) {
+        if (dow === 0 || dow === 1) return "closed";
+        return "night";
+      }
+      // 日盤：周一～五 08:45–13:45
+      if (hm >= 8 * 60 + 45 && hm <= 13 * 60 + 45) {
+        if (dow >= 1 && dow <= 5) return "day";
+        return "closed";
+      }
+      // 夜盤開盤後：周一～五 15:00 起
+      if (hm >= 15 * 60) {
+        if (dow >= 1 && dow <= 5) return "night";
+        return "closed";
+      }
       return "closed";
     }
     function chartStepMs() {
@@ -1485,6 +1516,14 @@
       d.setDate(d.getDate() - diff);
       return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
     }
+    function monthKey(b) {
+      const d = new Date(b.timestamp);
+      return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+    }
+    function monthBarsLive() {
+      if (dailyPack.month && dailyPack.month.length) return dailyPack.month.slice();
+      return foldDaily(dailyBars(), monthKey);
+    }
 
     // 日／夜 1 分合併 → 30 分（含未走完的當根）
     function all1mBars() {
@@ -1601,6 +1640,7 @@
       }
       if (kInt === "5") return m5.length ? m5 : resample(m1, 5 * 60 * 1000);
       if (kInt === "15") return m15.length ? m15 : resample(m5.length ? m5 : m1, 15 * 60 * 1000);
+      if (kInt === "m") return monthBarsLive();
       if (kInt === "30") {
         const src = m1.length ? m1 : m5.length ? m5 : m15;
         return resample(src, 30 * 60 * 1000);
@@ -1882,7 +1922,7 @@
 
       // 副圖：內外盤差面積圖（同主圖遮罩漸層；0 軸上紅下綠）
       if (showImb && !multi && imbH > 0) {
-        const ibs = imbSeries().filter((b) => b && b.t >= t0 && b.t <= t1)
+        const ibs = imbSeries().filter((b) => b && b.t >= t0 && b.t <= t1 && sessKindAt(b.t) !== "closed")
           .slice().sort((a, b) => a.t - b.t);
         const zeroY = Math.round(imbTop + imbH / 2) + 0.5;
         // 左緣水平「內外盤」10pt
@@ -2264,70 +2304,98 @@
       const wtx = rows.find((x) => x.symbol === "WTX&") || rows[0];
       if (!wtx) return;
       const q0 = slimYahoo(wtx);
-      const liveK = liveSess();
+      const nowTs = Date.now();
+      const tradeSk = sessKindAt(nowTs); // day / night / closed（含周末）
+      const bookSk = bookSessNow(); // 08:30 起可更新日盤五檔
+      const freezeSk = liveSess();
       snap = Object.assign({}, snap || {}, {
         fetchedAt: new Date().toLocaleString("zh-TW", { hour12: false }),
         source: "yahoo via wtx.19850926.xyz",
       });
-      // 只覆寫當盤；另一盤 lastBook 不動
-      snap[liveK] = q0;
-      // lastBook 延後到 patchQuoteOHLC 之後再存
       const px = n(q0.CLastPrice);
       const vol = n(q0.CTotalVolume) || 0;
       const inn = n(q0.inMarket);
       const outv = n(q0.outMarket);
-      // 休市不寫內外盤／hist，避免 13:46–14:59 水平折線
-      const nowTs = Date.now();
-      const inSess = sessKindAt(nowTs) !== "closed";
-      if (inSess) recordImb(liveK, inn, outv, nowTs);
-      if (px && inSess) {
-        const pt = {
-          t: snap.fetchedAt,
-          ts: nowTs,
-          time: q0.CTime,
-          px,
-          vol,
-          in: inn,
-          out: outv,
-          d: inn != null && outv != null ? outv - inn : null,
-        };
-        const h = hist[liveK] || [];
-        if (
-          !h.length ||
-          h[h.length - 1].px !== px ||
-          h[h.length - 1].time !== pt.time ||
-          h[h.length - 1].d !== pt.d
-        ) {
-          h.push(pt);
-          if (h.length > 800) h.splice(0, h.length - 800);
-          hist[liveK] = h;
+      let liveK = freezeSk;
+
+      if (tradeSk === "day" || tradeSk === "night") {
+        // 正式盤中：整包覆寫當盤（含五檔／內外盤）
+        liveK = tradeSk;
+        snap[tradeSk] = q0;
+        recordImb(tradeSk, inn, outv, nowTs);
+        if (px) {
+          const pt = {
+            t: snap.fetchedAt,
+            ts: nowTs,
+            time: q0.CTime,
+            px,
+            vol,
+            in: inn,
+            out: outv,
+            d: inn != null && outv != null ? outv - inn : null,
+          };
+          const h = hist[tradeSk] || [];
+          if (
+            !h.length ||
+            h[h.length - 1].px !== px ||
+            h[h.length - 1].time !== pt.time ||
+            h[h.length - 1].d !== pt.d
+          ) {
+            h.push(pt);
+            if (h.length > 800) h.splice(0, h.length - 800);
+            hist[tradeSk] = h;
+          }
         }
+        // 颱風／停市：開盤 3 分鐘後，價+量+時間都不變連續 10 次 → 改探測
+        const sig = [px, vol, q0.CTime || ""].join("|");
+        const grace = Date.now() - sessionOpenAt() >= 3 * 60 * 1000;
+        if (grace && lastSig && sig === lastSig) {
+          staleHits++;
+        } else if (sig !== lastSig) {
+          staleHits = 0;
+          probeOnly = false;
+        }
+        lastSig = sig;
+        if (staleHits >= 10) {
+          probeOnly = true;
+          try {
+            localStorage.setItem(
+              STALE_KEY,
+              JSON.stringify({ date: new Date().toDateString(), sess: tradeSk, at: Date.now() })
+            );
+          } catch (e) {}
+        }
+        live = true;
+        touchSessTrack(tradeSk, px);
+        bumpLiveBar();
+        patchQuoteOHLC(tradeSk, px);
+        saveLastBook(tradeSk, snap[tradeSk]);
+      } else if (bookSk) {
+        // 盤前（如周一 08:30–08:44）：更新五檔+最新價，不寫走勢／內外盤點
+        liveK = bookSk;
+        const prev = Object.assign({}, (snap && snap[bookSk]) || {});
+        ["CLastPrice", "CRefPrice", "CDiff", "CDiffRate", "CTotalVolume", "CDate", "CTime", "inMarket", "outMarket"].forEach((k) => {
+          if (q0[k] != null && q0[k] !== "") prev[k] = q0[k];
+        });
+        for (let i = 1; i <= 5; i++) {
+          ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach((k) => {
+            const key = k + i;
+            if (q0[key] != null && q0[key] !== "") prev[key] = q0[key];
+          });
+        }
+        snap[bookSk] = prev;
+        patchQuoteOHLC(bookSk, px);
+        saveLastBook(bookSk, snap[bookSk]);
+      } else {
+        // 休市／周末：只動凍結盤最新價，五檔／內外盤／量完全保留（日盤維持上個交易日 13:45）
+        liveK = freezeSk;
+        const prev = Object.assign({}, (snap && snap[freezeSk]) || {});
+        if (q0.CLastPrice != null && q0.CLastPrice !== "") prev.CLastPrice = q0.CLastPrice;
+        if (q0.CRefPrice != null && q0.CRefPrice !== "") prev.CRefPrice = q0.CRefPrice;
+        if (q0.CDiff != null && q0.CDiff !== "") prev.CDiff = q0.CDiff;
+        if (q0.CDiffRate != null && q0.CDiffRate !== "") prev.CDiffRate = q0.CDiffRate;
+        snap[freezeSk] = prev;
       }
-      // 颱風／停市：開盤 3 分鐘後，價+量+時間都不變連續 10 次 → 改探測
-      const sig = [px, vol, q0.CTime || ""].join("|");
-      const grace = Date.now() - sessionOpenAt() >= 3 * 60 * 1000;
-      if (grace && lastSig && sig === lastSig) {
-        staleHits++;
-      } else if (sig !== lastSig) {
-        staleHits = 0;
-        probeOnly = false;
-      }
-      lastSig = sig;
-      if (staleHits >= 10) {
-        probeOnly = true;
-        try {
-          localStorage.setItem(
-            STALE_KEY,
-            JSON.stringify({ date: new Date().toDateString(), sess: liveK, at: Date.now() })
-          );
-        } catch (e) {}
-      }
-      live = true;
-      touchSessTrack(liveK, px);
-      bumpLiveBar();
-      patchQuoteOHLC(liveK, px);
-      // 存 lastBook 時已是修正後開高低
-      saveLastBook(liveK, snap[liveK]);
       render();
     }
 
@@ -2542,6 +2610,7 @@
         dailyPack.day = pack.day || [];
         dailyPack.daily = pack.daily || pack.night || [];
         dailyPack.week = pack.week || [];
+        dailyPack.month = pack.month || [];
       } catch (e) {}
       try {
         const m = await gh("data/kline-minute.json").then((r) => r.json());
