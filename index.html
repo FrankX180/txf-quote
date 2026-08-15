@@ -261,10 +261,10 @@
               <span class="chip-group" id="kGroup" hidden>
                 <button class="chip" data-k="1" type="button">１分</button>
                 <button class="chip" data-k="5" type="button">５分</button>
-                <button class="chip" data-k="m" type="button">月Ｋ</button>
                 <button class="chip" data-k="30" type="button">３０</button>
                 <button class="chip" data-k="d" type="button">日Ｋ</button>
                 <button class="chip" data-k="w" type="button">週Ｋ</button>
+                <button class="chip" data-k="m" type="button">月Ｋ</button>
               </span>
             </div>
           </div>
@@ -303,7 +303,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.20</div>
+      <div class="ver foot-right">1.21</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1558,13 +1558,38 @@
       d.setDate(d.getDate() - diff);
       return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
     }
-    function monthKey(b) {
-      const d = new Date(b.timestamp);
-      return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
-    }
+    // 月 K 雲端已依結算日切好；前端禁止日曆重合成，只併「今天」H/L/C 到最後一根（開盤固定）
     function monthBarsLive() {
-      if (dailyPack.month && dailyPack.month.length) return dailyPack.month.slice();
-      return foldDaily(dailyBars(), monthKey);
+      const hist =
+        dailyPack.month && dailyPack.month.length ? dailyPack.month.slice() : [];
+      if (!hist.length) return hist;
+      const last = Object.assign({}, hist[hist.length - 1]);
+      let h = last.high;
+      let l = last.low;
+      let c = last.close;
+      const qDay = snap && snap.day;
+      const qNight = snap && snap.night;
+      [qDay, qNight].forEach((q) => {
+        if (!q) return;
+        const hh = n(q.CHighPrice);
+        const ll = n(q.CLowPrice);
+        if (hh != null && hh > h) h = hh;
+        if (ll != null && ll < l) l = ll;
+      });
+      const px = liveLastPx();
+      if (px != null) {
+        if (px > h) h = px;
+        if (px < l) l = px;
+        c = px;
+      }
+      hist[hist.length - 1] = Object.assign({}, last, {
+        open: last.open,
+        high: h,
+        low: l,
+        close: c,
+        live: true,
+      });
+      return hist;
     }
 
     // 日／夜 1 分合併 → 30 分（含未走完的當根）
