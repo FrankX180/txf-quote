@@ -67,16 +67,20 @@ def want_fubon(dt=None):
 
 
 def want_daily_k(dt=None):
+    """日／週／月 K 雲端更新視窗（縮流量：收盤定案 + 凌晨短窗）。"""
     if forced():
         return True
     d = dt or now_tw()
     h = hm(d)
     wd = d.weekday()
-    if wd >= 5 and h >= 510:
+    # 周末不抓（夜盤周末已收）
+    if wd >= 5:
         return False
+    # 日盤收後定案（含結算日 13:45 後寫完整月 K）
     if 1350 <= h <= 1600:
         return True
-    if 500 <= h <= 840:
+    # 凌晨短窗：補算昨收（不必整段 05:00–08:40）
+    if 500 <= h <= 530:
         return True
     return False
 

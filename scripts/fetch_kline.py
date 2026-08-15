@@ -1,5 +1,6 @@
 # MoneyDJ 期貨 FITX 日／週 K + 結算日月 K → data/kline-daily.json
 # 月 K：依 TAIFEX 結算日切段（上期結算翌日～本期結算日），雲端預算；前端只併當日 H/L/C。
+# MoneyDJ per=D：曆日 OHLC（是否含夜盤尚未對拍 TAIFEX；量 V6 幾乎全空，月 K volume 不可靠）。
 import json
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
@@ -15,6 +16,10 @@ BASE = (
     "?x=afterhours-options-common-10&a=FITX&b=0&c={per}&d={n}"
 )
 MONTH_FROM = date(2013, 1, 1)
+# 最後一根月 K 的 end 若已過去超過此天數 → 視為結算日表斷鏈，非零 exit
+STALE_MONTH_DAYS = 45
+# 表尾至少要覆蓋到「今日 + N 天」（不足則用第三週三推估）
+HORIZON_DAYS = 400
 
 
 def get(per: str, n: int):
@@ -35,6 +40,8 @@ def fnum(v):
 
 
 def to_bars(rows):
+    # MoneyDJ FITX 日 K：每根 = 曆日一條；夜盤是否入棱不由本 API 文件定義。
+    # V6（量）實測幾乎全 0，保留欄位但不依賴。
     out = []
     for r in reversed(rows or []):
         ds = str(r.get("V1") or "").replace("/", "-")
@@ -69,10 +76,16 @@ def to_bars(rows):
 
 def third_wednesday(y: int, m: int) -> date:
     d = date(y, m, 1)
-    # weekday Mon=0 … Wed=2
     while d.weekday() != 2:
         d += timedelta(days=1)
     return d + timedelta(weeks=2)
+
+
+def _ym_add(y: int, m: int, n: int):
+    m2 = m + n
+    y2 = y + (m2 - 1) // 12
+    m2 = (m2 - 1) % 12 + 1
+    return y2, m2
 
 
 def load_settlement_dates():
@@ -95,6 +108,16 @@ def load_settlement_dates():
         if prev not in flat:
             flat.insert(0, prev)
             flat.sort()
+    # 尾端：若表不夠遮到今日+HORIZON，用第三週三推估補（遇假日未順延，僅防靜默斷鏈）
+    today = datetime.now(TZ).date()
+    need_until = today + timedelta(days=HORIZON_DAYS)
+    while flat and flat[-1] < need_until:
+        ly, lm = flat[-1].year, flat[-1].month
+        ny, nm = _ym_add(ly, lm, 1)
+        est = third_wednesday(ny, nm)
+        if est <= flat[-1]:
+            break
+        flat.append(est)
     return flat
 
 
@@ -130,6 +153,7 @@ def month_bars_from_daily(daily, settlements):
         h = max(x["high"] for x in chunk)
         l = min(x["low"] for x in chunk)
         c = chunk[-1]["close"]
+        # MoneyDJ 量幾乎全 0；仍加總但不當作可信量能
         vol = sum(int(x.get("volume") or 0) for x in chunk)
         y, m, d = settle.year, settle.month, settle.day
         ts = int(datetime(y, m, d, 13, 45, tzinfo=TZ).timestamp() * 1000)
@@ -166,11 +190,21 @@ def main():
     settlements = load_settlement_dates()
     month = month_bars_from_daily(daily, settlements)
 
+    # 量統計：若幾乎全 0 印出提示（不當失敗）
+    nz = sum(1 for b in daily if int(b.get("volume") or 0) > 0)
+    vol_note = (
+        "MoneyDJ V6 volume mostly empty; month volume not meaningful"
+        if nz < max(3, len(daily) // 100)
+        else "ok"
+    )
+
     payload = {
         "fetchedAt": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
         "source": "moneydj daily/week + TAIFEX settlement month",
         "contract": "FITX",
         "monthRule": "prev_settle+1d .. settle (inclusive); from 2013-01",
+        "dailySessionNote": "MoneyDJ calendar daily OHLC; night-session inclusion not verified vs TAIFEX pure day",
+        "volumeNote": vol_note,
         "daily": daily,
         "week": week,
         "month": month,
@@ -195,6 +229,8 @@ def main():
         month[0]["date"] if month else "",
         "last",
         month[-1]["date"] if month else "",
+        "vol_nz",
+        nz,
     )
     if aug:
         print(
@@ -216,6 +252,18 @@ def main():
         )
     else:
         print("WARN no 2026-08-19 month bar yet")
+
+    # MAJOR：最後月 K end 已過去 >45 天 → 結算日表斷鏈，紅燈
+    today = datetime.now(TZ).date()
+    if not month:
+        raise SystemExit("FAIL empty month bars")
+    last_end = date.fromisoformat(str(month[-1].get("end") or month[-1]["date"])[:10])
+    age = (today - last_end).days
+    if age > STALE_MONTH_DAYS:
+        raise SystemExit(
+            f"FAIL month stale: last end {last_end.isoformat()} age={age}d > {STALE_MONTH_DAYS}d; update taifex_settlement_dates.json"
+        )
+    print("settle_ok last_end", last_end.isoformat(), "age_days", age)
 
 
 if __name__ == "__main__":
