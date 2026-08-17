@@ -814,8 +814,9 @@
       while (d0.getDay() === 0 || d0.getDay() === 6) d0.setDate(d0.getDate() - 1);
       return ymdOf(d0);
     }
-    // 奇摩夜盤：Mon–Thu ts 已是牆鐘；僅「周五夜」會標到下一交易日（如 8/16）
-    // 還原為實際開盤曆日 15:00～次日 05:00（8/14 15:00～8/15 05:00）
+    // 奇摩夜盤：Mon–Thu ts 已是牆鐘、date=開盤曆日；僅「周五夜」date 標到週末（如 8/16）
+    // 判斷：date 落在週六/週日 → 週五夜盤 → 還原為實際開盤曆日 15:00～次日 05:00
+    // 禁：用 prevTradingYmd 的 gapDays 判斷（週一會跳回上週五，誤判跨周末而平移 3 天）
     function barWallTs(b) {
       if (!b || b.timestamp == null) return b && b.timestamp;
       const ts = +b.timestamp;
@@ -825,14 +826,15 @@
       const hm = d.getHours() * 100 + d.getMinutes();
       const isNight = b.session === "night" || hm >= 1500 || hm < 500;
       if (!isNight) return ts;
+      const tradeD = parseYmd(ymd);
+      if (!tradeD) return ts;
+      const dow = tradeD.getDay();
+      if (dow !== 0 && dow !== 6) return ts; // 週一～四夜盤：牆鐘，不平移
       const openYmd = prevTradingYmd(ymd);
       if (!openYmd || openYmd === ymd) return ts;
-      const tradeD = parseYmd(ymd);
       const openD = parseYmd(openYmd);
-      if (!tradeD || !openD) return ts;
-      const gapDays = (tradeD.getTime() - openD.getTime()) / 86400000;
-      if (gapDays <= 1.5) return ts; // 一般隔夜
-      // 跨周末：開盤日有日盤、卻沒有「開盤日 date」的夜盤 → 此 ymd 夜盤實為開盤日夜
+      if (!openD) return ts;
+      // 開盤日有日盤、卻沒有「開盤日 date」的夜盤 → 此 ymd 夜盤實為開盤日夜
       const nightDates = {};
       (minutePack.night_1m || []).forEach((x) => {
         const k = dateKey(x && x.date);
