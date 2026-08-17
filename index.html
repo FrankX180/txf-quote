@@ -129,6 +129,8 @@
     }
     .chip.on, .mode.on { background: #b91c1c; color: #fff; }
     #khost { width: 100%; height: 320px; display: none; }
+    #khost.k-expand { height: 560px; }
+    .side.k-hidden { display: none !important; }
     #kWrap { position: relative; width: 100%; }
     #kMonthNote {
       position: absolute;
@@ -319,7 +321,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.23</div>
+      <div class="ver foot-right">1.24</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -344,6 +346,7 @@
     let holding = false;
     let holdTimer = null;
     let lineHit = null;
+    let imbHit = null;
     let lastTot = null;
     let liveTimer = null;
     let klineTimer = null;
@@ -1779,8 +1782,23 @@
       el.textContent = hasMonth ? "以結算日繪製月收盤日" : "月K資料缺";
       el.style.display = "block";
     }
+    function syncSideLayout() {
+      const side = document.querySelector(".board .side");
+      const kh = $("khost");
+      const kOn = chartMode === "k";
+      if (side) side.classList.toggle("k-hidden", kOn);
+      if (kh) {
+        kh.classList.toggle("k-expand", kOn);
+        if (kOn && kchart && kchart.resize) {
+          requestAnimationFrame(() => {
+            try { kchart.resize(); } catch (e) {}
+          });
+        }
+      }
+    }
     function draw() {
       const lineOn = chartMode === "line";
+      syncSideLayout();
       $("chart").style.display = lineOn ? "block" : "none";
       $("khost").style.display = lineOn ? "none" : "block";
       const kw = $("kWrap");
@@ -2041,6 +2059,7 @@
         ctx.fillRect(mid - 6.5, yTop, 13, bh);
       }
 
+      imbHit = null;
       // 副圖：內外盤差面積圖（同主圖遮罩漸層；0 軸上紅下綠）
       if (showImb && !multi && imbH > 0) {
         const ibs = imbSeries().filter((b) => b && b.t >= t0 && b.t <= t1 && sessKindAt(b.t) !== "closed")
@@ -2146,10 +2165,12 @@
             ctx.fill();
           }
 
-          // 最新差值標在「最後一點」旁（非角落）
+          imbHit = { segs, ibs, zeroY, half, maxAbs, imbTop, imbH };
+
+          // 最新差值標在「最後一點」旁（十字線按住時改畫在十字座標）
           const last = ibs[ibs.length - 1];
           const lp = segs[segs.length - 1];
-          if (last && lp) {
+          if (last && lp && !(holding && hoverIdx != null)) {
             const lab = (last.d > 0 ? "+" : "") + Math.round(last.d) + "口";
             ctx.font = "10pt sans-serif";
             ctx.fillStyle = last.d >= 0 ? "#d32f2f" : "#1b8a3e";
@@ -2193,7 +2214,9 @@
         ctx.setLineDash([4, 3]);
         ctx.beginPath();
         ctx.moveTo(hx + 0.5, padT);
-        ctx.lineTo(hx + 0.5, padT + ch);
+        // 當日：虛線貫穿內外盤副圖，讓十字對到籌碼口數
+        const crossBot = (imbHit && imbHit.imbH) ? (imbHit.imbTop + imbHit.imbH) : (padT + ch);
+        ctx.lineTo(hx + 0.5, crossBot);
         ctx.moveTo(padL, hy + 0.5);
         ctx.lineTo(padL + cw, hy + 0.5);
         ctx.stroke();
@@ -2218,6 +2241,43 @@
         ctx.fillStyle = "#111827";
         ctx.textAlign = "left";
         ctx.fillText(tip, tx, ty + 13);
+        // 十字座標：內外盤籌碼口數（對齊副圖時間）
+        if (imbHit && imbHit.segs && imbHit.segs.length) {
+          let bi = 0, bd = 1e15;
+          imbHit.segs.forEach((s, i) => {
+            const dd = Math.abs(s.x - hx);
+            if (dd < bd) { bd = dd; bi = i; }
+          });
+          const sp = imbHit.segs[bi];
+          const ib = imbHit.ibs[bi];
+          if (sp && ib) {
+            const lab = (ib.d > 0 ? "+" : "") + Math.round(ib.d) + "口";
+            ctx.font = "10pt sans-serif";
+            const tw2 = ctx.measureText(lab).width;
+            let ix = sp.x + 6;
+            let iy = sp.y;
+            if (ix + tw2 > w - padR - 2) {
+              ix = sp.x - 6;
+              ctx.textAlign = "right";
+            } else {
+              ctx.textAlign = "left";
+            }
+            iy = Math.min(imbHit.imbTop + imbHit.imbH - 2, Math.max(imbHit.imbTop + 8, iy));
+            ctx.textBaseline = "middle";
+            const padX = 2;
+            const bx = ctx.textAlign === "right" ? ix - tw2 - padX : ix - padX;
+            ctx.fillStyle = "rgba(255,255,255,0.9)";
+            ctx.fillRect(bx, iy - 7, tw2 + padX * 2, 14);
+            ctx.fillStyle = ib.d >= 0 ? "#d32f2f" : "#1b8a3e";
+            ctx.fillText(lab, ix, iy);
+            ctx.beginPath();
+            ctx.arc(hx, sp.y, 2.5, 0, Math.PI * 2);
+            ctx.fillStyle = "#111827";
+            ctx.fill();
+            ctx.textAlign = "left";
+            ctx.textBaseline = "alphabetic";
+          }
+        }
       }
     }
 
