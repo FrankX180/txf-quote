@@ -130,20 +130,53 @@
     .chip.on, .mode.on { background: #b91c1c; color: #fff; }
     #khost { width: 100%; height: 320px; display: none; }
     #khost.k-expand { height: 600px; }
-    .range-ma-bar {
-      display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
-      margin: 4px 0 6px; font-size: 12px; color: #374151;
+    .range-ma-gear {
+      position: absolute;
+      left: 6px;
+      bottom: 26px;
+      z-index: 8;
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      background: rgba(255,255,255,0.92);
+      color: #374151;
+      font-size: 16px;
+      line-height: 1;
+      cursor: pointer;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
     }
-    .range-ma-bar[hidden] { display: none !important; }
-    .range-ma-bar label {
-      display: inline-flex; align-items: center; gap: 4px; font-weight: 600;
+    .range-ma-gear:hover { background: #fff; border-color: #d1d5db; }
+    .range-ma-gear[hidden] { display: none !important; }
+    .range-ma-pop {
+      position: absolute;
+      left: 6px;
+      bottom: 58px;
+      z-index: 9;
+      min-width: 168px;
+      padding: 10px 12px;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+      font-size: 12px;
+      color: #374151;
     }
-    .range-ma-bar input[type="number"] {
-      width: 48px; padding: 2px 4px; border: 1px solid #e5e7eb; border-radius: 4px;
+    .range-ma-pop[hidden] { display: none !important; }
+    .range-ma-pop .rm-title {
+      font-weight: 700; margin: 0 0 8px; font-size: 12px; color: #111827;
+    }
+    .range-ma-pop label {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 8px; margin: 6px 0; font-weight: 600;
+    }
+    .range-ma-pop input[type="number"] {
+      width: 56px; padding: 3px 5px; border: 1px solid #e5e7eb; border-radius: 4px;
       font-size: 12px; font-variant-numeric: tabular-nums;
     }
-    .range-ma-bar input[type="color"] {
-      width: 28px; height: 22px; padding: 0; border: 1px solid #e5e7eb;
+    .range-ma-pop input[type="color"] {
+      width: 36px; height: 24px; padding: 0; border: 1px solid #e5e7eb;
       border-radius: 4px; background: #fff; cursor: pointer;
     }
     .side.k-hidden { display: none !important; }
@@ -297,23 +330,25 @@
                 <button class="chip" data-k="w" type="button">週Ｋ</button>
                 <button class="chip" data-k="m" type="button">月Ｋ</button>
               </span>
-              <div class="range-ma-bar" id="rangeMaBar" hidden title="震盪副圖 MA 設定">
-                <label>震盪MA
-                  <input id="rangeMaN" type="number" min="2" max="200" step="1" value="20" />
-                </label>
-                <label>色
-                  <input id="rangeMaColor" type="color" value="#f59e0b" />
-                </label>
-                <label>粗
-                  <input id="rangeMaWidth" type="number" min="1" max="6" step="1" value="2" />
-                </label>
-              </div>
             </div>
           </div>
           <div class="meta" id="sumline"></div>
           <canvas id="chart" width="720" height="280"></canvas>
           <div id="kWrap">
             <div id="khost"></div>
+            <button type="button" class="range-ma-gear" id="rangeMaGear" hidden title="震盪 MA 設定">⚙</button>
+            <div class="range-ma-pop" id="rangeMaPop" hidden>
+              <div class="rm-title">震盪 MA</div>
+              <label>週期
+                <input id="rangeMaN" type="number" min="2" max="200" step="1" value="20" />
+              </label>
+              <label>顏色
+                <input id="rangeMaColor" type="color" value="#ff9600" />
+              </label>
+              <label>粗細
+                <input id="rangeMaWidth" type="number" min="1" max="6" step="1" value="2" />
+              </label>
+            </div>
             <div id="kMonthNote">以結算日繪製月收盤日</div>
           </div>
         </div>
@@ -348,7 +383,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.27</div>
+      <div class="ver foot-right">1.28</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -377,7 +412,7 @@
     let kRangePane = null;
     let rangeIndReady = false;
     const RANGE_MA_KEY = "txfRangeMa";
-    let rangeMa = { n: 20, color: "#f59e0b", width: 2 };
+    let rangeMa = { n: 20, color: "#ff9600", width: 2 };
     (function loadRangeMa() {
       try {
         const o = JSON.parse(localStorage.getItem(RANGE_MA_KEY) || "null");
@@ -400,12 +435,22 @@
       if (cEl) cEl.value = rangeMa.color;
       if (wEl) wEl.value = String(rangeMa.width);
     }
+    function rangeMaLineStyle() {
+      // 必須含 style/smooth/dashedValue；只塞 color+size 會讓 klinecharts 畫線崩潰
+      return {
+        style: "solid",
+        smooth: false,
+        size: rangeMa.width,
+        color: rangeMa.color,
+        dashedValue: [2, 2],
+      };
+    }
     function rangeMaIndOpts() {
       return {
         name: "RANGE_AMP",
         calcParams: [rangeMa.n],
         styles: {
-          lines: [{ color: rangeMa.color, size: rangeMa.width }],
+          lines: [rangeMaLineStyle()],
         },
       };
     }
@@ -2507,6 +2552,15 @@
         precision: 0,
         minValue: 0,
         calcParams: [20],
+        styles: {
+          lines: [{
+            style: "solid",
+            smooth: false,
+            size: 2,
+            color: "#ff9600",
+            dashedValue: [2, 2],
+          }],
+        },
         figures: [
           {
             key: "range",
@@ -2519,15 +2573,6 @@
             key: "ma",
             title: "MA: ",
             type: "line",
-            styles: function (data, indicator, defaultStyles) {
-              const lines = (indicator && indicator.styles && indicator.styles.lines) || [];
-              const ln = lines[0] || {};
-              const defs = (defaultStyles && defaultStyles.lines && defaultStyles.lines[0]) || {};
-              return {
-                color: ln.color || defs.color || "#f59e0b",
-                size: ln.size != null ? ln.size : (defs.size != null ? defs.size : 2),
-              };
-            },
           },
         ],
         regenerateFigures: function (params) {
@@ -2544,15 +2589,6 @@
               key: "ma",
               title: "MA" + n + ": ",
               type: "line",
-              styles: function (data, indicator, defaultStyles) {
-                const lines = (indicator && indicator.styles && indicator.styles.lines) || [];
-                const ln = lines[0] || {};
-                const defs = (defaultStyles && defaultStyles.lines && defaultStyles.lines[0]) || {};
-                return {
-                  color: ln.color || defs.color || "#f59e0b",
-                  size: ln.size != null ? ln.size : (defs.size != null ? defs.size : 2),
-                };
-              },
             },
           ];
         },
@@ -2924,8 +2960,11 @@
       const kg = $("kGroup");
       if (lg) lg.hidden = kOn;
       if (kg) kg.hidden = !kOn;
-      const rmb = $("rangeMaBar");
-      if (rmb) rmb.hidden = !(kOn && (kInt === "d" || kInt === "w" || kInt === "m"));
+      const showRangeMa = kOn && (kInt === "d" || kInt === "w" || kInt === "m");
+      const gear = $("rangeMaGear");
+      const pop = $("rangeMaPop");
+      if (gear) gear.hidden = !showRangeMa;
+      if (pop && !showRangeMa) pop.hidden = true;
       document.querySelectorAll(".chip[data-k]").forEach((b) => {
         b.classList.toggle("on", kOn && b.getAttribute("data-k") === kInt);
       });
@@ -2965,6 +3004,21 @@
         el.addEventListener("change", readAndApply);
         if (id === "rangeMaColor") el.addEventListener("input", readAndApply);
       });
+      const gear = $("rangeMaGear");
+      const pop = $("rangeMaPop");
+      if (gear && pop) {
+        gear.addEventListener("click", function (e) {
+          e.stopPropagation();
+          pop.hidden = !pop.hidden;
+          if (!pop.hidden) syncRangeMaInputs();
+        });
+        document.addEventListener("click", function (e) {
+          if (pop.hidden) return;
+          const t = e.target;
+          if (pop.contains(t) || gear.contains(t)) return;
+          pop.hidden = true;
+        });
+      }
       syncRangeMaInputs();
     })();
 
