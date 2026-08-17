@@ -383,7 +383,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.28</div>
+      <div class="ver foot-right">1.29</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2547,9 +2547,9 @@
       rangeIndReady = true;
       klinecharts.registerIndicator({
         name: "RANGE_AMP",
-        shortName: "震盪點數",
+        shortName: "震盪%",
         series: "normal",
-        precision: 0,
+        precision: 1,
         minValue: 0,
         calcParams: [20],
         styles: {
@@ -2563,8 +2563,8 @@
         },
         figures: [
           {
-            key: "range",
-            title: "震盪 ",
+            key: "pct",
+            title: "震盪% ",
             type: "bar",
             baseValue: 0,
             styles: rangeBarStyles,
@@ -2579,8 +2579,8 @@
           const n = (params && params[0]) || 20;
           return [
             {
-              key: "range",
-              title: "震盪 ",
+              key: "pct",
+              title: "震盪% ",
               type: "bar",
               baseValue: 0,
               styles: rangeBarStyles,
@@ -2595,7 +2595,7 @@
         calc: function (list, indicator) {
           const n0 = indicator && indicator.calcParams && indicator.calcParams[0];
           const n = Math.max(2, Math.min(200, Math.round(Number(n0) || 20)));
-          const ranges = [];
+          const pcts = [];
           let sum = 0;
           return list.map(function (k, i) {
             const h = Number(k.high) || 0;
@@ -2603,12 +2603,12 @@
             const base = Number(k.close) || Number(k.open) || 0;
             const range = Math.max(0, h - l);
             const pct = base > 0 ? (range / base) * 100 : 0;
-            ranges.push(range);
-            sum += range;
+            pcts.push(pct);
+            sum += pct;
             const out = { range: range, pct: pct };
             if (i >= n - 1) {
               out.ma = sum / n;
-              sum -= ranges[i - n + 1];
+              sum -= pcts[i - n + 1];
             }
             return out;
           });
@@ -2629,7 +2629,7 @@
             pct = base > 0 ? (range / base) * 100 : 0;
           }
           if (range == null) {
-            return { name: "震盪點數", values: [] };
+            return { name: "震盪%", values: [] };
           }
           const r0 = Math.round(Number(range) || 0);
           const p0 = (Number(pct) || 0).toFixed(1);
@@ -2642,16 +2642,16 @@
           const n = Math.max(2, Math.min(200, Math.round(Number(n0) || rangeMa.n || 20)));
           const values = [{
             title: "",
-            value: { text: r0 + " (" + p0 + "%)", color: color },
+            value: { text: r0 + "點 (" + p0 + "%)", color: color },
           }];
           if (row && row.ma != null && isFinite(row.ma)) {
             const maColor = (ind.styles && ind.styles.lines && ind.styles.lines[0] && ind.styles.lines[0].color) || rangeMa.color || "#f59e0b";
             values.push({
               title: "MA" + n + " ",
-              value: { text: String(Math.round(row.ma)), color: maColor },
+              value: { text: (Number(row.ma) || 0).toFixed(1) + "%", color: maColor },
             });
           }
-          return { name: "震盪點數", values: values };
+          return { name: "震盪%", values: values };
         },
       });
     }
