@@ -129,7 +129,7 @@
     }
     .chip.on, .mode.on { background: #b91c1c; color: #fff; }
     #khost { width: 100%; height: 320px; display: none; }
-    #khost.k-expand { height: 560px; }
+    #khost.k-expand { height: 640px; }
     .side.k-hidden { display: none !important; }
     #kWrap { position: relative; width: 100%; }
     #kMonthNote {
@@ -321,7 +321,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.24</div>
+      <div class="ver foot-right">1.25</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -347,6 +347,8 @@
     let holdTimer = null;
     let lineHit = null;
     let imbHit = null;
+    let kRangePanes = { pt: null, pct: null };
+    let rangeIndReady = false;
     let lastTot = null;
     let liveTimer = null;
     let klineTimer = null;
@@ -2401,7 +2403,7 @@
         },
         indicator: {
           bars: [{ upColor: "#d32f2f", downColor: "#1b8a3e", noChangeColor: "#888" }],
-          tooltip: { showRule: "none" },
+          tooltip: { showRule: "follow_cross" },
         },
       };
     }
@@ -2421,8 +2423,95 @@
       return s;
     }
 
+    function rangeBarStyles(data) {
+      const k = data && data.current && data.current.kLineData;
+      if (k) {
+        if (k.close > k.open) return { color: "#d32f2f" };
+        if (k.close < k.open) return { color: "#1b8a3e" };
+      }
+      return { color: "#888888" };
+    }
+    function ensureRangeIndicators() {
+      if (rangeIndReady || typeof klinecharts === "undefined" || !klinecharts.registerIndicator) return;
+      rangeIndReady = true;
+      klinecharts.registerIndicator({
+        name: "RANGE_PT",
+        shortName: "震盪點",
+        series: "normal",
+        precision: 0,
+        minValue: 0,
+        figures: [{
+          key: "range",
+          title: "震盪點 ",
+          type: "bar",
+          baseValue: 0,
+          styles: rangeBarStyles,
+        }],
+        calc: function (list) {
+          return list.map(function (k) {
+            const h = Number(k.high) || 0;
+            const l = Number(k.low) || 0;
+            return { range: Math.max(0, h - l) };
+          });
+        },
+      });
+      klinecharts.registerIndicator({
+        name: "RANGE_PCT",
+        shortName: "震盪%",
+        series: "normal",
+        precision: 2,
+        minValue: 0,
+        figures: [{
+          key: "pct",
+          title: "震盪% ",
+          type: "bar",
+          baseValue: 0,
+          styles: rangeBarStyles,
+        }],
+        calc: function (list) {
+          return list.map(function (k) {
+            const h = Number(k.high) || 0;
+            const l = Number(k.low) || 0;
+            const base = Number(k.close) || Number(k.open) || 0;
+            const pct = base > 0 ? ((h - l) / base) * 100 : 0;
+            return { pct: pct };
+          });
+        },
+      });
+    }
+    function syncKRangePanes() {
+      if (!kchart) return;
+      const want = chartMode === "k" && (kInt === "d" || kInt === "w" || kInt === "m");
+      if (want) {
+        ensureRangeIndicators();
+        if (!kRangePanes.pt) {
+          try {
+            kRangePanes.pt = kchart.createIndicator("RANGE_PT", false, { height: 78 });
+          } catch (e) { kRangePanes.pt = null; }
+        }
+        if (!kRangePanes.pct) {
+          try {
+            kRangePanes.pct = kchart.createIndicator("RANGE_PCT", false, { height: 78 });
+          } catch (e) { kRangePanes.pct = null; }
+        }
+      } else {
+        if (kRangePanes.pt) {
+          try { kchart.removeIndicator(kRangePanes.pt, "RANGE_PT"); } catch (e1) {
+            try { kchart.removeIndicator(kRangePanes.pt); } catch (e2) {}
+          }
+          kRangePanes.pt = null;
+        }
+        if (kRangePanes.pct) {
+          try { kchart.removeIndicator(kRangePanes.pct, "RANGE_PCT"); } catch (e1) {
+            try { kchart.removeIndicator(kRangePanes.pct); } catch (e2) {}
+          }
+          kRangePanes.pct = null;
+        }
+      }
+    }
     function renderK() {
       if (typeof klinecharts === "undefined") return;
+      ensureRangeIndicators();
       const data = klineData();
       if (!kchart) {
         kchart = klinecharts.init("khost", { styles: twStyles() });
@@ -2432,6 +2521,12 @@
         kchart.setStyles(twStyles());
       }
       kchart.applyNewData(data.length ? data : []);
+      syncKRangePanes();
+      if (kchart.resize) {
+        requestAnimationFrame(function () {
+          try { kchart.resize(); } catch (e) {}
+        });
+      }
     }
 
     function slimYahoo(d) {
