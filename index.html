@@ -129,7 +129,7 @@
     }
     .chip.on, .mode.on { background: #b91c1c; color: #fff; }
     #khost { width: 100%; height: 320px; display: none; }
-    #khost.k-expand { height: 640px; }
+    #khost.k-expand { height: 580px; }
     .side.k-hidden { display: none !important; }
     #kWrap { position: relative; width: 100%; }
     #kMonthNote {
@@ -321,7 +321,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.25</div>
+      <div class="ver foot-right">1.26</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -347,7 +347,7 @@
     let holdTimer = null;
     let lineHit = null;
     let imbHit = null;
-    let kRangePanes = { pt: null, pct: null };
+    let kRangePane = null;
     let rangeIndReady = false;
     let lastTot = null;
     let liveTimer = null;
@@ -2435,35 +2435,14 @@
       if (rangeIndReady || typeof klinecharts === "undefined" || !klinecharts.registerIndicator) return;
       rangeIndReady = true;
       klinecharts.registerIndicator({
-        name: "RANGE_PT",
-        shortName: "震盪點",
+        name: "RANGE_AMP",
+        shortName: "震盪點數",
         series: "normal",
         precision: 0,
         minValue: 0,
         figures: [{
           key: "range",
-          title: "震盪點 ",
-          type: "bar",
-          baseValue: 0,
-          styles: rangeBarStyles,
-        }],
-        calc: function (list) {
-          return list.map(function (k) {
-            const h = Number(k.high) || 0;
-            const l = Number(k.low) || 0;
-            return { range: Math.max(0, h - l) };
-          });
-        },
-      });
-      klinecharts.registerIndicator({
-        name: "RANGE_PCT",
-        shortName: "震盪%",
-        series: "normal",
-        precision: 2,
-        minValue: 0,
-        figures: [{
-          key: "pct",
-          title: "震盪% ",
+          title: "震盪 ",
           type: "bar",
           baseValue: 0,
           styles: rangeBarStyles,
@@ -2473,9 +2452,43 @@
             const h = Number(k.high) || 0;
             const l = Number(k.low) || 0;
             const base = Number(k.close) || Number(k.open) || 0;
-            const pct = base > 0 ? ((h - l) / base) * 100 : 0;
-            return { pct: pct };
+            const range = Math.max(0, h - l);
+            const pct = base > 0 ? (range / base) * 100 : 0;
+            return { range: range, pct: pct };
           });
+        },
+        createTooltipDataSource: function (params) {
+          const ch = params && params.crosshair;
+          const ind = params && params.indicator;
+          const dataIdx = ch && ch.dataIndex != null ? ch.dataIndex : -1;
+          const row = ind && ind.result && dataIdx >= 0 ? ind.result[dataIdx] : null;
+          const k = ch && ch.kLineData;
+          let range = row && row.range != null ? row.range : null;
+          let pct = row && row.pct != null ? row.pct : null;
+          if (range == null && k) {
+            const h = Number(k.high) || 0;
+            const l = Number(k.low) || 0;
+            const base = Number(k.close) || Number(k.open) || 0;
+            range = Math.max(0, h - l);
+            pct = base > 0 ? (range / base) * 100 : 0;
+          }
+          if (range == null) {
+            return { name: "震盪點數", values: [] };
+          }
+          const r0 = Math.round(Number(range) || 0);
+          const p0 = (Number(pct) || 0).toFixed(1);
+          let color = "#888888";
+          if (k) {
+            if (k.close > k.open) color = "#d32f2f";
+            else if (k.close < k.open) color = "#1b8a3e";
+          }
+          return {
+            name: "震盪點數",
+            values: [{
+              title: "",
+              value: { text: r0 + " (" + p0 + "%)", color: color },
+            }],
+          };
         },
       });
     }
@@ -2484,29 +2497,16 @@
       const want = chartMode === "k" && (kInt === "d" || kInt === "w" || kInt === "m");
       if (want) {
         ensureRangeIndicators();
-        if (!kRangePanes.pt) {
+        if (!kRangePane) {
           try {
-            kRangePanes.pt = kchart.createIndicator("RANGE_PT", false, { height: 78 });
-          } catch (e) { kRangePanes.pt = null; }
+            kRangePane = kchart.createIndicator("RANGE_AMP", false, { height: 88 });
+          } catch (e) { kRangePane = null; }
         }
-        if (!kRangePanes.pct) {
-          try {
-            kRangePanes.pct = kchart.createIndicator("RANGE_PCT", false, { height: 78 });
-          } catch (e) { kRangePanes.pct = null; }
+      } else if (kRangePane) {
+        try { kchart.removeIndicator(kRangePane, "RANGE_AMP"); } catch (e1) {
+          try { kchart.removeIndicator(kRangePane); } catch (e2) {}
         }
-      } else {
-        if (kRangePanes.pt) {
-          try { kchart.removeIndicator(kRangePanes.pt, "RANGE_PT"); } catch (e1) {
-            try { kchart.removeIndicator(kRangePanes.pt); } catch (e2) {}
-          }
-          kRangePanes.pt = null;
-        }
-        if (kRangePanes.pct) {
-          try { kchart.removeIndicator(kRangePanes.pct, "RANGE_PCT"); } catch (e1) {
-            try { kchart.removeIndicator(kRangePanes.pct); } catch (e2) {}
-          }
-          kRangePanes.pct = null;
-        }
+        kRangePane = null;
       }
     }
     function renderK() {
