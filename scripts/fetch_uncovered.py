@@ -1,5 +1,6 @@
 # 法人／大額未平倉 → data/uncovered.json
 # 今日部位主路：期交所 OpenAPI；備援 Yahoo；近20日：聚財／wearn／CMoney
+# 口數一律大台等值：TX + MTX/4 + TMF/20（點值 200/50/10）
 import json
 import re
 import urllib.request
@@ -22,6 +23,14 @@ OA_LARGE = "https://openapi.taifex.com.tw/v1/OpenInterestOfLargeTradersFutures"
 WEARN = "https://stock.wearn.com/taifexphoto.asp"
 CMONEY = "https://www.cmoney.tw/MobileService/ashx/GetDtnoData.ashx"
 HIST_N = 20
+MTX_DIV = 4.0
+TMF_DIV = 20.0
+TMF_JSON = ROOT / "data" / "tmf_retail.json"
+OA_CODES = (
+    ("臺股期貨", 1.0),
+    ("小型臺指期貨", MTX_DIV),
+    ("微型臺指期貨", TMF_DIV),
+)
 
 
 def get_text(url: str, timeout: int = 30) -> str:
@@ -34,6 +43,18 @@ def get_json(url: str, timeout: int = 30):
     req = urllib.request.Request(url, headers={**HDR, "Accept": "application/json,*/*"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8-sig", "replace"))
+
+def tx_eq(tx, mtx=None, tmf=None):
+    if tx is None and mtx is None and tmf is None:
+        return None
+    return float(tx or 0) + float(mtx or 0) / MTX_DIV + float(tmf or 0) / TMF_DIV
+
+
+def _sum_div(parts):
+    """parts: [(value, div), ...]；全 None 則 None。"""
+    if not parts or all(v is None for v, _ in parts):
+        return None
+    return sum(float(v or 0) / float(div) for v, div in parts)
 
 
 def extract(html: str, marker: str):
@@ -131,24 +152,63 @@ def inst_has_ls(inst) -> bool:
     return all(r.get("long") is not None and r.get("short") is not None for r in rows[:3])
 
 
+def load_tmf_by_date():
+    if not TMF_JSON.exists():
+        return {}
+    try:
+        j = json.loads(TMF_JSON.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    out = {}
+    for r in j.get("series") or []:
+        d = str(r.get("date") or "")
+        if d:
+            out[d] = r
+    return out
+
+
 def fetch_openapi_tx():
-    """最新一交易日：臺股期貨法人多空＋近月大額前十／特定。"""
+    """最新一交易日：大台等值法人多空（TX+MTX/4+TMF/20）＋近月大額前十／特定。"""
     raw = get_json(OA_INST, 40)
     if isinstance(raw, dict):
         raw = raw.get("data") or raw.get("Data") or []
-    tx = [r for r in (raw or []) if str(r.get("ContractCode") or "") == "臺股期貨"]
-    date = _ymd8(tx[0].get("Date")) if tx else ""
+    by_code = {}
+    date = ""
+    for code, _div in OA_CODES:
+        rows = [r for r in (raw or []) if str(r.get("ContractCode") or "") == code]
+        if rows and not date:
+            date = _ymd8(rows[0].get("Date"))
+        slot = {}
+        for r in rows:
+            name = str(r.get("Item") or "")
+            slot[name] = {
+                "long": num(r.get("OpenInterest(Long)")),
+                "short": num(r.get("OpenInterest(Short)")),
+                "net": num(r.get("OpenInterest(Net)")),
+            }
+        by_code[code] = slot
     order = ["外資及陸資", "投信", "自營商"]
-    by = {}
-    for r in tx:
-        name = str(r.get("Item") or "")
-        by[name] = {
-            "name": name,
-            "long": num(r.get("OpenInterest(Long)")),
-            "short": num(r.get("OpenInterest(Short)")),
-            "net": num(r.get("OpenInterest(Net)")),
-        }
-    inst = [by[n] for n in order if n in by]
+    inst = []
+    for name in order:
+        parts_l, parts_s, parts_n = [], [], []
+        present = False
+        for code, div in OA_CODES:
+            cell = (by_code.get(code) or {}).get(name) or {}
+            if cell:
+                present = True
+            parts_l.append((cell.get("long"), div))
+            parts_s.append((cell.get("short"), div))
+            parts_n.append((cell.get("net"), div))
+        if not present:
+            continue
+        inst.append(
+            {
+                "name": name,
+                "long": _sum_div(parts_l),
+                "short": _sum_div(parts_s),
+                "net": _sum_div(parts_n),
+            }
+        )
     if inst:
         ls = [r for r in inst if r.get("long") is not None]
         ss = [r for r in inst if r.get("short") is not None]
@@ -250,16 +310,27 @@ def fetch_cmoney_map(dtno: str):
 
 
 def cmoney_series():
-    """date -> {retail, foreignDelta, retailDelta, foreign, pc}"""
+    """date -> {retail, foreignDelta, retailDelta, foreign, mtx*, pc}"""
     out = {}
     idx, data = fetch_cmoney_map("883765")
     for row in data[: max(HIST_N * 2, 40)]:
         d = str(row[idx["日期"]])
+        def fget(key):
+            if key not in idx:
+                return None
+            try:
+                return float(row[idx[key]])
+            except (TypeError, ValueError):
+                return None
+
         out[d] = {
-            "foreign": float(row[idx["外資淨未平倉口數"]]),
-            "retail": float(row[idx["散戶淨未平倉口數"]]),
-            "foreignDelta": float(row[idx["外資期貨未平倉增減"]]),
-            "retailDelta": float(row[idx["散戶期貨未平倉增減"]]),
+            "foreign": fget("外資淨未平倉口數"),
+            "retail": fget("散戶淨未平倉口數"),
+            "foreignDelta": fget("外資期貨未平倉增減"),
+            "retailDelta": fget("散戶期貨未平倉增減"),
+            "foreignMtx": fget("外資小台未平倉"),
+            "trustMtx": fget("投信小台未平倉"),
+            "dealerMtx": fget("自營商小台未平倉"),
         }
     idx2, data2 = fetch_cmoney_map("345198")
     # oldest-first
@@ -334,6 +405,9 @@ def main():
     if wearn:
         sources.append("wearn")
     cm_map, pc_map = cmoney_series()
+    tmf_map = load_tmf_by_date()
+    if tmf_map:
+        sources.append("tmf")
     sources.append("cmoney")
     extra = {}
     try:
@@ -341,48 +415,82 @@ def main():
     except Exception as e:
         print("WARN cmoney today", e)
 
-    # merge history: wearn base + cmoney retail/delta/pc
+    # merge history：大台等值 = wearn大台 + CMoney小台/4 + tmf_retail微台/20
     history = []
     for w in wearn:
         d = w["date"]
         c = cm_map.get(d) or {}
+        t = tmf_map.get(d) or {}
         rec = {
             "date": d,
-            "foreign": w["foreign"],
-            "trust": w["trust"],
-            "dealer": w["dealer"],
-            "retail": c.get("retail"),
+            "foreign": tx_eq(w["foreign"], c.get("foreignMtx"), t.get("foreign")),
+            "trust": tx_eq(w["trust"], c.get("trustMtx"), t.get("trust")),
+            "dealer": tx_eq(w["dealer"], c.get("dealerMtx"), t.get("dealer")),
+            "retail": tx_eq(c.get("retail"), None, t.get("retail")),
             "top5": w["top5"],
             "top10": w["top10"],
             "top5Spec": w["top5Spec"],
             "top10Spec": w["top10Spec"],
             "close": w["close"],
-            "foreignDelta": c.get("foreignDelta"),
-            "retailDelta": c.get("retailDelta"),
             "pc": c.get("pc", pc_map.get(d)),
         }
         history.append(rec)
 
-    # if wearn empty, fall back cmoney foreign/retail only
+    # if wearn empty, fall back cmoney foreign/retail only（仍做小台／微台換算）
     if not history:
         for d, c in list(cm_map.items())[:HIST_N]:
+            t = tmf_map.get(d) or {}
             history.append(
                 {
                     "date": d,
-                    "foreign": c.get("foreign"),
-                    "trust": None,
-                    "dealer": None,
-                    "retail": c.get("retail"),
+                    "foreign": tx_eq(c.get("foreign"), c.get("foreignMtx"), t.get("foreign")),
+                    "trust": tx_eq(None, c.get("trustMtx"), t.get("trust")),
+                    "dealer": tx_eq(None, c.get("dealerMtx"), t.get("dealer")),
+                    "retail": tx_eq(c.get("retail"), None, t.get("retail")),
                     "top5": None,
                     "top10": None,
                     "top5Spec": None,
                     "top10Spec": None,
                     "close": None,
-                    "foreignDelta": c.get("foreignDelta"),
-                    "retailDelta": c.get("retailDelta"),
                     "pc": c.get("pc"),
                 }
             )
+
+    # Δ 用換算後水位重算（口）
+    for i, rec in enumerate(history):
+        nxt = history[i + 1] if i + 1 < len(history) else None
+        if not nxt:
+            rec["foreignDelta"] = None
+            rec["retailDelta"] = None
+            continue
+        rec["foreignDelta"] = (
+            None
+            if rec.get("foreign") is None or nxt.get("foreign") is None
+            else float(rec["foreign"]) - float(nxt["foreign"])
+        )
+        rec["retailDelta"] = (
+            None
+            if rec.get("retail") is None or nxt.get("retail") is None
+            else float(rec["retail"]) - float(nxt["retail"])
+        )
+
+    # 奇摩今日多空是大台原值：淨額改成大台等值（多／空欄在官方未更新前仍可能是大台）
+    if (not use_oa) and inst and date_pick:
+        c = cm_map.get(date_pick) or {}
+        t = tmf_map.get(date_pick) or {}
+        add = {
+            "外資及陸資": tx_eq(0, c.get("foreignMtx"), t.get("foreign")),
+            "投信": tx_eq(0, c.get("trustMtx"), t.get("trust")),
+            "自營商": tx_eq(0, c.get("dealerMtx"), t.get("dealer")),
+        }
+        for r in inst:
+            nm = r.get("name") or ""
+            if nm in add and r.get("net") is not None and add[nm] is not None:
+                r["net"] = float(r["net"]) + float(add[nm])
+        tot = next((r for r in inst if "合計" in (r.get("name") or "")), None)
+        if tot is not None:
+            parts = [r for r in inst if r is not tot and r.get("net") is not None]
+            tot["net"] = sum(float(r["net"]) for r in parts) if parts else tot.get("net")
 
     date = yahoo_date or (history[0]["date"] if history else "") or extra.get("date") or ""
     # Yahoo 偶發只有人名沒多空：用 history 淨額補今日部位
@@ -427,7 +535,7 @@ def main():
         "top": top,
         "top10Net": extra.get("top10", top10_net),
         "top10SpecNet": extra.get("top10Spec", top10_spec),
-        "retailNet": extra.get("retail", history[0].get("retail") if history else None),
+        "retailNet": (history[0].get("retail") if history and history[0].get("retail") is not None else extra.get("retail")),
         "foreignDelta": history[0].get("foreignDelta") if history else None,
         "retailDelta": history[0].get("retailDelta") if history else None,
         "pc": extra.get("pc", history[0].get("pc") if history else None),
@@ -438,6 +546,8 @@ def main():
         "fetchedAt": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
         "date": ymd_slash(date) if len(date) == 8 else date,
         "source": "+".join(sources),
+        "unit": "tx_eq",
+        "unitNote": "大台等值口=大台+小台/4+微台/20",
         "inst": inst,
         "top": top,
         "today": today,

@@ -445,7 +445,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.47</div>
+      <div class="ver foot-right">1.48</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -980,21 +980,21 @@
         const s = r.retailDelta != null ? r.retailDelta : oiDayDiff(hist, i, "retail");
         hTr += `<tr><td>${oiShortDate(r.date)}</td><td>${signedOi(f)}</td><td>${signedOi(t)}</td><td>${signedOi(d)}</td><td>${signedOi(s)}</td></tr>`;
       });
-      hTr += `</table><div class="note">單位：口；相對前一交易日的未平倉淨額變化</div>`;
+      hTr += `</table><div class="note">單位：大台等值口（大台＋小台/4＋微台/20）；相對前一交易日未平倉淨額變化</div>`;
       tradeEl.innerHTML = hTr;
 
       let hOi = `<table><tr><th>日</th><th>外資</th><th>投信</th><th>自營</th><th>散戶</th></tr>`;
       hist.forEach((r) => {
         hOi += `<tr><td>${oiShortDate(r.date)}</td><td>${signedOi(r.foreign)}</td><td>${signedOi(r.trust)}</td><td>${signedOi(r.dealer)}</td><td>${signedOi(r.retail)}</td></tr>`;
       });
-      hOi += `</table><div class="note">單位：口；數字為淨未平倉（多−空）</div>`;
+      hOi += `</table><div class="note">單位：大台等值口（大台＋小台/4＋微台/20）；數字為淨未平倉（多−空）</div>`;
       oiEl.innerHTML = hOi;
 
       let hBig = `<table><tr><th>日</th><th>前十淨</th><th>特定淨</th><th>外資Δ</th><th>散戶Δ</th><th>PC</th><th>收盤</th></tr>`;
       hist.forEach((r) => {
         hBig += `<tr><td>${oiShortDate(r.date)}</td><td>${signedOi(r.top10)}</td><td>${signedOi(r.top10Spec)}</td><td>${signedOi(r.foreignDelta)}</td><td>${signedOi(r.retailDelta)}</td><td>${r.pc == null ? "—" : fmt(r.pc, 1)}</td><td>${r.close == null ? "—" : fmt(r.close)}</td></tr>`;
       });
-      hBig += `</table><div class="note">前十／特定＝大額淨未平倉；Δ＝相對前一交易日變化（口）</div>`;
+      hBig += `</table><div class="note">前十／特定＝大額淨未平倉（官方 TX+小台/4）；Δ＝大台等值日變化；PC／收盤不換算</div>`;
       bigEl.innerHTML = hBig;
 
       const sw = $("oiSimpleSw");
