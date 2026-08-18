@@ -111,18 +111,23 @@
     .oi-panel.on { display: block; }
     .oi .muted { color: #9ca3af; font-weight: 500; font-size: 12px; }
     .oi .note { margin: 6px 0 0; color: #6b7280; font-size: 12px; line-height: 1.4; }
-    .oi td.oi-close { padding: 2px 4px; vertical-align: bottom; }
-    .oi-cbar-wrap { width: 56px; margin: 0 auto; text-align: center; }
+    .oi td.oi-close { padding: 4px 6px; vertical-align: middle; min-width: 120px; }
+    .oi-cbar-wrap {
+      display: flex; flex-direction: row; align-items: center; gap: 6px;
+      min-width: 112px;
+    }
     .oi-cbar-track {
-      height: 52px; display: flex; align-items: flex-end; justify-content: center;
+      flex: 1; height: 14px; min-width: 72px;
+      background: #ffedd5; border-radius: 3px; overflow: hidden;
     }
     .oi-cbar {
-      width: 18px; min-height: 4px;
-      background: linear-gradient(180deg, #fdba74 0%, #f97316 55%, #ea580c 100%);
-      border-radius: 4px 4px 1px 1px;
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.35);
+      height: 100%; min-width: 4px;
+      background: #f97316; border-radius: 3px;
     }
-    .oi-cnum { display: block; margin-top: 2px; font-size: 11px; font-weight: 800; color: #9a3412; line-height: 1.1; }
+    .oi-cnum {
+      flex-shrink: 0; min-width: 3.6em; text-align: right;
+      font-size: 11px; font-weight: 800; color: #9a3412; line-height: 1.1;
+    }
     .oi-simple {
       display: inline-flex; align-items: center; gap: 6px;
       flex-shrink: 0; user-select: none; cursor: pointer; margin-left: auto;
@@ -457,7 +462,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.51</div>
+      <div class="ver foot-right">1.52</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -938,13 +943,13 @@
       const n = Number(v);
       if (!isFinite(n)) return "—";
       const span = rng.mx - rng.mn;
-      // 以表內最低～最高縮放（非從 0），高低差才明顯；再映射到 18%～100%
+      // 以表內最低～最高做橫柱寬度（非從 0），高低差才明顯；映射 18%～100%
       let pct = 100;
       if (span > 0) {
         const raw = (n - rng.mn) / span;
         pct = 18 + raw * 82;
       }
-      return `<div class="oi-cbar-wrap" title="${fmt(n)}"><div class="oi-cbar-track"><div class="oi-cbar" style="height:${pct.toFixed(1)}%"></div></div><span class="oi-cnum">${fmt(n)}</span></div>`;
+      return `<div class="oi-cbar-wrap" title="${fmt(n)}"><div class="oi-cbar-track"><div class="oi-cbar" style="width:${pct.toFixed(1)}%"></div></div><span class="oi-cnum">${fmt(n)}</span></div>`;
     }
     function setOiTab(tab) {
       oiTab = tab || "today";
