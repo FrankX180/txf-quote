@@ -526,7 +526,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.57</div>
+      <div class="ver foot-right">1.58</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1049,6 +1049,32 @@
       const side = (hasPos && hasNeg) ? "both" : (hasNeg ? "neg" : "pos");
       return { absMax: m, side: side };
     }
+    function oiPcMeta(vals) {
+      let mn = Infinity, mx = -Infinity;
+      (vals || []).forEach((v) => {
+        if (v == null || v === "") return;
+        const n = Number(v);
+        if (!isFinite(n)) return;
+        if (n < mn) mn = n;
+        if (n > mx) mx = n;
+      });
+      if (!isFinite(mn) || !isFinite(mx)) return null;
+      return { mn: mn, mx: mx };
+    }
+    function oiPcBarCell(v, meta) {
+      if (v == null || v === "" || !meta) return "";
+      const n = Number(v);
+      if (!isFinite(n)) return "";
+      const span = meta.mx - meta.mn;
+      // 表內最低～最高 → 12%～100%，拉開落差
+      let pct = 100;
+      if (span > 0) {
+        const raw = (n - meta.mn) / span;
+        pct = 12 + raw * 88;
+      }
+      const lab = fmt(n, 1);
+      return `<div class="oi-sbar-wrap" title="${lab}"><span class="oi-snum">${lab}</span><div class="oi-sbar-track one pos"><div class="oi-sbar pos" style="width:${pct.toFixed(1)}%"></div></div></div>`;
+    }
     function oiSignedBarCell(v, meta, mode) {
       if (v == null || v === "") return "";
       const n = Number(v);
@@ -1081,7 +1107,8 @@
     }
     function oiPickHead(panel, labels) {
       const k = oiPick[panel];
-      const lab = (k && labels[k]) ? labels[k] : "";
+      let lab = (k && labels[k]) ? labels[k] : "";
+      if (k === "pc") lab = "Put Call Ratio";
       const on = k ? " on" : "";
       return `<th class="oi-pick-h${on}">${lab}</th>`;
     }
@@ -1106,7 +1133,7 @@
       const pick = oiPick[panel];
       const keys = oiKeysThrough(allKeys, pick);
       const closeRng = oiCloseRange(list);
-      const meta = pick ? oiSignedMeta(list.map((r) => r[pick])) : null;
+      const meta = !pick ? null : (pick === "pc" ? oiPcMeta(list.map((r) => r[pick])) : oiSignedMeta(list.map((r) => r[pick])));
       const mode = pick === "pc" ? "pc" : "oi";
       let html = `<div class="oi-table-wrap${pick ? " has-pick" : ""}">`;
       if (pick) html += `<button type="button" class="oi-restore" data-oi-restore="${panel}">恢復</button>`;
@@ -1114,7 +1141,7 @@
       keys.forEach((k) => { html += oiPickTh(panel, k, labs[k] || k); });
       html += `</tr>`;
       list.forEach((r) => {
-        const pickCell = pick ? oiSignedBarCell(r[pick], meta, mode) : "";
+        const pickCell = !pick ? "" : (pick === "pc" ? oiPcBarCell(r[pick], meta) : oiSignedBarCell(r[pick], meta, mode));
         html += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td class="oi-pick${pick ? " on" : ""}">${pickCell}</td>`;
         keys.forEach((k) => {
           if (k === "pc") html += `<td>${r.pc == null ? "—" : fmt(r.pc, 1)}</td>`;
