@@ -42,20 +42,86 @@ def nint(x):
 
 
 def load_proxies():
-    if not PROXY_FILE.exists():
-        return []
+    """本機檔 or 雲端 env WEBSHARE_PROXIES / TAIFEX_PROXIES（一行一個 host:port:user:pass）。"""
     out = []
-    for ln in PROXY_FILE.read_text(encoding="utf-8", errors="replace").splitlines():
+    env_raw = os.environ.get("WEBSHARE_PROXIES") or os.environ.get("TAIFEX_PROXIES") or ""
+    lines = []
+    if env_raw.strip():
+        lines.extend(env_raw.replace("\r", "\n").split("\n"))
+    if PROXY_FILE.exists():
+        lines.extend(PROXY_FILE.read_text(encoding="utf-8", errors="replace").splitlines())
+    seen = set()
+    for ln in lines:
         ln = ln.strip()
         if not ln or ln.startswith("#"):
             continue
         parts = ln.split(":")
         if len(parts) >= 4:
             host, port, user, pwd = parts[0], parts[1], parts[2], ":".join(parts[3:])
-            out.append(f"http://{user}:{pwd}@{host}:{port}")
+            url = f"http://{user}:{pwd}@{host}:{port}"
         elif len(parts) == 2:
-            out.append(f"http://{parts[0]}:{parts[1]}")
+            url = f"http://{parts[0]}:{parts[1]}"
+        else:
+            continue
+        if url in seen:
+            continue
+        seen.add(url)
+        out.append(url)
     return out
+
+
+def fetch_range_maps(start, end, proxies=None):
+    """抓 [start,end]：先直連整段，失敗或缺日再切塊＋proxy。"""
+    proxies = proxies if proxies is not None else load_proxies()
+    im, om = {}, {}
+    try:
+        im, om = fetch_chunk(start, end, proxy=None)
+        print("direct", ymd_slash(start), ymd_slash(end), "inst", len(im), "oi", len(om))
+    except Exception as e:
+        print("WARN direct", e)
+    # Actions／缺日：切塊重抓並 merge
+    need_chunk = (not im) or os.environ.get("GITHUB_ACTIONS") or (end - start).days > 10
+    if need_chunk:
+        for rg in chunk_ranges(start, end, 7):
+            ok = False
+            last_err = None
+            # 先直連小塊
+            for attempt in range(2):
+                try:
+                    a, b = fetch_chunk(rg[0], rg[1], proxy=None)
+                    im.update(a)
+                    om.update(b)
+                    print("chunk direct", ymd_slash(rg[0]), ymd_slash(rg[1]), "inst", len(a), "oi", len(b))
+                    ok = True
+                    break
+                except Exception as e:
+                    last_err = e
+                    time.sleep(0.8)
+            if ok:
+                continue
+            for attempt in range(4):
+                proxy = random.choice(proxies) if proxies else None
+                try:
+                    a, b = fetch_chunk(rg[0], rg[1], proxy=proxy)
+                    im.update(a)
+                    om.update(b)
+                    print(
+                        "chunk proxy",
+                        ymd_slash(rg[0]),
+                        ymd_slash(rg[1]),
+                        "inst",
+                        len(a),
+                        "oi",
+                        len(b),
+                    )
+                    ok = True
+                    break
+                except Exception as e:
+                    last_err = e
+                    time.sleep(1.2)
+            if not ok:
+                print("FAIL chunk", ymd_slash(rg[0]), ymd_slash(rg[1]), last_err)
+    return im, om
 
 
 def taifex_post(url, data, referer, proxy=None, timeout=90):
@@ -208,94 +274,54 @@ def load_existing():
 
 
 def main():
-    from when import want_uncovered
+    from when import want_tmf_retail
 
-    if not want_uncovered():
+    if not want_tmf_retail():
         print("SKIP tmf_retail")
         return
 
     existing = load_existing()
     today = datetime.now(TZ).date()
     end = datetime(today.year, today.month, today.day)
+    proxies = load_proxies()
+    print("proxies", len(proxies), "existing", len(existing), "GHA", bool(os.environ.get("GITHUB_ACTIONS")))
 
+    # 近段若有日曆洞（例如漏抓兩個交易日），強制拉近 40 日自補
+    have_dates = sorted({r["date"] for r in existing if r.get("date")})
+    hole = False
+    if len(have_dates) >= 2:
+        for a, b in zip(have_dates[-40:], have_dates[-39:]):
+            try:
+                da = datetime.strptime(a, "%Y%m%d")
+                db = datetime.strptime(b, "%Y%m%d")
+            except Exception:
+                continue
+            gap = (db - da).days
+            # 平日序列通常 1；跨周末約 3。大於 4 視為漏抓
+            if gap > 4:
+                hole = True
+                print("GAP", a, b, "days", gap)
+                break
     need_backfill = len(existing) < max(60, HIST_N // 4)
     if need_backfill:
         start = end - timedelta(days=int(HIST_N * 1.6))
-        ranges = chunk_ranges(start, end, CHUNK_DAYS)
-        proxies = load_proxies()
-        use_proxy = len(ranges) * 2 > 10
-        print(
-            "BACKFILL ranges",
-            len(ranges),
-            "proxy",
-            use_proxy,
-            "proxies",
-            len(proxies) if use_proxy else 0,
-        )
-        inst_map = {}
-        oi_map = {}
-
-        def job(rg):
-            proxy = random.choice(proxies) if use_proxy and proxies else None
-            for attempt in range(3):
-                try:
-                    return fetch_chunk(rg[0], rg[1], proxy=proxy)
-                except Exception as e:
-                    if attempt == 2:
-                        raise e
-                    time.sleep(1.5 * (attempt + 1))
-                    if use_proxy and proxies:
-                        proxy = random.choice(proxies)
-            return {}, {}
-
-        if use_proxy:
-            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
-                futs = {ex.submit(job, rg): rg for rg in ranges}
-                for fut in as_completed(futs):
-                    rg = futs[fut]
-                    try:
-                        im, om = fut.result()
-                        inst_map.update(im)
-                        oi_map.update(om)
-                        print("OK chunk", ymd_slash(rg[0]), ymd_slash(rg[1]), "inst", len(im), "oi", len(om))
-                    except Exception as e:
-                        print("FAIL chunk", ymd_slash(rg[0]), ymd_slash(rg[1]), e)
-        else:
-            for rg in ranges:
-                im, om = job(rg)
-                inst_map.update(im)
-                oi_map.update(om)
-                print("OK chunk", ymd_slash(rg[0]), ymd_slash(rg[1]), "inst", len(im), "oi", len(om))
-
-        series = merge_series(existing, build_series(inst_map, oi_map))
+        print("BACKFILL", ymd_slash(start), ymd_slash(end))
+    elif hole:
+        start = end - timedelta(days=40)
+        print("HEAL", ymd_slash(start), ymd_slash(end))
     else:
         start = end - timedelta(days=RECENT_DAYS)
         print("REFRESH", ymd_slash(start), ymd_slash(end))
-        im, om = {}, {}
-        try:
-            im, om = fetch_chunk(start, end, proxy=None)
-        except Exception as e:
-            print("WARN direct", e)
-        if not im:
-            proxies = load_proxies()
-            ranges = chunk_ranges(start, end, 10)
-            print("RETRY proxy chunks", len(ranges), "proxies", len(proxies))
-            for rg in ranges:
-                ok = False
-                for _attempt in range(4):
-                    proxy = random.choice(proxies) if proxies else None
-                    try:
-                        a, b = fetch_chunk(rg[0], rg[1], proxy=proxy)
-                        im.update(a)
-                        om.update(b)
-                        ok = True
-                        break
-                    except Exception as e:
-                        time.sleep(1.2)
-                print("chunk", ymd_slash(rg[0]), ymd_slash(rg[1]), "inst", len(im), "ok", ok)
-        series = merge_series(existing, build_series(im, om))
 
-    series = series[:HIST_N]
+    im, om = fetch_range_maps(start, end, proxies=proxies)
+    series = merge_series(existing, build_series(im, om))[:HIST_N]
+
+    # 缺口觀察：近 20 個有 OI 的交易日是否都在 series
+    have = {r["date"] for r in series}
+    missing = sorted(d for d in om.keys() if d not in have)
+    if missing:
+        print("WARN missing_after_merge", missing[:12])
+
     payload = {
         "fetchedAt": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
         "date": series[0]["date"] if series else "",

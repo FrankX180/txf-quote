@@ -449,7 +449,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.39</div>
+      <div class="ver foot-right">1.40</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -3554,7 +3554,17 @@
         uncover = { inst: [], top: [], date: "", today: null, history: [] };
       }
       try {
-        const mx = await gh("data/tmf_retail.json").then((r) => r.json());
+        let mx = null;
+        try {
+          mx = await fetch(LIVE + "?kind=tmf", { cache: "no-cache" }).then((r) =>
+            r.ok ? r.json() : null
+          );
+        } catch (e) {
+          mx = null;
+        }
+        if (!mx || !(mx.series && mx.series.length)) {
+          mx = await gh("data/tmf_retail.json").then((r) => r.json());
+        }
         const map = {};
         (mx.series || []).forEach(function (r) {
           if (!r || r.date == null) return;

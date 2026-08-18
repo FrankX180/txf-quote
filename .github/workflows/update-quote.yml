@@ -33,6 +33,8 @@ jobs:
         run: python scripts/fetch_uncovered.py
         continue-on-error: true
       - name: Fetch TAIFEX TMF retail long-short ratio
+        env:
+          WEBSHARE_PROXIES: ${{ secrets.WEBSHARE_PROXIES }}
         run: python scripts/fetch_tmf_retail.py
         continue-on-error: true
       - name: Fetch MoneyDJ FITX daily/week/month K

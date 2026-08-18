@@ -157,6 +157,16 @@ async function ensureSchema(db) {
         ")"
     )
     .run();
+  await db
+    .prepare(
+      "CREATE TABLE IF NOT EXISTS tmf_retail (" +
+        "id INTEGER PRIMARY KEY CHECK (id = 1)," +
+        "payload TEXT NOT NULL," +
+        "fetched_at TEXT," +
+        "ts INTEGER" +
+        ")"
+    )
+    .run();
 }
 
 const ONLINE_MS = 90 * 1000;
@@ -548,6 +558,288 @@ async function pollAndStore(env, opts) {
   return out;
 }
 
+// Big5 markers as latin1 (數字／逗號／TMF 仍是 ASCII，中文欄位用位元組比對)
+const TMF_NAME_L1 = "\xB7\x4C\xAB\xAC\xBB\x4F\xAB\xFC"; // 微型臺指
+const WHO_FOREIGN_L1 = "\xA5\x7E\xB8\xEA"; // 外資
+const WHO_TRUST_L1 = "\xA7\xEB\xAB\x48"; // 投信
+const WHO_DEALER_L1 = "\xA6\xDB\xC0\xE7"; // 自營
+const TOTAL_L1 = "\xA6\x58\xAD\x70"; // 合計
+const AFTER_L1 = "\xBD\x4C\xAB\xE1"; // 盤後
+
+function nintCell(x) {
+  const s = String(x == null ? "" : x).replace(/,/g, "").trim();
+  if (!s || s === "-") return 0;
+  const n = Number(s);
+  return Number.isFinite(n) ? Math.trunc(n) : 0;
+}
+
+function parseCsvLatin1(text) {
+  const rows = [];
+  let row = [];
+  let cur = "";
+  let inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQ) {
+      if (ch === '"' && text[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else if (ch === '"') inQ = false;
+      else cur += ch;
+      continue;
+    }
+    if (ch === '"') {
+      inQ = true;
+      continue;
+    }
+    if (ch === ",") {
+      row.push(cur);
+      cur = "";
+      continue;
+    }
+    if (ch === "\n") {
+      row.push(cur);
+      rows.push(row);
+      row = [];
+      cur = "";
+      continue;
+    }
+    if (ch !== "\r") cur += ch;
+  }
+  if (cur.length || row.length) {
+    row.push(cur);
+    rows.push(row);
+  }
+  return rows;
+}
+
+function ymdSlash(d) {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return y + "/" + m + "/" + day;
+}
+
+function parseInstLatin1(text) {
+  const out = {};
+  const rows = parseCsvLatin1(text);
+  for (const r of rows) {
+    if (!r || r.length < 14) continue;
+    if (String(r[1] || "").indexOf(TMF_NAME_L1) < 0) continue;
+    const who = String(r[2] || "");
+    if (who.indexOf(TOTAL_L1) >= 0) continue;
+    const d = String(r[0] || "").replace(/\//g, "");
+    if (d.length !== 8) continue;
+    const il = nintCell(r[9]);
+    const ish = nintCell(r[11]);
+    const inet = nintCell(r[13]);
+    const rec = out[d] || { il: 0, ish: 0, inet: 0, foreign: 0, trust: 0, dealer: 0 };
+    rec.il += il;
+    rec.ish += ish;
+    rec.inet += inet;
+    if (who.indexOf(WHO_FOREIGN_L1) >= 0) rec.foreign = inet;
+    else if (who.indexOf(WHO_TRUST_L1) >= 0) rec.trust = inet;
+    else if (who.indexOf(WHO_DEALER_L1) >= 0) rec.dealer = inet;
+    out[d] = rec;
+  }
+  return out;
+}
+
+function parseOiLatin1(text) {
+  const out = {};
+  const rows = parseCsvLatin1(text);
+  for (const r of rows) {
+    if (!r || r.length < 12) continue;
+    if (String(r[1] || "").trim() !== "TMF") continue;
+    const sess = r[17] != null ? String(r[17]) : "";
+    if (sess.indexOf(AFTER_L1) >= 0) continue;
+    const d = String(r[0] || "").replace(/\//g, "");
+    if (d.length !== 8) continue;
+    out[d] = (out[d] || 0) + nintCell(r[11]);
+  }
+  return out;
+}
+
+async function taifexPost(url, form, referer) {
+  const body = new URLSearchParams(form).toString();
+  const r = await fetch(url, {
+    method: "POST",
+    headers: {
+      "User-Agent": "Mozilla/5.0 (compatible; txf-quote-worker/1.0)",
+      "Content-Type": "application/x-www-form-urlencoded",
+      Origin: "https://www.taifex.com.tw",
+      Referer: referer,
+    },
+    body,
+  });
+  if (!r.ok) throw new Error("taifex HTTP " + r.status);
+  const buf = new Uint8Array(await r.arrayBuffer());
+  let s = "";
+  for (let i = 0; i < buf.length; i++) s += String.fromCharCode(buf[i]);
+  return s;
+}
+
+function buildTmfSeries(instMap, oiMap) {
+  const dates = Object.keys(instMap).sort().reverse();
+  const series = [];
+  for (const d of dates) {
+    const a = instMap[d];
+    const oi = oiMap[d];
+    if (!oi || oi <= 0) continue;
+    const retail = a.ish - a.il;
+    const ratio = Math.round((retail / oi) * 1000) / 10;
+    series.push({
+      date: d,
+      retail,
+      ratio,
+      marketOi: oi,
+      instNet: a.inet,
+      foreign: a.foreign,
+      trust: a.trust,
+      dealer: a.dealer,
+    });
+  }
+  return series;
+}
+
+async function loadTmfPayload(env) {
+  if (!env.IMB_DB) return null;
+  await ensureSchema(env.IMB_DB);
+  const row = await env.IMB_DB.prepare(
+    "SELECT payload, fetched_at, ts FROM tmf_retail WHERE id = 1"
+  ).first();
+  if (!row || !row.payload) return null;
+  try {
+    const j = JSON.parse(row.payload);
+    j._cachedAt = row.fetched_at || null;
+    j._ts = row.ts || null;
+    return j;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function saveTmfPayload(env, payload) {
+  if (!env.IMB_DB) return;
+  await ensureSchema(env.IMB_DB);
+  const now = Date.now();
+  const fetchedAt = twParts(now);
+  const stamp =
+    fetchedAt.y +
+    "-" +
+    fetchedAt.mo +
+    "-" +
+    fetchedAt.d +
+    " " +
+    String(fetchedAt.h).padStart(2, "0") +
+    ":" +
+    String(fetchedAt.mi).padStart(2, "0") +
+    ":" +
+    String(fetchedAt.s).padStart(2, "0");
+  payload.fetchedAt = stamp;
+  await env.IMB_DB.prepare(
+    "INSERT INTO tmf_retail (id, payload, fetched_at, ts) VALUES (1, ?, ?, ?) " +
+      "ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, fetched_at=excluded.fetched_at, ts=excluded.ts"
+  )
+    .bind(JSON.stringify(payload), stamp, now)
+    .run();
+}
+
+async function refreshTmfRetail(env, days) {
+  const n = days || 21;
+  const now = Date.now();
+  const p = twParts(now);
+  const endUtc = Date.UTC(Number(p.y), Number(p.mo) - 1, Number(p.d));
+  const startUtc = endUtc - (n - 1) * 86400000;
+  // futDataDown 長區間會回 HTML 錯頁；切 7 日塊再 merge（對齊本機腳本）
+  const span = 7;
+  const instMap = {};
+  const oiMap = {};
+  let chunks = 0;
+  let oiBytes = 0;
+  for (let t = startUtc; t <= endUtc; t += span * 86400000) {
+    const a = t;
+    const b = Math.min(t + (span - 1) * 86400000, endUtc);
+    const start = ymdSlash(new Date(a));
+    const endS = ymdSlash(new Date(b));
+    const instTxt = await taifexPost(
+      "https://www.taifex.com.tw/cht/3/futContractsDateDown",
+      { queryStartDate: start, queryEndDate: endS },
+      "https://www.taifex.com.tw/cht/3/futContractsDateView"
+    );
+    const oiTxt = await taifexPost(
+      "https://www.taifex.com.tw/cht/3/futDataDown",
+      {
+        down_type: "1",
+        commodity_id: "TMF",
+        queryStartDate: start,
+        queryEndDate: endS,
+      },
+      "https://www.taifex.com.tw/cht/3/futDailyMarketView"
+    );
+    oiBytes += oiTxt.length;
+    Object.assign(instMap, parseInstLatin1(instTxt));
+    Object.assign(oiMap, parseOiLatin1(oiTxt));
+    chunks++;
+  }
+  const series = buildTmfSeries(instMap, oiMap);
+  // merge with cached history so short refresh does not wipe long series
+  const prev = await loadTmfPayload(env);
+  const by = {};
+  for (const r of (prev && prev.series) || []) {
+    if (r && r.date) by[r.date] = r;
+  }
+  for (const r of series) by[r.date] = r;
+  const merged = Object.keys(by)
+    .sort()
+    .reverse()
+    .map((k) => by[k])
+    .slice(0, 800);
+  const payload = {
+    date: merged[0] ? merged[0].date : "",
+    source: "taifex:futContractsDateDown+futDataDown",
+    label: "微台散戶多空比",
+    note: "ratio%=retail_net/market_oi*100; retail_net=inst_short-inst_long",
+    series: merged,
+  };
+  await saveTmfPayload(env, payload);
+  return {
+    ok: true,
+    n: merged.length,
+    date: payload.date,
+    fetched: Object.keys(instMap).length,
+    oiFetched: Object.keys(oiMap).length,
+    chunks,
+    oiBytes,
+    range: [ymdSlash(new Date(startUtc)), ymdSlash(new Date(endUtc))],
+  };
+}
+
+function wantTmfRefresh(ms) {
+  const p = twParts(ms);
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Taipei",
+    weekday: "short",
+  });
+  const wd = fmt.format(new Date(ms));
+  if (wd === "Sat" || wd === "Sun") return false;
+  const hm = p.hm;
+  if (hm >= 1530 && hm <= 2000) return true;
+  if (hm >= 800 && hm <= 1000) return true;
+  return false;
+}
+
+async function maybeRefreshTmf(env) {
+  if (!env.IMB_DB) return { ok: false, reason: "no-db" };
+  const now = Date.now();
+  if (!wantTmfRefresh(now)) return { ok: false, reason: "outside-window" };
+  const prev = await loadTmfPayload(env);
+  if (prev && prev._ts && now - Number(prev._ts) < 25 * 60 * 1000) {
+    return { ok: false, reason: "throttled", ageMin: Math.round((now - Number(prev._ts)) / 60000) };
+  }
+  return refreshTmfRetail(env, 30);
+}
+
 export default {
   async fetch(request, env, ctx) {
     if (request.method === "OPTIONS") {
@@ -567,6 +859,35 @@ export default {
           "Cache-Control": "no-store",
           "CDN-Cache-Control": "no-store",
           "Cloudflare-CDN-Cache-Control": "no-store",
+        });
+      } catch (e) {
+        return jsonResp({ ok: false, error: String(e && e.message || e) }, 500, {
+          "Cache-Control": "no-store",
+        });
+      }
+    }
+
+    if (kind === "tmf") {
+      try {
+        if (url.searchParams.get("refresh") === "1") {
+          const st = await refreshTmfRetail(env, Number(url.searchParams.get("days") || 30));
+          const payload = await loadTmfPayload(env);
+          return jsonResp({ ...payload, _refresh: st }, 200, {
+            "Cache-Control": "no-store",
+            "CDN-Cache-Control": "no-store",
+            "Cloudflare-CDN-Cache-Control": "no-store",
+          });
+        }
+        let payload = await loadTmfPayload(env);
+        if (!payload || !(payload.series && payload.series.length)) {
+          await refreshTmfRetail(env, 30);
+          payload = await loadTmfPayload(env);
+        }
+        if (!payload) return jsonResp({ ok: false, reason: "empty" }, 404, { "Cache-Control": "no-store" });
+        return jsonResp(payload, 200, {
+          "Cache-Control": "public, max-age=0",
+          "CDN-Cache-Control": "public, max-age=60",
+          "Cloudflare-CDN-Cache-Control": "public, max-age=60",
         });
       } catch (e) {
         return jsonResp({ ok: false, error: String(e && e.message || e) }, 500, {
@@ -703,6 +1024,15 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(pollAndStore(env, { chart: true }));
+    ctx.waitUntil(
+      (async () => {
+        await pollAndStore(env, { chart: true });
+        try {
+          await maybeRefreshTmf(env);
+        } catch (e) {
+          /* ignore tmf cron errors */
+        }
+      })()
+    );
   },
 };

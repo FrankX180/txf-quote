@@ -93,3 +93,16 @@ def want_uncovered(dt=None):
     if d.weekday() >= 5:
         return False
     return 1530 <= h <= 2000
+
+
+def want_tmf_retail(dt=None):
+    """微台與法人同窗；另加平日 08:00–10:00 補洞（前一日若晚上抓失敗可自癒）。"""
+    if forced():
+        return True
+    d = dt or now_tw()
+    h = hm(d)
+    if d.weekday() >= 5:
+        return False
+    if 1530 <= h <= 2000:
+        return True
+    return 800 <= h <= 1000
