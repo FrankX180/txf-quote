@@ -438,7 +438,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.32</div>
+      <div class="ver foot-right">1.33</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -900,14 +900,14 @@
       h1 += `</table>`;
       todayEl.innerHTML = h1;
 
-      let hOi = `<h4>未平倉淨額（近${hist.length || 20}日）</h4><table><tr><th>日</th><th>外</th><th>投</th><th>自</th><th>散</th></tr>`;
+      let hOi = `<h4>未平倉淨額（近${hist.length || 20}日）</h4><table><tr><th>日</th><th>外資</th><th>投信</th><th>自營</th><th>散戶</th></tr>`;
       hist.forEach((r) => {
         hOi += `<tr><td>${oiShortDate(r.date)}</td><td>${signed(r.foreign)}</td><td>${signed(r.trust)}</td><td>${signed(r.dealer)}</td><td>${signed(r.retail)}</td></tr>`;
       });
       hOi += `</table><div class="note">單位：口；數字為淨未平倉（多−空）</div>`;
       oiEl.innerHTML = hOi;
 
-      let hTr = `<h4>每日淨額變化（近${hist.length || 20}日）</h4><table><tr><th>日</th><th>外資</th><th>投信</th><th>自營</th><th>散戶</th></tr>`;
+      let hTr = `<table><tr><th>日</th><th>外資</th><th>投信</th><th>自營</th><th>散戶</th></tr>`;
       hist.forEach((r, i) => {
         const f = r.foreignDelta != null ? r.foreignDelta : oiDayDiff(hist, i, "foreign");
         const t = oiDayDiff(hist, i, "trust");
