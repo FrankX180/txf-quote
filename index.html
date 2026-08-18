@@ -463,6 +463,8 @@
     let lastTot = null;
     let liveTimer = null;
     let klineTimer = null;
+    let live1mTimer = null;
+    let live1mBusy = false;
     let staleHits = 0;
     let probeOnly = false;
     let lastSig = "";
@@ -3103,6 +3105,95 @@
       return { night, day };
     }
 
+    // 開盤價線回填：Worker 奇摩 1m（與內外盤一樣不依賴「何時開頁」）
+    async function pullLive1m() {
+      try {
+        const y = await fetch(LIVE + "?kind=1m", { cache: "no-cache" }).then((r) =>
+          r.ok ? r.json() : null
+        );
+        if (!y || !y.timestamp || !y.timestamp.length) return false;
+        const parts = barsFromYahooChart(y);
+        minutePack.night_1m = mergeBarLists(minutePack.night_1m, parts.night);
+        minutePack.day_1m = mergeBarLists(minutePack.day_1m, parts.day);
+        save1m();
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    // 當盤 1 分是否已從開盤附近接到現在（奇摩常缺 08:45 第一根 → 容許 3 分鐘）
+    function live1mGap() {
+      if (!marketOpen()) return false;
+      const d = new Date();
+      const hm = d.getHours() * 100 + d.getMinutes();
+      // 日盤盤前 08:30–08:44：尚未正式成交，不催 1 分
+      if (hm >= 830 && hm < 845) return false;
+      const sk = liveSess();
+      if (sk !== "day" && sk !== "night") return false;
+      if (sessKindAt(Date.now()) !== sk) return false;
+      const openMs = sessionOpenAt();
+      const dstr = barDateAt(Math.max(openMs, Date.now() - 1000));
+      const rows = (minutePack[sk + "_1m"] || [])
+        .filter((b) => b && dateKey(b.date) === dstr)
+        .slice()
+        .sort((a, b) => a.timestamp - b.timestamp);
+      if (!rows.length) return true;
+      const first = rows[0].timestamp;
+      // 第一根晚於開盤 +3 分 → 左端會空（對上內外盤從 08:45 就有柱）
+      if (first > openMs + 3 * 60000) return true;
+      const last = rows[rows.length - 1].timestamp;
+      const nowSlot = Math.floor(Date.now() / 60000) * 60000;
+      let endMs = nowSlot;
+      if (sk === "day") {
+        const end = new Date(openMs);
+        end.setHours(13, 45, 0, 0);
+        endMs = Math.min(nowSlot, end.getTime());
+      } else {
+        const end = new Date(openMs);
+        end.setDate(end.getDate() + 1);
+        end.setHours(5, 0, 0, 0);
+        endMs = Math.min(nowSlot, end.getTime());
+      }
+      if (endMs - last > 3 * 60000) return true;
+      return false;
+    }
+
+    async function ensureLive1m(force) {
+      if (live1mBusy) return false;
+      if (document.visibilityState !== "visible") return false;
+      if (!force && !live1mGap()) return false;
+      live1mBusy = true;
+      let ok = false;
+      try {
+        ok = await pullLive1m();
+        if (ok) {
+          if (snap) {
+            patchQuoteOHLC("day", n(snap.day && snap.day.CLastPrice));
+            patchQuoteOHLC("night", n(snap.night && snap.night.CLastPrice));
+          }
+          if (chartMode === "line") draw();
+          else render();
+        }
+      } finally {
+        live1mBusy = false;
+      }
+      return ok;
+    }
+
+    function startLive1mGuard() {
+      if (live1mTimer) return;
+      ensureLive1m(true);
+      // 開頁後短突發重試（對齊內外盤雲端補齊節奏）
+      setTimeout(() => ensureLive1m(true), 2500);
+      setTimeout(() => ensureLive1m(true), 8000);
+      setTimeout(() => ensureLive1m(true), 20000);
+      live1mTimer = setInterval(() => {
+        // 有缺段才拉；已齊則跳過（完整 kline 仍每 5 分由 klineTimer 跑）
+        ensureLive1m(false);
+      }, 30000);
+    }
+
     async function loadKline() {
       try {
         const pack = await gh("data/kline-daily.json").then((r) => r.json());
@@ -3123,18 +3214,8 @@
           minutePack.night_1m = m.night;
           minutePack.day_1m = m.day || [];
         }
-        // GitHub 可能落後：每 5 分併 Worker 即時 1m（非每 5 秒）
-        try {
-          const y = await fetch(LIVE + "?kind=1m", { cache: "no-cache" }).then((r) =>
-            r.ok ? r.json() : null
-          );
-          if (y && y.timestamp && y.timestamp.length) {
-            const parts = barsFromYahooChart(y);
-            minutePack.night_1m = mergeBarLists(minutePack.night_1m, parts.night);
-            minutePack.day_1m = mergeBarLists(minutePack.day_1m, parts.day);
-            save1m();
-          }
-        } catch (e2) {}
+        // GitHub 可能落後：併 Worker 即時 1m（開盤另有 startLive1mGuard 缺段重試）
+        await pullLive1m();
       } catch (e) {}
       try {
         uncover = await gh("data/uncovered.json").then((r) => r.json());
@@ -3235,8 +3316,10 @@
       }
     }
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") startPoll();
-      else stopPoll();
+      if (document.visibilityState === "visible") {
+        startPoll();
+        ensureLive1m(true);
+      } else stopPoll();
     });
 
     window.addEventListener("resize", () => {
@@ -3268,6 +3351,7 @@
       if (chartMode === "line") draw();
     });
     loadKline();
+    startLive1mGuard();
     startPoll();
     startTraffic();
     klineTimer = setInterval(loadKline, 300000);
