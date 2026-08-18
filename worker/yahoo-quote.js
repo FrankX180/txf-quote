@@ -169,23 +169,38 @@ async function ensureSchema(db) {
     .run();
 }
 
+
+function normalizeSite(url) {
+  const s = (url.searchParams.get("site") || "txf").slice(0, 32);
+  return /^[a-zA-Z0-9_-]+$/.test(s) ? s : "txf";
+}
+function presenceKey(site, sid) {
+  return site + "::" + sid;
+}
+function trafficDayKey(site, dayKey) {
+  return site === "txf" ? dayKey : site + ":" + dayKey;
+}
+
 const ONLINE_MS = 90 * 1000;
 
 async function handlePing(env, url) {
   if (!env.IMB_DB) return { ok: false, reason: "no-db" };
+  const site = normalizeSite(url);
   const sid = (url.searchParams.get("sid") || "").slice(0, 64);
   if (!sid || !/^[a-zA-Z0-9_-]{8,64}$/.test(sid)) {
     return { ok: false, reason: "bad-sid" };
   }
   const hit = url.searchParams.get("hit") === "1";
   const now = Date.now();
-  const dayKey = tradingDayKey(now);
+  const dayKeyRaw = tradingDayKey(now);
+  const dayKey = trafficDayKey(site, dayKeyRaw);
+  const pSid = presenceKey(site, sid);
   await ensureSchema(env.IMB_DB);
   await env.IMB_DB.prepare(
     "INSERT INTO presence (sid, last_seen, day_key) VALUES (?, ?, ?) " +
       "ON CONFLICT(sid) DO UPDATE SET last_seen=excluded.last_seen, day_key=excluded.day_key"
   )
-    .bind(sid, now, dayKey)
+    .bind(pSid, now, dayKey)
     .run();
   // 清超過 1 小時沒心跳
   await env.IMB_DB.prepare("DELETE FROM presence WHERE last_seen < ?")
@@ -223,12 +238,22 @@ async function handlePing(env, url) {
     }
   }
 
-  const onlineRow = await env.IMB_DB.prepare(
-    "SELECT COUNT(*) AS n FROM presence WHERE last_seen >= ?"
-  )
-    .bind(now - ONLINE_MS)
-    .first();
-  const online = Number(onlineRow && onlineRow.n) || 0;
+  let online = 0;
+  if (site === "txf") {
+    const onlineRow = await env.IMB_DB.prepare(
+      "SELECT COUNT(*) AS n FROM presence WHERE last_seen >= ? AND (sid LIKE ? OR sid NOT LIKE '%::%')"
+    )
+      .bind(now - ONLINE_MS, "txf::%")
+      .first();
+    online = Number(onlineRow && onlineRow.n) || 0;
+  } else {
+    const onlineRow = await env.IMB_DB.prepare(
+      "SELECT COUNT(*) AS n FROM presence WHERE last_seen >= ? AND sid LIKE ?"
+    )
+      .bind(now - ONLINE_MS, site + "::%")
+      .first();
+    online = Number(onlineRow && onlineRow.n) || 0;
+  }
   await env.IMB_DB.prepare(
     "INSERT INTO traffic_day (day_key, pv, uv, peak) VALUES (?, 0, 0, ?) " +
       "ON CONFLICT(day_key) DO UPDATE SET peak = MAX(traffic_day.peak, excluded.peak)"
@@ -236,17 +261,20 @@ async function handlePing(env, url) {
     .bind(dayKey, online)
     .run();
 
-  return loadStats(env, dayKey, now);
+  return loadStats(env, dayKeyRaw, now, site);
 }
 
-async function loadStats(env, dayKey, nowMs) {
+async function loadStats(env, dayKey, nowMs, siteName) {
   const now = nowMs || Date.now();
-  const dk = dayKey || tradingDayKey(now);
-  const monthKey = dk.slice(0, 6);
+  const site = siteName || "txf";
+  const dkRaw = dayKey || tradingDayKey(now);
+  const dk = trafficDayKey(site, dkRaw);
+  const monthKey = dkRaw.slice(0, 6);
   const empty = {
     ok: false,
-    dayKey: dk,
+    dayKey: dkRaw,
     monthKey,
+    site,
     online: 0,
     pv: 0,
     uv: 0,
@@ -259,36 +287,62 @@ async function loadStats(env, dayKey, nowMs) {
   };
   if (!env.IMB_DB) return empty;
   await ensureSchema(env.IMB_DB);
-  const onlineRow = await env.IMB_DB.prepare(
-    "SELECT COUNT(*) AS n FROM presence WHERE last_seen >= ?"
-  )
-    .bind(now - ONLINE_MS)
-    .first();
+  let onlineRow;
+  if (site === "txf") {
+    onlineRow = await env.IMB_DB.prepare(
+      "SELECT COUNT(*) AS n FROM presence WHERE last_seen >= ? AND (sid LIKE ? OR sid NOT LIKE '%::%')"
+    )
+      .bind(now - ONLINE_MS, "txf::%")
+      .first();
+  } else {
+    onlineRow = await env.IMB_DB.prepare(
+      "SELECT COUNT(*) AS n FROM presence WHERE last_seen >= ? AND sid LIKE ?"
+    )
+      .bind(now - ONLINE_MS, site + "::%")
+      .first();
+  }
   const dayRow = await env.IMB_DB.prepare(
     "SELECT pv, uv, peak FROM traffic_day WHERE day_key = ?"
   )
     .bind(dk)
     .first();
+  const monthLike = site === "txf" ? monthKey + "%" : site + ":" + monthKey + "%";
   const monthRow = await env.IMB_DB.prepare(
     "SELECT COALESCE(SUM(pv), 0) AS pv FROM traffic_day WHERE day_key LIKE ?"
   )
-    .bind(monthKey + "%")
+    .bind(monthLike)
     .first();
   const monthUvRow = await env.IMB_DB.prepare(
     "SELECT COUNT(DISTINCT sid) AS n FROM traffic_sid WHERE day_key LIKE ?"
   )
-    .bind(monthKey + "%")
+    .bind(monthLike)
     .first();
-  const totalRow = await env.IMB_DB.prepare(
-    "SELECT COALESCE(SUM(pv), 0) AS pv FROM traffic_day"
-  ).first();
-  const totalUvRow = await env.IMB_DB.prepare(
-    "SELECT COUNT(DISTINCT sid) AS n FROM traffic_sid"
-  ).first();
+  let totalRow;
+  let totalUvRow;
+  if (site === "txf") {
+    totalRow = await env.IMB_DB.prepare(
+      "SELECT COALESCE(SUM(pv), 0) AS pv FROM traffic_day WHERE day_key NOT LIKE '%:%'"
+    ).first();
+    totalUvRow = await env.IMB_DB.prepare(
+      "SELECT COUNT(DISTINCT sid) AS n FROM traffic_sid WHERE day_key NOT LIKE '%:%'"
+    ).first();
+  } else {
+    totalRow = await env.IMB_DB.prepare(
+      "SELECT COALESCE(SUM(pv), 0) AS pv FROM traffic_day WHERE day_key LIKE ?"
+    )
+      .bind(site + ":%")
+      .first();
+    totalUvRow = await env.IMB_DB.prepare(
+      "SELECT COUNT(DISTINCT sid) AS n FROM traffic_sid WHERE day_key LIKE ?"
+    )
+      .bind(site + ":%")
+      .first();
+  }
   return {
     ok: true,
-    dayKey: dk,
+    dayKey: dkRaw,
     monthKey,
+    site,
     online: Number(onlineRow && onlineRow.n) || 0,
     pv: Number(dayRow && dayRow.pv) || 0,
     uv: Number(dayRow && dayRow.uv) || 0,
