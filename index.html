@@ -64,16 +64,6 @@
       align-items: center;
       gap: 8px;
     }
-    .imb-sum-lab {
-      flex-shrink: 0;
-      width: 3.2em;
-      font-size: 12px;
-      font-weight: 700;
-      line-height: 1.25;
-      color: #374151;
-      text-align: center;
-      user-select: none;
-    }
     .title-row { display: flex; align-items: center; gap: 8px; }
     .title { font-size: 20px; font-weight: 800; }
     .pxrow { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
@@ -353,7 +343,6 @@
         </div>
         <div class="hero-mid">
           <div id="minik"></div>
-          <div class="imb-sum-lab" title="內外盤為夜盤＋日盤合計">內外盤<br>　↑<br>夜＋日<br>盤合計</div>
         </div>
       </div>
     </div>
@@ -449,7 +438,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.41</div>
+      <div class="ver foot-right">1.42</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2371,13 +2360,20 @@
         const ibs = imbSeries().filter((b) => b && b.t >= t0 && b.t <= t1 && sessKindAt(b.t) !== "closed")
           .slice().sort((a, b) => a.t - b.t);
         const zeroY = Math.round(imbTop + imbH / 2) + 0.5;
-        // 左緣水平「內外盤」10pt
+        // 左緣說明：內外盤＝夜＋日合計（自右上 hero 移來）
         ctx.save();
-        ctx.fillStyle = "#6b7280";
-        ctx.font = "10pt sans-serif";
-        ctx.textAlign = "left";
+        ctx.fillStyle = "#374151";
+        ctx.font = "bold 10px sans-serif";
+        ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText("內外盤", 2, imbTop + imbH / 2);
+        const labLines = ["內外盤", "↑", "夜＋日", "盤合計"];
+        const labLh = 11;
+        const labX = Math.max(14, padL / 2 - 2);
+        let labY = imbTop + imbH / 2 - ((labLines.length - 1) * labLh) / 2;
+        labLines.forEach((ln) => {
+          ctx.fillText(ln, labX, labY);
+          labY += labLh;
+        });
         ctx.restore();
 
         ctx.strokeStyle = "#e5e7eb";
