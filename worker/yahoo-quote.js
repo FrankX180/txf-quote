@@ -140,6 +140,23 @@ async function ensureSchema(db) {
         ")"
     )
     .run();
+  await db
+    .prepare(
+      "CREATE TABLE IF NOT EXISTS price_1m (" +
+        "day_key TEXT NOT NULL," +
+        "session TEXT NOT NULL," +
+        "t INTEGER NOT NULL," +
+        "o REAL," +
+        "h REAL," +
+        "l REAL," +
+        "c REAL NOT NULL," +
+        "v INTEGER DEFAULT 0," +
+        "ts INTEGER," +
+        "source TEXT," +
+        "PRIMARY KEY (day_key, session, t)" +
+        ")"
+    )
+    .run();
 }
 
 const ONLINE_MS = 90 * 1000;
@@ -274,6 +291,174 @@ async function loadStats(env, dayKey, nowMs) {
   };
 }
 
+async function appendPricePx(env, px, nowMs, source) {
+  if (!env.IMB_DB || px == null || !Number.isFinite(px)) return { ok: false, reason: "no-px" };
+  const sess = sessionOf(nowMs);
+  if (!sess) return { ok: false, reason: "closed" };
+  const dayKey = tradingDayKey(nowMs);
+  const slot = minuteSlot(nowMs);
+  await ensureSchema(env.IMB_DB);
+  const prev = await env.IMB_DB.prepare(
+    "SELECT o, h, l, c, v FROM price_1m WHERE day_key=? AND session=? AND t=?"
+  )
+    .bind(dayKey, sess, slot)
+    .first();
+  let o = px;
+  let h = px;
+  let l = px;
+  let c = px;
+  let v = 0;
+  if (prev && prev.c != null) {
+    o = prev.o != null ? prev.o : px;
+    h = Math.max(prev.h != null ? prev.h : px, px);
+    l = Math.min(prev.l != null ? prev.l : px, px);
+    c = px;
+    v = Number(prev.v) || 0;
+  }
+  await env.IMB_DB.prepare(
+    "INSERT INTO price_1m (day_key, session, t, o, h, l, c, v, ts, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+      "ON CONFLICT(day_key, session, t) DO UPDATE SET " +
+      "o=excluded.o, h=excluded.h, l=excluded.l, c=excluded.c, v=excluded.v, ts=excluded.ts, source=excluded.source"
+  )
+    .bind(dayKey, sess, slot, o, h, l, c, v, nowMs, source || "quote")
+    .run();
+  return { ok: true, dayKey, sess, slot, c: px };
+}
+
+
+async function upsertPriceBars(env, bars) {
+  if (!env.IMB_DB || !bars || !bars.length) return 0;
+  await ensureSchema(env.IMB_DB);
+  const sql =
+    "INSERT INTO price_1m (day_key, session, t, o, h, l, c, v, ts, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+    "ON CONFLICT(day_key, session, t) DO UPDATE SET " +
+    "o=COALESCE(excluded.o, price_1m.o), " +
+    "h=CASE WHEN excluded.h IS NOT NULL AND (price_1m.h IS NULL OR excluded.h > price_1m.h) THEN excluded.h ELSE price_1m.h END, " +
+    "l=CASE WHEN excluded.l IS NOT NULL AND (price_1m.l IS NULL OR excluded.l < price_1m.l) THEN excluded.l ELSE price_1m.l END, " +
+    "c=excluded.c, " +
+    "v=CASE WHEN excluded.v IS NOT NULL AND excluded.v >= COALESCE(price_1m.v, 0) THEN excluded.v ELSE price_1m.v END, " +
+    "ts=excluded.ts, source=excluded.source";
+  const stmts = [];
+  for (const bar of bars) {
+    if (!bar || bar.c == null) continue;
+    stmts.push(
+      env.IMB_DB.prepare(sql).bind(
+        bar.dayKey,
+        bar.session,
+        bar.t,
+        bar.o,
+        bar.h,
+        bar.l,
+        bar.c,
+        bar.v || 0,
+        bar.ts,
+        bar.source || "chart"
+      )
+    );
+  }
+  // D1 batch 上限約 1000；分塊寫入
+  for (let i = 0; i < stmts.length; i += 200) {
+    await env.IMB_DB.batch(stmts.slice(i, i + 200));
+  }
+  return stmts.length;
+}
+
+function barsFromChartJson(chart) {
+  const tsList = (chart && chart.timestamp) || [];
+  const q0 = (((chart && chart.indicators) || {}).quote || [{}])[0] || {};
+  const opens = q0.open || [];
+  const highs = q0.high || [];
+  const lows = q0.low || [];
+  const closes = q0.close || [];
+  const vols = q0.volume || [];
+  const out = [];
+  for (let i = 0; i < tsList.length; i++) {
+    const c = closes[i];
+    if (c == null) continue;
+    const tsSec = +tsList[i];
+    const ts = tsSec < 1e12 ? tsSec * 1000 : tsSec;
+    const sess = sessionOf(ts);
+    if (!sess) continue;
+    const dayKey = tradingDayKey(ts);
+    const slot = minuteSlot(ts);
+    const o = opens[i] != null ? +opens[i] : +c;
+    const h = highs[i] != null ? +highs[i] : +c;
+    const l = lows[i] != null ? +lows[i] : +c;
+    const v = vols[i] != null ? Math.round(+vols[i] * 1000) : 0;
+    out.push({
+      dayKey,
+      session: sess,
+      t: slot,
+      o,
+      h,
+      l,
+      c: +c,
+      v,
+      ts,
+      source: "chart",
+    });
+  }
+  return out;
+}
+
+async function backfillChart1m(env) {
+  if (!env.IMB_DB) return { ok: false, reason: "no-db" };
+  const r = await fetch(CHART1M, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
+      Referer: "https://tw.stock.yahoo.com/",
+    },
+  });
+  if (!r.ok) return { ok: false, reason: "yahoo-chart-fail", status: r.status };
+  const chart = await r.json();
+  const all = barsFromChartJson(chart);
+  const dayKey = tradingDayKey(Date.now());
+  const bars = all.filter((b) => b.dayKey === dayKey);
+  const n = await upsertPriceBars(env, bars.length ? bars : all);
+  return { ok: true, n, dayKey, raw: all.length };
+}
+
+async function loadPricePack(env, dayKey) {
+  const empty = { dayKey, day: [], night: [], updatedAt: null };
+  if (!env.IMB_DB) return empty;
+  try {
+    await ensureSchema(env.IMB_DB);
+    const { results } = await env.IMB_DB.prepare(
+      "SELECT session, t, o, h, l, c, v, ts FROM price_1m WHERE day_key = ? ORDER BY t ASC"
+    )
+      .bind(dayKey)
+      .all();
+    const day = [];
+    const night = [];
+    let updatedAt = null;
+    for (const row of results || []) {
+      const bar = {
+        timestamp: row.t,
+        open: row.o,
+        high: row.h,
+        low: row.l,
+        close: row.c,
+        volume: row.v || 0,
+        date: dayKey,
+        session: row.session,
+        ts: row.ts,
+      };
+      if (row.session === "day") day.push(bar);
+      else if (row.session === "night") night.push(bar);
+      if (row.ts && (!updatedAt || row.ts > updatedAt)) updatedAt = row.ts;
+    }
+    return {
+      dayKey,
+      day,
+      night,
+      updatedAt: updatedAt ? new Date(updatedAt).toISOString() : null,
+    };
+  } catch (e) {
+    return empty;
+  }
+}
+
 async function appendImb(env, rows, nowMs) {
   if (!env.IMB_DB) return { ok: false, reason: "no-db" };
   const sess = sessionOf(nowMs);
@@ -341,14 +526,26 @@ async function fetchYahooQuote() {
   return { ok: r.ok, status: r.status, body };
 }
 
-/** 無人看盤也寫：Cron 觸發（CF 最短 1 分） */
-async function pollAndStore(env) {
+/** 無人看盤也寫：Cron／poll 觸發（CF 最短 1 分；本機守護可 5 秒） */
+async function pollAndStore(env, opts) {
   const nowMs = Date.now();
   if (!sessionOf(nowMs)) return { skipped: true, reason: "closed" };
   const { ok, body } = await fetchYahooQuote();
   if (!ok) return { skipped: true, reason: "yahoo-fail" };
   const rows = JSON.parse(body);
-  return await appendImb(env, rows, nowMs);
+  const imb = await appendImb(env, rows, nowMs);
+  const w = extractWtx(rows);
+  const px = await appendPricePx(env, w && w.px, nowMs, "quote");
+  const out = { imb, px };
+  // chart 回填只走 cron（約 1 分一次），避免本機 5 秒 poll 打爆奇摩
+  if (opts && opts.chart) {
+    try {
+      out.chart = await backfillChart1m(env);
+    } catch (e) {
+      out.chart = { ok: false, reason: String(e && e.message || e) };
+    }
+  }
+  return out;
 }
 
 export default {
@@ -416,9 +613,34 @@ export default {
       );
     }
 
+    // 後端權威 1 分價（與 imb 同級；前端優先讀此）
+    if (kind === "px1m") {
+      const now = Date.now();
+      const day =
+        (url.searchParams.get("day") || "").replace(/-/g, "") ||
+        tradingDayKey(now);
+      const pack = await loadPricePack(env, day);
+      return jsonResp(
+        {
+          dayKey: day,
+          day: pack.day,
+          night: pack.night,
+          updatedAt: pack.updatedAt,
+          source: "d1",
+        },
+        200,
+        {
+          "Cache-Control": "public, max-age=0",
+          "CDN-Cache-Control": "public, max-age=3",
+          "Cloudflare-CDN-Cache-Control": "public, max-age=3",
+        }
+      );
+    }
+
     // 手動／外部守護：強制打奇摩並寫 D1（不走 5 秒 CDN 快取語意）
     if (kind === "poll") {
-      const res = await pollAndStore(env);
+      const wantChart = url.searchParams.get("chart") === "1";
+      const res = await pollAndStore(env, wantChart ? { chart: true } : undefined);
       return jsonResp({ ok: true, ...res, at: new Date().toISOString() }, 200, {
         "Cache-Control": "no-store",
         "CDN-Cache-Control": "no-store",
@@ -436,6 +658,22 @@ export default {
     });
     const body = await r.text();
 
+    if (kind === "1m" && r.ok && env.IMB_DB) {
+      ctx.waitUntil(
+        (async () => {
+          try {
+            const chart = JSON.parse(body);
+            const all = barsFromChartJson(chart);
+            const dayKey = tradingDayKey(Date.now());
+            const bars = all.filter((b) => b.dayKey === dayKey);
+            await upsertPriceBars(env, bars.length ? bars : all);
+          } catch (e) {
+            /* ignore */
+          }
+        })()
+      );
+    }
+
     if (kind !== "1m" && r.ok && env.IMB_DB) {
       const nowMs = Date.now();
       ctx.waitUntil(
@@ -443,6 +681,8 @@ export default {
           try {
             const rows = JSON.parse(body);
             await appendImb(env, rows, nowMs);
+            const w = extractWtx(rows);
+            await appendPricePx(env, w && w.px, nowMs, "quote");
           } catch (e) {
             /* ignore */
           }
@@ -463,6 +703,6 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(pollAndStore(env));
+    ctx.waitUntil(pollAndStore(env, { chart: true }));
   },
 };

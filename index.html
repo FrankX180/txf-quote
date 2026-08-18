@@ -3105,8 +3105,27 @@
       return { night, day };
     }
 
-    // 開盤價線回填：Worker 奇摩 1m（與內外盤一樣不依賴「何時開頁」）
-    async function pullLive1m() {
+    // 後端權威 1 分價（D1）→ 奇摩 chart 補洞；不依賴何時開頁
+    async function pullCloudPx1m() {
+      try {
+        const day = imbDayKey();
+        const y = await fetch(LIVE + "?kind=px1m&day=" + day, { cache: "no-cache" }).then((r) =>
+          r.ok ? r.json() : null
+        );
+        if (!y) return false;
+        const n0 = (y.night || []).length;
+        const d0 = (y.day || []).length;
+        if (!n0 && !d0) return false;
+        minutePack.night_1m = mergeBarLists(minutePack.night_1m, y.night || []);
+        minutePack.day_1m = mergeBarLists(minutePack.day_1m, y.day || []);
+        save1m();
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    async function pullYahoo1m() {
       try {
         const y = await fetch(LIVE + "?kind=1m", { cache: "no-cache" }).then((r) =>
           r.ok ? r.json() : null
@@ -3120,6 +3139,12 @@
       } catch (e) {
         return false;
       }
+    }
+
+    async function pullLive1m() {
+      const a = await pullCloudPx1m();
+      const b = await pullYahoo1m();
+      return a || b;
     }
 
     // 當盤 1 分是否已從開盤附近接到現在（奇摩常缺 08:45 第一根 → 容許 3 分鐘）
