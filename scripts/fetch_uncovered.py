@@ -1,5 +1,5 @@
 # 法人／大額未平倉 → data/uncovered.json
-# 來源：Yahoo（當日多空）+ 聚財（近月淨額序列）+ CMoney DtNo（散戶／PC／Δ）
+# 今日部位主路：期交所 OpenAPI；備援 Yahoo；近20日：聚財／wearn／CMoney
 import json
 import re
 import urllib.request
@@ -14,6 +14,11 @@ HDR = {
     "Accept": "text/html,application/json,*/*",
 }
 YAHOO = "https://tw.stock.yahoo.com/future/futures_uncovered.html"
+OA_INST = (
+    "https://openapi.taifex.com.tw/v1/"
+    "MarketDataOfMajorInstitutionalTradersDetailsOfFuturesContractsBytheDate"
+)
+OA_LARGE = "https://openapi.taifex.com.tw/v1/OpenInterestOfLargeTradersFutures"
 WEARN = "https://stock.wearn.com/taifexphoto.asp"
 CMONEY = "https://www.cmoney.tw/MobileService/ashx/GetDtnoData.ashx"
 HIST_N = 20
@@ -28,7 +33,7 @@ def get_text(url: str, timeout: int = 30) -> str:
 def get_json(url: str, timeout: int = 30):
     req = urllib.request.Request(url, headers={**HDR, "Accept": "application/json,*/*"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode("utf-8", "replace"))
+        return json.loads(r.read().decode("utf-8-sig", "replace"))
 
 
 def extract(html: str, marker: str):
@@ -108,6 +113,93 @@ def fetch_yahoo():
     date = ""
     if inst_raw:
         date = str(inst_raw[0].get("date") or "")[:10].replace("-", "")
+    return inst, top, date
+
+def _ymd8(s) -> str:
+    s = str(s or "").strip()
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        return s[:10].replace("-", "")
+    if len(s) >= 8 and s[:8].isdigit():
+        return s[:8]
+    return ""
+
+
+def inst_has_ls(inst) -> bool:
+    rows = [r for r in (inst or []) if r.get("name") and "合計" not in (r.get("name") or "")]
+    if len(rows) < 3:
+        return False
+    return all(r.get("long") is not None and r.get("short") is not None for r in rows[:3])
+
+
+def fetch_openapi_tx():
+    """最新一交易日：臺股期貨法人多空＋近月大額前十／特定。"""
+    raw = get_json(OA_INST, 40)
+    if isinstance(raw, dict):
+        raw = raw.get("data") or raw.get("Data") or []
+    tx = [r for r in (raw or []) if str(r.get("ContractCode") or "") == "臺股期貨"]
+    date = _ymd8(tx[0].get("Date")) if tx else ""
+    order = ["外資及陸資", "投信", "自營商"]
+    by = {}
+    for r in tx:
+        name = str(r.get("Item") or "")
+        by[name] = {
+            "name": name,
+            "long": num(r.get("OpenInterest(Long)")),
+            "short": num(r.get("OpenInterest(Short)")),
+            "net": num(r.get("OpenInterest(Net)")),
+        }
+    inst = [by[n] for n in order if n in by]
+    if inst:
+        ls = [r for r in inst if r.get("long") is not None]
+        ss = [r for r in inst if r.get("short") is not None]
+        ns = [r for r in inst if r.get("net") is not None]
+        inst.append(
+            {
+                "name": "三大法人合計",
+                "long": sum(r["long"] for r in ls) if ls else None,
+                "short": sum(r["short"] for r in ss) if ss else None,
+                "net": sum(r["net"] for r in ns) if ns else None,
+            }
+        )
+    large = get_json(OA_LARGE, 40)
+    if isinstance(large, dict):
+        large = large.get("data") or large.get("Data") or []
+    txl = [r for r in (large or []) if str(r.get("Contract") or "") == "TX"]
+    if not date and txl:
+        date = _ymd8(txl[0].get("Date"))
+    months = []
+    for r in txl:
+        m = str(r.get("SettlementMonth") or "")
+        if m.isdigit() and m not in ("666666", "999912"):
+            months.append(m)
+    near = max(months) if months else ""
+    top = []
+    type_map = {"0": "前十大交易人合計", "1": "特定法人合計"}
+    for code, label in type_map.items():
+        row = next(
+            (
+                r
+                for r in txl
+                if str(r.get("SettlementMonth") or "") == near
+                and str(r.get("TypeOfTraders") or "") == code
+            ),
+            None,
+        )
+        if not row:
+            continue
+        lg = num(row.get("Top10Buy"))
+        sh = num(row.get("Top10Sell"))
+        oi = num(row.get("OIOfMarket"))
+        top.append(
+            {
+                "type": label,
+                "long": lg,
+                "longPct": (lg / oi * 100.0) if lg is not None and oi else None,
+                "short": sh,
+                "shortPct": (sh / oi * 100.0) if sh is not None and oi else None,
+                "open": oi,
+            }
+        )
     return inst, top, date
 
 
@@ -210,8 +302,34 @@ def main():
         return
 
     sources = []
-    inst, top, yahoo_date = fetch_yahoo()
-    sources.append("yahoo")
+    oa_inst, oa_top, oa_date = [], [], ""
+    try:
+        oa_inst, oa_top, oa_date = fetch_openapi_tx()
+    except Exception as e:
+        print("WARN openapi", e)
+    yh_inst, yh_top, yh_date = [], [], ""
+    try:
+        yh_inst, yh_top, yh_date = fetch_yahoo()
+    except Exception as e:
+        print("WARN yahoo", e)
+
+    oa_ok = inst_has_ls(oa_inst)
+    yh_ok = inst_has_ls(yh_inst)
+    # 官方日 >= 奇摩日才用 OpenAPI；官方較舊不蓋較新奇摩（奇摩空值交後面 history 補淨額）
+    use_oa = bool(oa_ok and oa_date and (not yh_date or oa_date >= yh_date))
+    if not use_oa and oa_ok and not yh_ok and (not yh_date or not yh_inst):
+        use_oa = True
+    if use_oa:
+        inst, top, date_pick = oa_inst, oa_top, oa_date
+        sources.append("openapi")
+    else:
+        inst, top, date_pick = yh_inst, yh_top, yh_date
+        if yh_inst or yh_top:
+            sources.append("yahoo")
+        elif oa_ok:
+            inst, top, date_pick = oa_inst, oa_top, oa_date
+            sources.append("openapi")
+    yahoo_date = date_pick
     wearn = fetch_wearn_hist(HIST_N)
     if wearn:
         sources.append("wearn")
