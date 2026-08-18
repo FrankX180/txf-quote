@@ -168,11 +168,12 @@ def build_series(inst_map, oi_map):
     series = []
     for d in sorted(inst_map.keys(), reverse=True):
         a = inst_map[d]
-        retail = a["ish"] - a["il"]  # = -inet
         oi = oi_map.get(d)
-        ratio = None
-        if oi and oi > 0:
-            ratio = round(retail / oi * 100.0, 2)
+        # 無市場OI＝當日行情未齊（或盤中占位），不進副圖，避免假 0 柱／缺比
+        if not oi or oi <= 0:
+            continue
+        retail = a["ish"] - a["il"]  # = -inet
+        ratio = round(retail / oi * 100.0, 2)
         series.append(
             {
                 "date": d,
