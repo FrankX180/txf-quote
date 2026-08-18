@@ -156,6 +156,9 @@
       display: flex; align-items: stretch;
       background: #f3f4f6; border-radius: 3px; overflow: hidden;
     }
+    .oi-sbar-track.one { display: flex; align-items: stretch; }
+    .oi-sbar-track.one.pos { justify-content: flex-end; }
+    .oi-sbar-track.one.neg { justify-content: flex-start; }
     .oi-sbar-half {
       flex: 1; display: flex; align-items: stretch; min-width: 0;
     }
@@ -507,7 +510,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.54</div>
+      <div class="ver foot-right">1.55</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1013,17 +1016,38 @@
       });
       return m;
     }
-    function oiSignedBarCell(v, absMax, mode) {
+    function oiSignedMeta(vals) {
+      let m = 0, hasPos = false, hasNeg = false;
+      (vals || []).forEach((v) => {
+        if (v == null || v === "") return;
+        const n = Number(v);
+        if (!isFinite(n) || n === 0) return;
+        if (n > 0) hasPos = true;
+        if (n < 0) hasNeg = true;
+        const a = Math.abs(n);
+        if (a > m) m = a;
+      });
+      const side = (hasPos && hasNeg) ? "both" : (hasNeg ? "neg" : "pos");
+      return { absMax: m, side: side };
+    }
+    function oiSignedBarCell(v, meta, mode) {
       if (v == null || v === "") return "";
       const n = Number(v);
       if (!isFinite(n)) return "";
+      const absMax = (meta && meta.absMax != null) ? meta.absMax : (typeof meta === "number" ? meta : 0);
+      const side = (meta && meta.side) || "both";
       const am = absMax > 0 ? absMax : (Math.abs(n) || 1);
       const pct = Math.min(100, (Math.abs(n) / am) * 100);
       const cls = n > 0 ? "up" : n < 0 ? "dn" : "flat";
       let lab;
       if (mode === "pc") lab = fmt(n, 1);
       else lab = (oiSimple ? fmt(round50(n)) : fmt(n));
-      // 正值：中軸往左；負值：中軸往右
+      if (side !== "both") {
+        const barCls = n >= 0 ? "pos" : "neg";
+        const oneCls = n >= 0 ? "pos" : "neg";
+        const bar = n === 0 ? "" : `<div class="oi-sbar ${barCls}" style="width:${pct.toFixed(1)}%"></div>`;
+        return `<div class="oi-sbar-wrap" title="${lab}"><span class="oi-snum ${cls}">${lab}</span><div class="oi-sbar-track one ${oneCls}">${bar}</div></div>`;
+      }
       const left = n > 0
         ? `<div class="oi-sbar pos" style="width:${pct.toFixed(1)}%"></div>`
         : "";
@@ -1109,7 +1133,7 @@
       h1 += `</table><div class="note">口數＝大台等值（大台＋小台/4＋微台/20）；PC／VIX 不換算</div>`;
       todayEl.innerHTML = h1;
 
-      const tradeLabs = { foreign: "外資", trust: "投信", dealer: "自營", retail: "散戶" };
+      const tradeLabs = { foreign: "外資", trust: "投信", dealer: "自營", retail: "散戶", pc: "PC" };
       const tradeRows = hist.map((r, i) => ({
         date: r.date,
         close: r.close,
@@ -1117,43 +1141,48 @@
         trust: oiDayDiff(hist, i, "trust"),
         dealer: oiDayDiff(hist, i, "dealer"),
         retail: r.retailDelta != null ? r.retailDelta : oiDayDiff(hist, i, "retail"),
+        pc: r.pc,
       }));
       const tradePick = oiPick.trade;
-      const tradeAbs = tradePick ? oiAbsMax(tradeRows.map((r) => r[tradePick])) : 0;
-      let hTr = `<table><tr><th>日</th><th>收盤</th>${oiPickHead("trade", tradeLabs)}${oiPickTh("trade", "foreign", "外資")}${oiPickTh("trade", "trust", "投信")}${oiPickTh("trade", "dealer", "自營")}${oiPickTh("trade", "retail", "散戶")}</tr>`;
+      const tradeMeta = tradePick ? oiSignedMeta(tradeRows.map((r) => r[tradePick])) : null;
+      let hTr = `<table><tr><th>日</th><th>收盤</th>${oiPickHead("trade", tradeLabs)}${oiPickTh("trade", "foreign", "外資")}${oiPickTh("trade", "trust", "投信")}${oiPickTh("trade", "dealer", "自營")}${oiPickTh("trade", "retail", "散戶")}${oiPickTh("trade", "pc", "PC")}</tr>`;
       tradeRows.forEach((r) => {
         const pickCell = tradePick
-          ? oiSignedBarCell(r[tradePick], tradeAbs)
+          ? oiSignedBarCell(r[tradePick], tradeMeta, tradePick === "pc" ? "pc" : "oi")
           : "";
-        hTr += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td class="oi-pick${tradePick ? " on" : ""}">${pickCell}</td><td>${signedOi(r.foreign)}</td><td>${signedOi(r.trust)}</td><td>${signedOi(r.dealer)}</td><td>${signedOi(r.retail)}</td></tr>`;
+        hTr += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td class="oi-pick${tradePick ? " on" : ""}">${pickCell}</td><td>${signedOi(r.foreign)}</td><td>${signedOi(r.trust)}</td><td>${signedOi(r.dealer)}</td><td>${signedOi(r.retail)}</td><td>${r.pc == null ? "—" : fmt(r.pc, 1)}</td></tr>`;
       });
-      hTr += `</table><div class="note">單位：大台等值口（大台＋小台/4＋微台/20）；相對前一交易日未平倉淨額變化；點表頭可在收盤右欄畫正負柱</div>`;
+      hTr += `</table><div class="note">單位：大台等值口（大台＋小台/4＋微台/20）；相對前一交易日未平倉淨額變化；PC 不換算；點表頭可在收盤右欄畫正負柱</div>`;
       tradeEl.innerHTML = hTr;
 
       const oiLabs = { foreign: "外資", trust: "投信", dealer: "自營", retail: "散戶" };
       const oiPickKey = oiPick.oi;
-      const oiAbs = oiPickKey ? oiAbsMax(hist.map((r) => r[oiPickKey])) : 0;
+      const oiMeta = oiPickKey ? oiSignedMeta(hist.map((r) => r[oiPickKey])) : null;
       let hOi = `<table><tr><th>日</th><th>收盤</th>${oiPickHead("oi", oiLabs)}${oiPickTh("oi", "foreign", "外資")}${oiPickTh("oi", "trust", "投信")}${oiPickTh("oi", "dealer", "自營")}${oiPickTh("oi", "retail", "散戶")}</tr>`;
       hist.forEach((r) => {
         const pickCell = oiPickKey
-          ? oiSignedBarCell(r[oiPickKey], oiAbs)
+          ? oiSignedBarCell(r[oiPickKey], oiMeta)
           : "";
         hOi += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td class="oi-pick${oiPickKey ? " on" : ""}">${pickCell}</td><td>${signedOi(r.foreign)}</td><td>${signedOi(r.trust)}</td><td>${signedOi(r.dealer)}</td><td>${signedOi(r.retail)}</td></tr>`;
       });
       hOi += `</table><div class="note">單位：大台等值口（大台＋小台/4＋微台/20）；數字為淨未平倉（多−空）；點表頭可在收盤右欄畫正負柱</div>`;
       oiEl.innerHTML = hOi;
 
-      const bigLabs = { top10: "前十淨", top10Spec: "特定淨", foreignDelta: "外資Δ", retailDelta: "散戶Δ", pc: "PC" };
+      if (oiPick.big && ["foreignDelta", "retailDelta", "pc"].indexOf(oiPick.big) >= 0) {
+        oiPick.big = null;
+        saveOiPick();
+      }
+      const bigLabs = { top10: "前十淨", top10Spec: "特定法人" };
       const bigPick = oiPick.big;
-      const bigAbs = bigPick ? oiAbsMax(hist.map((r) => r[bigPick])) : 0;
-      let hBig = `<table><tr><th>日</th><th>收盤</th>${oiPickHead("big", bigLabs)}${oiPickTh("big", "top10", "前十淨")}${oiPickTh("big", "top10Spec", "特定淨")}${oiPickTh("big", "foreignDelta", "外資Δ")}${oiPickTh("big", "retailDelta", "散戶Δ")}${oiPickTh("big", "pc", "PC")}</tr>`;
+      const bigMeta = bigPick ? oiSignedMeta(hist.map((r) => r[bigPick])) : null;
+      let hBig = `<table><tr><th>日</th><th>收盤</th>${oiPickHead("big", bigLabs)}${oiPickTh("big", "top10", "前十淨")}${oiPickTh("big", "top10Spec", "特定法人")}</tr>`;
       hist.forEach((r) => {
         const pickCell = bigPick
-          ? oiSignedBarCell(r[bigPick], bigAbs, bigPick === "pc" ? "pc" : "oi")
+          ? oiSignedBarCell(r[bigPick], bigMeta)
           : "";
-        hBig += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td class="oi-pick${bigPick ? " on" : ""}">${pickCell}</td><td>${signedOi(r.top10)}</td><td>${signedOi(r.top10Spec)}</td><td>${signedOi(r.foreignDelta)}</td><td>${signedOi(r.retailDelta)}</td><td>${r.pc == null ? "—" : fmt(r.pc, 1)}</td></tr>`;
+        hBig += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td class="oi-pick${bigPick ? " on" : ""}">${pickCell}</td><td>${signedOi(r.top10)}</td><td>${signedOi(r.top10Spec)}</td></tr>`;
       });
-      hBig += `</table><div class="note">前十／特定＝大額淨未平倉（官方 TX+小台/4）；Δ＝大台等值日變化；PC／收盤不換算；點表頭可在收盤右欄畫正負柱</div>`;
+      hBig += `</table><div class="note">前十／特定法人＝大額淨未平倉（官方 TX+小台/4）；收盤不換算；點表頭可在收盤右欄畫正負柱</div>`;
       bigEl.innerHTML = hBig;
 
       const sw = $("oiSimpleSw");
