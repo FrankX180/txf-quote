@@ -99,8 +99,9 @@
       display: block;
     }
     .oi-tabs {
-      display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px;
+      display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 8px;
     }
+    .oi-tabs-btns { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; }
     .oi-tab {
       background: #f3f4f6; border: 0; border-radius: 4px; padding: 4px 10px;
       font-size: 13px; cursor: pointer; font-weight: 600; color: #374151;
@@ -110,14 +111,9 @@
     .oi-panel.on { display: block; }
     .oi .muted { color: #9ca3af; font-weight: 500; font-size: 12px; }
     .oi .note { margin: 6px 0 0; color: #6b7280; font-size: 12px; line-height: 1.4; }
-    .oi-h4row {
-      display: flex; align-items: center; justify-content: space-between;
-      gap: 8px; margin: 0 0 6px;
-    }
-    .oi-h4row h4 { margin: 0; font-size: 13px; }
     .oi-simple {
       display: inline-flex; align-items: center; gap: 6px;
-      flex-shrink: 0; user-select: none; cursor: pointer;
+      flex-shrink: 0; user-select: none; cursor: pointer; margin-left: auto;
       font-size: 12px; font-weight: 700; color: #374151;
     }
     .oi-simple .sw {
@@ -430,10 +426,15 @@
       <div class="side-oi">
         <div class="oi" id="oi-box">
           <div class="oi-tabs" id="oi-tabs">
-            <button type="button" class="oi-tab on" data-oi="today">今日</button>
-            <button type="button" class="oi-tab" data-oi="trade">法人</button>
-            <button type="button" class="oi-tab" data-oi="oi">未平倉</button>
-            <button type="button" class="oi-tab" data-oi="big">大戶散戶</button>
+            <div class="oi-tabs-btns">
+              <button type="button" class="oi-tab on" data-oi="today">今日</button>
+              <button type="button" class="oi-tab" data-oi="trade">法人</button>
+              <button type="button" class="oi-tab" data-oi="oi">未平倉</button>
+              <button type="button" class="oi-tab" data-oi="big">大戶散戶</button>
+            </div>
+            <div class="oi-simple" id="oiSimpleSw" title="簡化為 50 口進位" role="switch" aria-checked="false">
+              <span>簡</span><span class="sw"></span>
+            </div>
           </div>
           <div class="oi-panel on" id="oi-today"></div>
           <div class="oi-panel" id="oi-trade"></div>
@@ -444,7 +445,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.46</div>
+      <div class="ver foot-right">1.47</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -951,9 +952,7 @@
       const inst = healOiInst(today.inst || uncover.inst || [], hist0);
       const dateLabel = uncover.date || today.date || "";
 
-      let h1 = `<div class="oi-h4row"><h4>${dateLabel ? dateLabel + "｜" : ""}今日部位</h4>` +
-        `<div class="oi-simple${oiSimple ? " on" : ""}" id="oiSimpleSw" title="簡化為 50 口進位" role="switch" aria-checked="${oiSimple ? "true" : "false"}">` +
-        `<span>簡</span><span class="sw"></span></div></div>`;
+      let h1 = `<h4>${dateLabel ? dateLabel + "｜" : ""}今日部位</h4>`;
       if (inst.length) {
         h1 += `<table><tr><th></th><th>多</th><th>空</th><th>淨</th></tr>`;
         inst.forEach((r) => {
@@ -972,16 +971,6 @@
       h1 += `<tr><td>VIX</td><td>${today.vix == null ? "—" : fmt(today.vix, 1)}</td></tr>`;
       h1 += `</table>`;
       todayEl.innerHTML = h1;
-      const sw = $("oiSimpleSw");
-      if (sw) {
-        sw.onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          oiSimple = !oiSimple;
-          try { localStorage.setItem("txfOiSimple", oiSimple ? "1" : "0"); } catch (err) {}
-          renderOi();
-        };
-      }
 
       let hTr = `<table><tr><th>日</th><th>外資</th><th>投信</th><th>自營</th><th>散戶</th></tr>`;
       hist.forEach((r, i) => {
@@ -989,25 +978,30 @@
         const t = oiDayDiff(hist, i, "trust");
         const d = oiDayDiff(hist, i, "dealer");
         const s = r.retailDelta != null ? r.retailDelta : oiDayDiff(hist, i, "retail");
-        hTr += `<tr><td>${oiShortDate(r.date)}</td><td>${signed(f)}</td><td>${signed(t)}</td><td>${signed(d)}</td><td>${signed(s)}</td></tr>`;
+        hTr += `<tr><td>${oiShortDate(r.date)}</td><td>${signedOi(f)}</td><td>${signedOi(t)}</td><td>${signedOi(d)}</td><td>${signedOi(s)}</td></tr>`;
       });
       hTr += `</table><div class="note">單位：口；相對前一交易日的未平倉淨額變化</div>`;
       tradeEl.innerHTML = hTr;
 
       let hOi = `<table><tr><th>日</th><th>外資</th><th>投信</th><th>自營</th><th>散戶</th></tr>`;
       hist.forEach((r) => {
-        hOi += `<tr><td>${oiShortDate(r.date)}</td><td>${signed(r.foreign)}</td><td>${signed(r.trust)}</td><td>${signed(r.dealer)}</td><td>${signed(r.retail)}</td></tr>`;
+        hOi += `<tr><td>${oiShortDate(r.date)}</td><td>${signedOi(r.foreign)}</td><td>${signedOi(r.trust)}</td><td>${signedOi(r.dealer)}</td><td>${signedOi(r.retail)}</td></tr>`;
       });
       hOi += `</table><div class="note">單位：口；數字為淨未平倉（多−空）</div>`;
       oiEl.innerHTML = hOi;
 
       let hBig = `<table><tr><th>日</th><th>前十淨</th><th>特定淨</th><th>外資Δ</th><th>散戶Δ</th><th>PC</th><th>收盤</th></tr>`;
       hist.forEach((r) => {
-        hBig += `<tr><td>${oiShortDate(r.date)}</td><td>${signed(r.top10)}</td><td>${signed(r.top10Spec)}</td><td>${signed(r.foreignDelta)}</td><td>${signed(r.retailDelta)}</td><td>${r.pc == null ? "—" : fmt(r.pc, 1)}</td><td>${r.close == null ? "—" : fmt(r.close)}</td></tr>`;
+        hBig += `<tr><td>${oiShortDate(r.date)}</td><td>${signedOi(r.top10)}</td><td>${signedOi(r.top10Spec)}</td><td>${signedOi(r.foreignDelta)}</td><td>${signedOi(r.retailDelta)}</td><td>${r.pc == null ? "—" : fmt(r.pc, 1)}</td><td>${r.close == null ? "—" : fmt(r.close)}</td></tr>`;
       });
       hBig += `</table><div class="note">前十／特定＝大額淨未平倉；Δ＝相對前一交易日變化（口）</div>`;
       bigEl.innerHTML = hBig;
 
+      const sw = $("oiSimpleSw");
+      if (sw) {
+        sw.classList.toggle("on", !!oiSimple);
+        sw.setAttribute("aria-checked", oiSimple ? "true" : "false");
+      }
       setOiTab(oiTab);
     }
 
@@ -3477,6 +3471,19 @@
         setOiTab(btn.getAttribute("data-oi"));
       };
     });
+    (function bindOiSimpleSw() {
+      const sw = $("oiSimpleSw");
+      if (!sw) return;
+      sw.classList.toggle("on", !!oiSimple);
+      sw.setAttribute("aria-checked", oiSimple ? "true" : "false");
+      sw.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        oiSimple = !oiSimple;
+        try { localStorage.setItem("txfOiSimple", oiSimple ? "1" : "0"); } catch (err) {}
+        renderOi();
+      };
+    })();
 
     // Worker/Yahoo chart 1m → night_1m / day_1m（與 fetch_minute 相同盤別規則）
     function barsFromYahooChart(chart) {
