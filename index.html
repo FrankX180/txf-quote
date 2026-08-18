@@ -110,6 +110,29 @@
     .oi-panel.on { display: block; }
     .oi .muted { color: #9ca3af; font-weight: 500; font-size: 12px; }
     .oi .note { margin: 6px 0 0; color: #6b7280; font-size: 12px; line-height: 1.4; }
+    .oi-h4row {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 8px; margin: 0 0 6px;
+    }
+    .oi-h4row h4 { margin: 0; font-size: 13px; }
+    .oi-simple {
+      display: inline-flex; align-items: center; gap: 6px;
+      flex-shrink: 0; user-select: none; cursor: pointer;
+      font-size: 12px; font-weight: 700; color: #374151;
+    }
+    .oi-simple .sw {
+      position: relative; width: 40px; height: 24px;
+      border-radius: 999px; background: #e5e7eb;
+      transition: background 0.2s ease; flex-shrink: 0;
+    }
+    .oi-simple.on .sw { background: #34c759; }
+    .oi-simple .sw::after {
+      content: ""; position: absolute; top: 2px; left: 2px;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+      transition: transform 0.2s ease;
+    }
+    .oi-simple.on .sw::after { transform: translateX(16px); }
     .imbrow {
       display: flex;
       align-items: center;
@@ -421,7 +444,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.45</div>
+      <div class="ver foot-right">1.46</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -452,6 +475,8 @@
     let kMtxPane = null;
     let mtxIndReady = false;
     let oiTab = "today";
+    let oiSimple = false;
+    try { oiSimple = localStorage.getItem("txfOiSimple") === "1"; } catch (e) {}
     let minutePack = {
       night_1m: [], day_1m: [],
       night_5m: [], day_5m: [],
@@ -851,6 +876,25 @@
       const c = x > 0 ? "up" : x < 0 ? "dn" : "flat";
       return `<span class="${c}">${fmt(x)}</span>`;
     }
+    function round50(v) {
+      if (v == null || v === "") return null;
+      const x = Number(v);
+      if (!Number.isFinite(x)) return null;
+      return Math.round(x / 50) * 50;
+    }
+    function fmtOi(v) {
+      if (v == null || v === "") return "—";
+      const x = oiSimple ? round50(v) : Number(v);
+      if (x == null || !Number.isFinite(Number(x))) return "—";
+      return fmt(x);
+    }
+    function signedOi(v) {
+      if (v == null || v === "") return "—";
+      const x = oiSimple ? round50(v) : Number(v);
+      if (x == null || !Number.isFinite(Number(x))) return "—";
+      const c = x > 0 ? "up" : x < 0 ? "dn" : "flat";
+      return `<span class="${c}">${fmt(x)}</span>`;
+    }
 
     function oiShortDate(ymd) {
       const s = String(ymd || "").replace(/-/g, "");
@@ -907,25 +951,37 @@
       const inst = healOiInst(today.inst || uncover.inst || [], hist0);
       const dateLabel = uncover.date || today.date || "";
 
-      let h1 = `<h4>${dateLabel ? dateLabel + "｜" : ""}今日部位</h4>`;
+      let h1 = `<div class="oi-h4row"><h4>${dateLabel ? dateLabel + "｜" : ""}今日部位</h4>` +
+        `<div class="oi-simple${oiSimple ? " on" : ""}" id="oiSimpleSw" title="簡化為 50 口進位" role="switch" aria-checked="${oiSimple ? "true" : "false"}">` +
+        `<span>簡</span><span class="sw"></span></div></div>`;
       if (inst.length) {
         h1 += `<table><tr><th></th><th>多</th><th>空</th><th>淨</th></tr>`;
         inst.forEach((r) => {
           const nm = oiName(r.name);
-          h1 += `<tr class="${nm === "總" ? "tot" : ""}"><td>${nm}</td><td class="up">${fmt(r.long)}</td><td class="dn">${fmt(r.short)}</td><td>${signed(r.net)}</td></tr>`;
+          h1 += `<tr class="${nm === "總" ? "tot" : ""}"><td>${nm}</td><td class="up">${fmtOi(r.long)}</td><td class="dn">${fmtOi(r.short)}</td><td>${signedOi(r.net)}</td></tr>`;
         });
         h1 += `</table>`;
       } else {
         h1 += `<div class="muted">當日多空尚未更新</div>`;
       }
       h1 += `<table style="margin-top:6px">`;
-      h1 += `<tr><td>淨買超_十大</td><td>${signed(today.top10Net)}</td></tr>`;
-      h1 += `<tr><td>淨買超_特定人</td><td>${signed(today.top10SpecNet)}</td></tr>`;
-      h1 += `<tr><td>淨買超_散戶</td><td>${signed(today.retailNet)}</td></tr>`;
+      h1 += `<tr><td>淨買超_十大</td><td>${signedOi(today.top10Net)}</td></tr>`;
+      h1 += `<tr><td>淨買超_特定人</td><td>${signedOi(today.top10SpecNet)}</td></tr>`;
+      h1 += `<tr><td>淨買超_散戶</td><td>${signedOi(today.retailNet)}</td></tr>`;
       h1 += `<tr><td>PC</td><td>${today.pc == null ? "—" : fmt(today.pc, 1)}</td></tr>`;
-      h1 += `<tr><td>VIX</td><td>${today.vix == null ? "—" : fmt(today.vix, 2)}</td></tr>`;
+      h1 += `<tr><td>VIX</td><td>${today.vix == null ? "—" : fmt(today.vix, 1)}</td></tr>`;
       h1 += `</table>`;
       todayEl.innerHTML = h1;
+      const sw = $("oiSimpleSw");
+      if (sw) {
+        sw.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          oiSimple = !oiSimple;
+          try { localStorage.setItem("txfOiSimple", oiSimple ? "1" : "0"); } catch (err) {}
+          renderOi();
+        };
+      }
 
       let hTr = `<table><tr><th>日</th><th>外資</th><th>投信</th><th>自營</th><th>散戶</th></tr>`;
       hist.forEach((r, i) => {
