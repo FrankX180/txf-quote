@@ -449,7 +449,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.40</div>
+      <div class="ver foot-right">1.41</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -617,8 +617,8 @@
 
     function q() {
       if (!snap) return null;
-      if (session === "merge") return snap.night || snap.day;
-      return snap[session];
+      const rawQ = session === "merge" ? (snap.night || snap.day) : snap[session];
+      return healRefPrice(rawQ);
     }
 
     // 當盤開高低：只用「目前盤別」最新交易日的 1 分 K + tick 追蹤
@@ -708,6 +708,19 @@
       snap[sk].CLowPrice = so.l;
     }
 
+    function healRefPrice(q) {
+      // 休市後奇摩 previousClose 常滾成近價，留下「昨收≈現價、漲跌仍是大點數」的矛盾
+      if (!q) return q;
+      const lastN = n(q.CLastPrice);
+      const refN = n(q.CRefPrice);
+      const diffN = n(q.CDiff);
+      if (lastN == null || refN == null || diffN == null) return q;
+      if (Math.abs(diffN) < 200) return q;
+      const implied = lastN - diffN;
+      if (Math.abs(refN - implied) > 80) q.CRefPrice = Math.round(implied);
+      return q;
+    }
+
     function render() {
       const x = q();
       if (!x) {
@@ -726,11 +739,15 @@
         highPx = highPx == null ? last : Math.max(highPx, last);
         lowPx = lowPx == null ? last : Math.min(lowPx, last);
       }
-      let diff = n(x.CDiff);
-      let rate = n(x.CDiffRate);
-      if (diff == null && last != null && ref != null) {
+      // 漲跌一律由最新價−昨收重算，避免休市後奇摩 previousClose 滾掉但 CDiff 仍留日盤值
+      let diff = null;
+      let rate = null;
+      if (last != null && ref != null) {
         diff = last - ref;
         rate = ref ? (diff / ref) * 100 : 0;
+      } else {
+        diff = n(x.CDiff);
+        rate = n(x.CDiffRate);
       }
       $("name").textContent = String(x.DispCName || "台指期")
         .replace(/\s*WTX&\s*/g, "")
@@ -3129,13 +3146,11 @@
         patchQuoteOHLC(bookSk, px);
         saveLastBook(bookSk, snap[bookSk]);
       } else {
-        // 休市／周末：只動凍結盤最新價，五檔／內外盤／量完全保留（日盤維持上個交易日 13:45）
+        // 休市／周末：只動凍結盤最新價；昨收／漲跌鎖定（奇摩收盤後 previousClose 會滾成夜盤基準）
         liveK = freezeSk;
         const prev = Object.assign({}, (snap && snap[freezeSk]) || {});
         if (q0.CLastPrice != null && q0.CLastPrice !== "") prev.CLastPrice = q0.CLastPrice;
-        if (q0.CRefPrice != null && q0.CRefPrice !== "") prev.CRefPrice = q0.CRefPrice;
-        if (q0.CDiff != null && q0.CDiff !== "") prev.CDiff = q0.CDiff;
-        if (q0.CDiffRate != null && q0.CDiffRate !== "") prev.CDiffRate = q0.CDiffRate;
+        healRefPrice(prev);
         snap[freezeSk] = prev;
       }
       render();

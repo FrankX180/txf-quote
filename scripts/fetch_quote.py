@@ -338,8 +338,17 @@ def main():
             else:
                 day_q = strip_book(day_ohlc_from_kline(dict(q)))
         else:
+            # 日收後～夜開前：更新日盤收／量／五檔，但昨收鎖定上一版（奇摩 previousClose 已滾夜盤）
             day_q = day_ohlc_from_kline(dict(q))
             copy_book(day_q, q)
+            prev_day = prev.get("day") or {}
+            if prev_day.get("CRefPrice"):
+                day_q["CRefPrice"] = prev_day["CRefPrice"]
+                last = raw(day_q.get("CLastPrice"))
+                ref = raw(day_q.get("CRefPrice"))
+                if last is not None and ref:
+                    day_q["CDiff"] = fmt_num(last - ref)
+                    day_q["CDiffRate"] = "%.2f" % ((last - ref) / ref * 100)
             if prev.get("night"):
                 night_q = dict(prev["night"])
             else:
