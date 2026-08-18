@@ -421,7 +421,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.44</div>
+      <div class="ver foot-right">1.45</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -541,6 +541,8 @@
     } catch (e) {}
     // 每分鐘 1 根：該分鐘內最後一次 5 秒的 外盤-內盤
     let imbBars = { night: [], day: [] };
+    // 前一夜盤收盤內外盤差值；日盤顯示時扣除，得到乾淨日盤
+    let nightImbBase = null; // { d, in, out, baseKey, forDay, t }
     // 當盤開高低追蹤（tick）；不依賴奇摩 stockList 的混盤 OHLC
     let sessTrack = { day: null, night: null };
 
@@ -746,7 +748,12 @@
       });
       const tot = bidTot + askTot;
       const pinBid = tot ? (bidTot / tot) * 100 : 50;
-      const inn = n(x.inMarket), outv = n(x.outMarket);
+      let inn = n(x.inMarket), outv = n(x.outMarket);
+      const imbBase = dayImbBase();
+      if (imbBase && inn != null && outv != null) {
+        if (imbBase.in != null) inn = inn - imbBase.in;
+        if (imbBase.out != null) outv = outv - imbBase.out;
+      }
       // 左右：預設外左／內右；點擊可切換，顏色跟著走
       function paintImbBar(leftVal, rightVal, leftIsOut) {
         const sum = (leftVal || 0) + (rightVal || 0);
@@ -1210,6 +1217,7 @@
         if (arr.length > 900) arr.splice(0, arr.length - 900);
       }
       saveImbBars();
+      maybeCaptureNightImbClose(sk, t);
     }
     // 內外盤 t 用牆鐘；夜盤價格軸用奇摩「下一交易日」（周五夜 8/14 牆鐘 vs 8/16 棒）
     // 繪圖前把牆鐘對齊到圖軸，否則 t0/t1 一濾全空
@@ -1230,9 +1238,78 @@
       // 走勢改牆鐘後，內外盤 t 本即牆鐘，不再偏移到奇摩下一交易日
       return t;
     }
+    const IMB_BASE_KEY = "txfImbNightBase";
+    function saveNightImbBase() {
+      try {
+        if (nightImbBase) localStorage.setItem(IMB_BASE_KEY, JSON.stringify(nightImbBase));
+      } catch (e) {}
+    }
+    function loadNightImbBase() {
+      try {
+        const o = JSON.parse(localStorage.getItem(IMB_BASE_KEY) || "null");
+        if (o && o.d != null && o.forDay === tradingDayKey()) nightImbBase = o;
+      } catch (e) {}
+    }
+    function applyNightImbBasePoint(b, baseKey, forDay) {
+      if (!b || b.d == null || !isFinite(Number(b.d))) return false;
+      const inn = b.in != null ? b.in : b.inn;
+      const outv = b.out != null ? b.out : b.outv;
+      nightImbBase = {
+        d: Number(b.d),
+        in: inn != null && isFinite(Number(inn)) ? Number(inn) : null,
+        out: outv != null && isFinite(Number(outv)) ? Number(outv) : null,
+        baseKey: baseKey || "",
+        forDay: forDay || tradingDayKey(),
+        t: b.t || null,
+      };
+      saveNightImbBase();
+      return true;
+    }
+    function dayImbBase() {
+      if (sessKey() !== "day") return null;
+      if (!nightImbBase || nightImbBase.forDay !== tradingDayKey()) return null;
+      return nightImbBase;
+    }
+    function adjustDayImbBar(b) {
+      const base = dayImbBase();
+      if (!base || !b) return b;
+      const o = Object.assign({}, b);
+      if (o.d != null) o.d = Number(o.d) - Number(base.d);
+      if (o.in != null && base.in != null) o.in = Number(o.in) - Number(base.in);
+      if (o.out != null && base.out != null) o.out = Number(o.out) - Number(base.out);
+      return o;
+    }
+    async function refreshNightImbBase() {
+      const forDay = tradingDayKey();
+      if (nightImbBase && nightImbBase.forDay === forDay && nightImbBase.d != null) return nightImbBase;
+      loadNightImbBase();
+      if (nightImbBase && nightImbBase.forDay === forDay && nightImbBase.d != null) return nightImbBase;
+      const baseKey = nightImbDayKey();
+      try {
+        const pack = await fetch(LIVE + "?kind=imb&day=" + baseKey, { cache: "no-cache" }).then((r) =>
+          r.ok ? r.json() : null
+        );
+        const nArr = (pack && pack.night) || [];
+        if (nArr.length) {
+          applyNightImbBasePoint(nArr[nArr.length - 1], baseKey, forDay);
+          return nightImbBase;
+        }
+      } catch (e) {}
+      return nightImbBase;
+    }
+    function maybeCaptureNightImbClose(sk, ts) {
+      if (sk !== "night") return;
+      const d = new Date(ts || Date.now());
+      const hm = d.getHours() * 100 + d.getMinutes();
+      if (hm >= 500 && hm < 845) {
+        const arr = imbBars.night || [];
+        if (arr.length) applyNightImbBasePoint(arr[arr.length - 1], nightImbDayKey(ts), ymdOf(d));
+      }
+    }
     function imbSeries() {
       const sk = sessKey();
       const arr = imbBars[sk] || [];
+      if (sk === "day") return arr.map(adjustDayImbBar);
       if (sk !== "night") return arr;
       return arr.map((b) =>
         b && b.t != null ? Object.assign({}, b, { t: alignImbChartT(b.t, sk) }) : b
@@ -1286,6 +1363,7 @@
         imbBars.day = mergeImbSide(imbBars.day, pack.day);
         imbBars.night = mergeImbSide(imbBars.night, pack.night);
         saveImbBars();
+        if (sessKey() === "day") await refreshNightImbBase();
       } catch (e) {}
     }
     function gh(path) {
@@ -2339,20 +2417,14 @@
         const ibs = imbSeries().filter((b) => b && b.t >= t0 && b.t <= t1 && sessKindAt(b.t) !== "closed")
           .slice().sort((a, b) => a.t - b.t);
         const zeroY = Math.round(imbTop + imbH / 2) + 0.5;
-        // 左緣說明：內外盤＝夜＋日合計（自右上 hero 移來）
+        // 左緣說明
         ctx.save();
         ctx.fillStyle = "#374151";
-        ctx.font = "bold 10px sans-serif";
+        ctx.font = "bold 11px sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        const labLines = ["內外盤", "↑", "夜＋日", "盤合計"];
-        const labLh = 11;
         const labX = Math.max(14, padL / 2 - 2);
-        let labY = imbTop + imbH / 2 - ((labLines.length - 1) * labLh) / 2;
-        labLines.forEach((ln) => {
-          ctx.fillText(ln, labX, labY);
-          labY += labLh;
-        });
+        ctx.fillText("內外盤", labX, imbTop + imbH / 2);
         ctx.restore();
 
         ctx.strokeStyle = "#e5e7eb";
@@ -3231,7 +3303,12 @@
     function setSession(s) {
       session = s === "day" ? "day" : "night";
       if (session === "day") save1m();
-      render();
+      const finish = () => {
+        render();
+        if (chartMode === "line") draw();
+      };
+      if (session === "day") refreshNightImbBase().then(finish).catch(finish);
+      else finish();
     }
     $("sumline").onclick = (e) => {
       if (e.target.id === "sessToggle" || e.target.closest("#sessToggle")) {
@@ -3692,8 +3769,10 @@
     markChips();
     loadLocal1m();
     loadImbBars();
+    loadNightImbBase();
     load();
-    loadImbCloud().then(() => {
+    loadImbCloud().then(async () => {
+      if (sessKey() === "day") await refreshNightImbBase();
       if (chartMode === "line") draw();
     });
     loadKline();
