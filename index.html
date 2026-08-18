@@ -445,7 +445,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.48</div>
+      <div class="ver foot-right">1.49</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -969,7 +969,7 @@
       h1 += `<tr><td>淨買超_散戶</td><td>${signedOi(today.retailNet)}</td></tr>`;
       h1 += `<tr><td>PC</td><td>${today.pc == null ? "—" : fmt(today.pc, 1)}</td></tr>`;
       h1 += `<tr><td>VIX</td><td>${today.vix == null ? "—" : fmt(today.vix, 1)}</td></tr>`;
-      h1 += `</table>`;
+      h1 += `</table><div class="note">口數＝大台等值（大台＋小台/4＋微台/20）；PC／VIX 不換算</div>`;
       todayEl.innerHTML = h1;
 
       let hTr = `<table><tr><th>日</th><th>外資</th><th>投信</th><th>自營</th><th>散戶</th></tr>`;

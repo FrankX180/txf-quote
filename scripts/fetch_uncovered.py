@@ -56,6 +56,36 @@ def _sum_div(parts):
         return None
     return sum(float(v or 0) / float(div) for v, div in parts)
 
+def mtx_retail_approx(foreign_mtx, trust_mtx, dealer_mtx):
+    """小台散戶淨 ≈ −(外資+投信+自營)小台淨（與微台散戶定義同）。"""
+    if foreign_mtx is None and trust_mtx is None and dealer_mtx is None:
+        return None
+    return -(
+        float(foreign_mtx or 0) + float(trust_mtx or 0) + float(dealer_mtx or 0)
+    )
+
+
+def apply_txeq_add_to_ls(row, add):
+    """把小台/微台淨額增量併入多空，使 long-short == 大台等值淨。"""
+    if row is None or add is None:
+        return
+    add = float(add)
+    if abs(add) < 1e-12:
+        return
+    lg, sh = row.get("long"), row.get("short")
+    if lg is None or sh is None:
+        if row.get("net") is not None:
+            row["net"] = float(row["net"]) + add
+        return
+    lg, sh = float(lg), float(sh)
+    if add >= 0:
+        lg += add
+    else:
+        sh += -add
+    row["long"] = lg
+    row["short"] = sh
+    row["net"] = lg - sh
+
 
 def extract(html: str, marker: str):
     i = html.find(marker)
@@ -426,7 +456,11 @@ def main():
             "foreign": tx_eq(w["foreign"], c.get("foreignMtx"), t.get("foreign")),
             "trust": tx_eq(w["trust"], c.get("trustMtx"), t.get("trust")),
             "dealer": tx_eq(w["dealer"], c.get("dealerMtx"), t.get("dealer")),
-            "retail": tx_eq(c.get("retail"), None, t.get("retail")),
+            "retail": tx_eq(
+                c.get("retail"),
+                mtx_retail_approx(c.get("foreignMtx"), c.get("trustMtx"), c.get("dealerMtx")),
+                t.get("retail"),
+            ),
             "top5": w["top5"],
             "top10": w["top10"],
             "top5Spec": w["top5Spec"],
@@ -446,7 +480,11 @@ def main():
                     "foreign": tx_eq(c.get("foreign"), c.get("foreignMtx"), t.get("foreign")),
                     "trust": tx_eq(None, c.get("trustMtx"), t.get("trust")),
                     "dealer": tx_eq(None, c.get("dealerMtx"), t.get("dealer")),
-                    "retail": tx_eq(c.get("retail"), None, t.get("retail")),
+                    "retail": tx_eq(
+                        c.get("retail"),
+                        mtx_retail_approx(c.get("foreignMtx"), c.get("trustMtx"), c.get("dealerMtx")),
+                        t.get("retail"),
+                    ),
                     "top5": None,
                     "top10": None,
                     "top5Spec": None,
@@ -474,7 +512,7 @@ def main():
             else float(rec["retail"]) - float(nxt["retail"])
         )
 
-    # 奇摩今日多空是大台原值：淨額改成大台等值（多／空欄在官方未更新前仍可能是大台）
+    # 奇摩今日多空是大台原值：把小台/微台淨額增量併入多空，使 L-S=等值淨
     if (not use_oa) and inst and date_pick:
         c = cm_map.get(date_pick) or {}
         t = tmf_map.get(date_pick) or {}
@@ -485,12 +523,17 @@ def main():
         }
         for r in inst:
             nm = r.get("name") or ""
-            if nm in add and r.get("net") is not None and add[nm] is not None:
-                r["net"] = float(r["net"]) + float(add[nm])
+            if nm in add:
+                apply_txeq_add_to_ls(r, add[nm])
         tot = next((r for r in inst if "合計" in (r.get("name") or "")), None)
         if tot is not None:
-            parts = [r for r in inst if r is not tot and r.get("net") is not None]
-            tot["net"] = sum(float(r["net"]) for r in parts) if parts else tot.get("net")
+            parts = [r for r in inst if r is not tot]
+            ls = [r for r in parts if r.get("long") is not None]
+            ss = [r for r in parts if r.get("short") is not None]
+            ns = [r for r in parts if r.get("net") is not None]
+            tot["long"] = sum(float(r["long"]) for r in ls) if ls else None
+            tot["short"] = sum(float(r["short"]) for r in ss) if ss else None
+            tot["net"] = sum(float(r["net"]) for r in ns) if ns else None
 
     date = yahoo_date or (history[0]["date"] if history else "") or extra.get("date") or ""
     # Yahoo 偶發只有人名沒多空：用 history 淨額補今日部位
@@ -547,7 +590,7 @@ def main():
         "date": ymd_slash(date) if len(date) == 8 else date,
         "source": "+".join(sources),
         "unit": "tx_eq",
-        "unitNote": "大台等值口=大台+小台/4+微台/20",
+        "unitNote": "大台等值口=大台+小台/4+微台/20；大額前十/特定=官方TX+小台/4（無微台大額）",
         "inst": inst,
         "top": top,
         "today": today,
