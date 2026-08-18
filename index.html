@@ -58,14 +58,31 @@
       align-items: start;
     }
     .hero-head { min-width: 0; }
-    .hero-mid { min-width: 0; }
+    .hero-mid {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .imb-sum-lab {
+      flex-shrink: 0;
+      width: 3.2em;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.25;
+      color: #374151;
+      text-align: center;
+      user-select: none;
+    }
     .title-row { display: flex; align-items: center; gap: 8px; }
     .title { font-size: 20px; font-weight: 800; }
     .pxrow { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
     .pxmeta { padding-bottom: 0; }
     #minik {
       position: relative;
-      width: 100%;
+      flex: 1;
+      min-width: 0;
+      width: auto;
       height: 118px;
     }
     .px { font-size: 36px; font-weight: 800; letter-spacing: -1px; margin: 2px 0 0; }
@@ -325,6 +342,7 @@
         </div>
         <div class="hero-mid">
           <div id="minik"></div>
+          <div class="imb-sum-lab" title="內外盤為夜盤＋日盤合計">內外盤<br>　↑<br>夜＋日<br>盤合計</div>
         </div>
       </div>
     </div>
@@ -420,7 +438,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.31</div>
+      <div class="ver foot-right">1.32</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
