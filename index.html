@@ -129,12 +129,24 @@
       flex-shrink: 0; min-width: 3.6em; text-align: right;
       font-size: 11px; font-weight: 800; color: #9a3412; line-height: 1.1;
     }
-    .oi td.oi-pick { padding: 4px 6px; vertical-align: middle; min-width: 128px; }
+    .oi td.oi-pick {
+      padding: 2px 2px; vertical-align: middle;
+      min-width: 6px; width: 8px; max-width: 10px;
+    }
+    .oi td.oi-pick.on {
+      padding: 4px 6px; min-width: 128px; width: auto; max-width: none;
+    }
     .oi th.oi-th-pick {
       cursor: pointer; user-select: none; white-space: nowrap;
     }
     .oi th.oi-th-pick.on { color: #b91c1c; text-decoration: underline; }
-    .oi th.oi-pick-h { color: #6b7280; font-weight: 700; min-width: 4em; }
+    .oi th.oi-pick-h {
+      color: #6b7280; font-weight: 700;
+      min-width: 6px; width: 8px; max-width: 10px; padding: 2px;
+    }
+    .oi th.oi-pick-h.on {
+      min-width: 4em; width: auto; max-width: none; padding: 4px 6px;
+    }
     .oi-sbar-wrap {
       display: flex; flex-direction: row; align-items: center; gap: 6px;
       min-width: 120px;
@@ -495,7 +507,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.53</div>
+      <div class="ver foot-right">1.54</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1011,11 +1023,12 @@
       let lab;
       if (mode === "pc") lab = fmt(n, 1);
       else lab = (oiSimple ? fmt(round50(n)) : fmt(n));
-      const left = n < 0
-        ? `<div class="oi-sbar neg" style="width:${pct.toFixed(1)}%"></div>`
-        : "";
-      const right = n > 0
+      // 正值：中軸往左；負值：中軸往右
+      const left = n > 0
         ? `<div class="oi-sbar pos" style="width:${pct.toFixed(1)}%"></div>`
+        : "";
+      const right = n < 0
+        ? `<div class="oi-sbar neg" style="width:${pct.toFixed(1)}%"></div>`
         : "";
       return `<div class="oi-sbar-wrap" title="${lab}"><span class="oi-snum ${cls}">${lab}</span><div class="oi-sbar-track"><div class="oi-sbar-half L">${left}</div><div class="oi-sbar-mid"></div><div class="oi-sbar-half R">${right}</div></div></div>`;
     }
@@ -1026,7 +1039,8 @@
     function oiPickHead(panel, labels) {
       const k = oiPick[panel];
       const lab = (k && labels[k]) ? labels[k] : "";
-      return `<th class="oi-pick-h">${lab}</th>`;
+      const on = k ? " on" : "";
+      return `<th class="oi-pick-h${on}">${lab}</th>`;
     }
     function saveOiPick() {
       try { localStorage.setItem("txfOiPick", JSON.stringify(oiPick)); } catch (e) {}
@@ -1111,7 +1125,7 @@
         const pickCell = tradePick
           ? oiSignedBarCell(r[tradePick], tradeAbs)
           : "";
-        hTr += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td class="oi-pick">${pickCell}</td><td>${signedOi(r.foreign)}</td><td>${signedOi(r.trust)}</td><td>${signedOi(r.dealer)}</td><td>${signedOi(r.retail)}</td></tr>`;
+        hTr += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td class="oi-pick${tradePick ? " on" : ""}">${pickCell}</td><td>${signedOi(r.foreign)}</td><td>${signedOi(r.trust)}</td><td>${signedOi(r.dealer)}</td><td>${signedOi(r.retail)}</td></tr>`;
       });
       hTr += `</table><div class="note">單位：大台等值口（大台＋小台/4＋微台/20）；相對前一交易日未平倉淨額變化；點表頭可在收盤右欄畫正負柱</div>`;
       tradeEl.innerHTML = hTr;
@@ -1124,7 +1138,7 @@
         const pickCell = oiPickKey
           ? oiSignedBarCell(r[oiPickKey], oiAbs)
           : "";
-        hOi += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td class="oi-pick">${pickCell}</td><td>${signedOi(r.foreign)}</td><td>${signedOi(r.trust)}</td><td>${signedOi(r.dealer)}</td><td>${signedOi(r.retail)}</td></tr>`;
+        hOi += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td class="oi-pick${oiPickKey ? " on" : ""}">${pickCell}</td><td>${signedOi(r.foreign)}</td><td>${signedOi(r.trust)}</td><td>${signedOi(r.dealer)}</td><td>${signedOi(r.retail)}</td></tr>`;
       });
       hOi += `</table><div class="note">單位：大台等值口（大台＋小台/4＋微台/20）；數字為淨未平倉（多−空）；點表頭可在收盤右欄畫正負柱</div>`;
       oiEl.innerHTML = hOi;
@@ -1137,7 +1151,7 @@
         const pickCell = bigPick
           ? oiSignedBarCell(r[bigPick], bigAbs, bigPick === "pc" ? "pc" : "oi")
           : "";
-        hBig += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td class="oi-pick">${pickCell}</td><td>${signedOi(r.top10)}</td><td>${signedOi(r.top10Spec)}</td><td>${signedOi(r.foreignDelta)}</td><td>${signedOi(r.retailDelta)}</td><td>${r.pc == null ? "—" : fmt(r.pc, 1)}</td></tr>`;
+        hBig += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td class="oi-pick${bigPick ? " on" : ""}">${pickCell}</td><td>${signedOi(r.top10)}</td><td>${signedOi(r.top10Spec)}</td><td>${signedOi(r.foreignDelta)}</td><td>${signedOi(r.retailDelta)}</td><td>${r.pc == null ? "—" : fmt(r.pc, 1)}</td></tr>`;
       });
       hBig += `</table><div class="note">前十／特定＝大額淨未平倉（官方 TX+小台/4）；Δ＝大台等值日變化；PC／收盤不換算；點表頭可在收盤右欄畫正負柱</div>`;
       bigEl.innerHTML = hBig;
