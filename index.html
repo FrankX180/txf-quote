@@ -438,7 +438,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.42</div>
+      <div class="ver foot-right">1.43</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -3566,6 +3566,7 @@
       }
       try {
         let mx = null;
+        let mxGh = null;
         try {
           mx = await fetch(LIVE + "?kind=tmf", { cache: "no-cache" }).then((r) =>
             r.ok ? r.json() : null
@@ -3573,16 +3574,23 @@
         } catch (e) {
           mx = null;
         }
-        if (!mx || !(mx.series && mx.series.length)) {
-          mx = await gh("data/tmf_retail.json").then((r) => r.json());
+        try {
+          mxGh = await gh("data/tmf_retail.json").then((r) => r.json());
+        } catch (e) {
+          mxGh = null;
         }
+        // Worker 常只有近段；與 GitHub 全史（微台上市以來）合併，重疊日以 Worker 為準
         const map = {};
-        (mx.series || []).forEach(function (r) {
-          if (!r || r.date == null) return;
-          const v = r.ratio != null ? Number(r.ratio) : (r.retail != null ? Number(r.retail) : null);
-          if (v == null || !isFinite(v)) return;
-          map[String(r.date)] = v;
-        });
+        function eat(pack) {
+          (pack && pack.series ? pack.series : []).forEach(function (r) {
+            if (!r || r.date == null) return;
+            const v = r.ratio != null ? Number(r.ratio) : (r.retail != null ? Number(r.retail) : null);
+            if (v == null || !isFinite(v)) return;
+            map[String(r.date)] = v;
+          });
+        }
+        eat(mxGh);
+        eat(mx);
         mtxRetailByDate = map;
       } catch (e) {
         mtxRetailByDate = {};

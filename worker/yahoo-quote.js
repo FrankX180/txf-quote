@@ -925,7 +925,7 @@ async function mergeSaveTmf(env, rows, meta) {
     .sort()
     .reverse()
     .map((k) => by[k])
-    .slice(0, 800);
+    .slice(0, 1200);
   const src = (meta && meta.source) || "taifex:openapi+download";
   const payload = {
     date: merged[0] ? merged[0].date : "",
@@ -941,6 +941,21 @@ async function mergeSaveTmf(env, rows, meta) {
     date: payload.date,
     ...(meta || {}),
   };
+}
+
+async function importGithubTmf(env) {
+  const r = await fetch("https://frankx180.github.io/txf-quote/data/tmf_retail.json", {
+    headers: { "User-Agent": "txf-quote-worker/1.0", Accept: "application/json" },
+  });
+  if (!r.ok) throw new Error("github tmf HTTP " + r.status);
+  const j = await r.json();
+  const rows = (j && j.series) || [];
+  if (!rows.length) throw new Error("github tmf empty");
+  return mergeSaveTmf(env, rows, {
+    source: (j && j.source) || "github:tmf_retail",
+    via: "github-import",
+    imported: rows.length,
+  });
 }
 
 async function refreshTmfRetail(env, days) {
@@ -1064,9 +1079,28 @@ export default {
 
     if (kind === "tmf") {
       try {
+        if (url.searchParams.get("import") === "1") {
+          const st = await importGithubTmf(env);
+          const payload = await loadTmfPayload(env);
+          return jsonResp({ ...payload, _import: st }, 200, {
+            "Cache-Control": "no-store",
+            "CDN-Cache-Control": "no-store",
+            "Cloudflare-CDN-Cache-Control": "no-store",
+          });
+        }
         if (url.searchParams.get("refresh") === "1") {
           const st = await refreshTmfRetail(env, Number(url.searchParams.get("days") || 30));
-          const payload = await loadTmfPayload(env);
+          let payload = await loadTmfPayload(env);
+          // 短歷史（雲端只補近段）時併入 GitHub 全史
+          if (!payload || !payload.series || payload.series.length < 200) {
+            try {
+              const imp = await importGithubTmf(env);
+              payload = await loadTmfPayload(env);
+              st.githubImport = imp;
+            } catch (e) {
+              st.githubImportErr = String(e && e.message || e);
+            }
+          }
           return jsonResp({ ...payload, _refresh: st }, 200, {
             "Cache-Control": "no-store",
             "CDN-Cache-Control": "no-store",
@@ -1077,6 +1111,12 @@ export default {
         if (!payload || !(payload.series && payload.series.length)) {
           await refreshTmfRetail(env, 30);
           payload = await loadTmfPayload(env);
+        }
+        if (payload && payload.series && payload.series.length < 200) {
+          try {
+            await importGithubTmf(env);
+            payload = await loadTmfPayload(env);
+          } catch (e) {}
         }
         if (!payload) return jsonResp({ ok: false, reason: "empty" }, 404, { "Cache-Control": "no-store" });
         return jsonResp(payload, 200, {
