@@ -92,7 +92,7 @@ def want_uncovered(dt=None):
     h = hm(d)
     if d.weekday() >= 5:
         return False
-    return 1530 <= h <= 2000
+    return 1500 <= h <= 2000
 
 
 def want_tmf_retail(dt=None):
@@ -103,6 +103,6 @@ def want_tmf_retail(dt=None):
     h = hm(d)
     if d.weekday() >= 5:
         return False
-    if 1530 <= h <= 2000:
+    if 1500 <= h <= 2000:
         return True
     return 800 <= h <= 1000

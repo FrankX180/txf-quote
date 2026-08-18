@@ -799,7 +799,72 @@ async function saveTmfPayload(env, payload) {
     .run();
 }
 
-async function refreshTmfRetail(env, days) {
+async function fetchTmfOpenApiLatest() {
+  const hdr = {
+    "User-Agent": "Mozilla/5.0 (compatible; txf-quote-worker/1.0)",
+    Accept: "application/json",
+  };
+  const [instR, mktR] = await Promise.all([
+    fetch(
+      "https://openapi.taifex.com.tw/v1/MarketDataOfMajorInstitutionalTradersDetailsOfFuturesContractsBytheDate",
+      { headers: hdr }
+    ),
+    fetch("https://openapi.taifex.com.tw/v1/DailyMarketReportFut", { headers: hdr }),
+  ]);
+  if (!instR.ok) throw new Error("openapi inst HTTP " + instR.status);
+  if (!mktR.ok) throw new Error("openapi mkt HTTP " + mktR.status);
+  const inst = await instR.json();
+  const mkt = await mktR.json();
+  const micro = (inst || []).filter(
+    (x) => x && String(x.ContractCode || "").indexOf("微型臺指") >= 0
+  );
+  if (!micro.length) throw new Error("openapi no TMF inst");
+  const d = String(micro[0].Date || "").replace(/\//g, "");
+  if (d.length !== 8) throw new Error("openapi bad date");
+  let il = 0;
+  let ish = 0;
+  let inet = 0;
+  let foreign = 0;
+  let trust = 0;
+  let dealer = 0;
+  for (const x of micro) {
+    const who = String(x.Item || "");
+    const l = nintCell(x["OpenInterest(Long)"]);
+    const s = nintCell(x["OpenInterest(Short)"]);
+    const n = nintCell(x["OpenInterest(Net)"]);
+    il += l;
+    ish += s;
+    inet += n;
+    if (who.indexOf("外資") >= 0) foreign = n;
+    else if (who.indexOf("投信") >= 0) trust = n;
+    else if (who.indexOf("自營") >= 0) dealer = n;
+  }
+  let oi = 0;
+  for (const x of mkt || []) {
+    if (!x || String(x.Contract || "").trim() !== "TMF") continue;
+    if (String(x.Date || "").replace(/\//g, "") !== d) continue;
+    const sess = String(x.TradingSession || "");
+    if (sess.indexOf("盤後") >= 0) continue;
+    const mon = String(x["ContractMonth(Week)"] || "");
+    if (mon.indexOf("/") >= 0) continue;
+    oi += nintCell(x.OpenInterest);
+  }
+  if (oi <= 0) throw new Error("openapi no TMF oi");
+  const retail = ish - il;
+  const ratio = Math.round((retail / oi) * 1000) / 10;
+  return {
+    date: d,
+    retail,
+    ratio,
+    marketOi: oi,
+    instNet: inet,
+    foreign,
+    trust,
+    dealer,
+  };
+}
+
+async function refreshTmfFromWebsite(env, days) {
   const n = days || 21;
   const now = Date.now();
   const p = twParts(now);
@@ -836,22 +901,35 @@ async function refreshTmfRetail(env, days) {
     Object.assign(oiMap, parseOiLatin1(oiTxt));
     chunks++;
   }
-  const series = buildTmfSeries(instMap, oiMap);
-  // merge with cached history so short refresh does not wipe long series
+  return {
+    series: buildTmfSeries(instMap, oiMap),
+    fetched: Object.keys(instMap).length,
+    oiFetched: Object.keys(oiMap).length,
+    chunks,
+    oiBytes,
+    range: [ymdSlash(new Date(startUtc)), ymdSlash(new Date(endUtc))],
+    source: "taifex:futContractsDateDown+futDataDown",
+  };
+}
+
+async function mergeSaveTmf(env, rows, meta) {
   const prev = await loadTmfPayload(env);
   const by = {};
   for (const r of (prev && prev.series) || []) {
     if (r && r.date) by[r.date] = r;
   }
-  for (const r of series) by[r.date] = r;
+  for (const r of rows || []) {
+    if (r && r.date) by[r.date] = r;
+  }
   const merged = Object.keys(by)
     .sort()
     .reverse()
     .map((k) => by[k])
     .slice(0, 800);
+  const src = (meta && meta.source) || "taifex:openapi+download";
   const payload = {
     date: merged[0] ? merged[0].date : "",
-    source: "taifex:futContractsDateDown+futDataDown",
+    source: src,
     label: "微台散戶多空比",
     note: "ratio%=retail_net/market_oi*100; retail_net=inst_short-inst_long",
     series: merged,
@@ -861,12 +939,63 @@ async function refreshTmfRetail(env, days) {
     ok: true,
     n: merged.length,
     date: payload.date,
-    fetched: Object.keys(instMap).length,
-    oiFetched: Object.keys(oiMap).length,
-    chunks,
-    oiBytes,
-    range: [ymdSlash(new Date(startUtc)), ymdSlash(new Date(endUtc))],
+    ...(meta || {}),
   };
+}
+
+async function refreshTmfRetail(env, days) {
+  const n = days || 21;
+  let openRow = null;
+  let openErr = null;
+  try {
+    openRow = await fetchTmfOpenApiLatest();
+  } catch (e) {
+    openErr = String(e && e.message || e);
+  }
+
+  // 日常：OpenAPI 只含最新交易日；有歷史快取且只補最新 → 不必再打下載頁
+  const prev = await loadTmfPayload(env);
+  const haveHist = !!(prev && prev.series && prev.series.length >= 10);
+  if (openRow && haveHist && n <= 5) {
+    return mergeSaveTmf(env, [openRow], {
+      source: "taifex:openapi",
+      via: "openapi",
+      openapiDate: openRow.date,
+      openErr,
+    });
+  }
+
+  let web = null;
+  let webErr = null;
+  try {
+    web = await refreshTmfFromWebsite(env, n);
+  } catch (e) {
+    webErr = String(e && e.message || e);
+  }
+
+  const rows = [];
+  if (web && web.series) rows.push(...web.series);
+  if (openRow) rows.push(openRow);
+  if (!rows.length) {
+    throw new Error("tmf refresh failed openapi=" + openErr + " web=" + webErr);
+  }
+  const src = openRow && web
+    ? "taifex:openapi+futContractsDateDown+futDataDown"
+    : openRow
+      ? "taifex:openapi"
+      : "taifex:futContractsDateDown+futDataDown";
+  return mergeSaveTmf(env, rows, {
+    source: src,
+    via: openRow && web ? "openapi+web" : openRow ? "openapi" : "web",
+    openapiDate: openRow ? openRow.date : null,
+    openErr,
+    webErr,
+    fetched: web ? web.fetched : 0,
+    oiFetched: web ? web.oiFetched : openRow ? 1 : 0,
+    chunks: web ? web.chunks : 0,
+    oiBytes: web ? web.oiBytes : 0,
+    range: web ? web.range : null,
+  });
 }
 
 function wantTmfRefresh(ms) {
@@ -878,7 +1007,7 @@ function wantTmfRefresh(ms) {
   const wd = fmt.format(new Date(ms));
   if (wd === "Sat" || wd === "Sun") return false;
   const hm = p.hm;
-  if (hm >= 1530 && hm <= 2000) return true;
+  if (hm >= 1500 && hm <= 2000) return true;
   if (hm >= 800 && hm <= 1000) return true;
   return false;
 }
@@ -891,7 +1020,19 @@ async function maybeRefreshTmf(env) {
   if (prev && prev._ts && now - Number(prev._ts) < 25 * 60 * 1000) {
     return { ok: false, reason: "throttled", ageMin: Math.round((now - Number(prev._ts)) / 60000) };
   }
-  return refreshTmfRetail(env, 30);
+  // 日常 cron 只補最新交易日：走 OpenAPI（穩定 JSON）；失敗才退回網站下載
+  try {
+    const openRow = await fetchTmfOpenApiLatest();
+    return mergeSaveTmf(env, [openRow], {
+      source: "taifex:openapi",
+      via: "openapi",
+      openapiDate: openRow.date,
+    });
+  } catch (e) {
+    const st = await refreshTmfRetail(env, 14);
+    st.openErr = String(e && e.message || e);
+    return st;
+  }
 }
 
 export default {

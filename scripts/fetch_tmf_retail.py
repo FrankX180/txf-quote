@@ -1,4 +1,5 @@
 # 微台(TMF)散戶多空比 → data/tmf_retail.json
+# 日常主路：期交所 OpenAPI（最新交易日）；歷史／缺口：網站下載頁
 # 來源：期交所三大法人 + 市場未沖銷；散戶淨=法人空−法人多；多空比=散戶淨/市場OI*100
 # 公式對齊 BLOK：retail_net = market_oi 殘差；等價於 institution_short - institution_long
 import csv
@@ -144,6 +145,71 @@ def taifex_post(url, data, referer, proxy=None, timeout=90):
             continue
     return raw.decode("utf-8", "replace")
 
+def fetch_openapi_latest():
+    """官方 OpenAPI 僅最新一交易日；回 series 一列。"""
+    hdr = {"User-Agent": HDR["User-Agent"], "Accept": "application/json"}
+    inst_url = (
+        "https://openapi.taifex.com.tw/v1/"
+        "MarketDataOfMajorInstitutionalTradersDetailsOfFuturesContractsBytheDate"
+    )
+    mkt_url = "https://openapi.taifex.com.tw/v1/DailyMarketReportFut"
+    req_i = urllib.request.Request(inst_url, headers=hdr)
+    req_m = urllib.request.Request(mkt_url, headers=hdr)
+    with urllib.request.urlopen(req_i, timeout=60, context=ssl_context) as r:
+        inst = json.loads(r.read().decode("utf-8"))
+    with urllib.request.urlopen(req_m, timeout=90, context=ssl_context) as r:
+        mkt = json.loads(r.read().decode("utf-8"))
+    micro = [x for x in inst if isinstance(x, dict) and "微型臺指" in str(x.get("ContractCode", ""))]
+    if not micro:
+        raise RuntimeError("openapi no TMF inst")
+    d = str(micro[0].get("Date", "")).replace("/", "")
+    if len(d) != 8:
+        raise RuntimeError("openapi bad date")
+    il = ish = inet = 0
+    foreign = trust = dealer = 0
+    for x in micro:
+        who = str(x.get("Item", ""))
+        l = nint(x.get("OpenInterest(Long)"))
+        s = nint(x.get("OpenInterest(Short)"))
+        n = nint(x.get("OpenInterest(Net)"))
+        il += l
+        ish += s
+        inet += n
+        if "外資" in who:
+            foreign = n
+        elif "投信" in who:
+            trust = n
+        elif "自營" in who:
+            dealer = n
+    oi = 0
+    for x in mkt:
+        if not isinstance(x, dict) or str(x.get("Contract", "")).strip() != "TMF":
+            continue
+        if str(x.get("Date", "")).replace("/", "") != d:
+            continue
+        sess = str(x.get("TradingSession", ""))
+        if "盤後" in sess:
+            continue
+        mon = str(x.get("ContractMonth(Week)", ""))
+        if "/" in mon:
+            continue
+        oi += nint(x.get("OpenInterest"))
+    if oi <= 0:
+        raise RuntimeError("openapi no TMF oi")
+    retail = ish - il
+    return [
+        {
+            "date": d,
+            "retail": retail,
+            "ratio": round(retail / oi * 100.0, 2),
+            "marketOi": oi,
+            "instNet": inet,
+            "foreign": foreign,
+            "trust": trust,
+            "dealer": dealer,
+        }
+    ]
+
 
 def ymd_slash(d: datetime) -> str:
     return d.strftime("%Y/%m/%d")
@@ -286,6 +352,17 @@ def main():
     proxies = load_proxies()
     print("proxies", len(proxies), "existing", len(existing), "GHA", bool(os.environ.get("GITHUB_ACTIONS")))
 
+    openapi_rows = []
+    openapi_err = None
+    try:
+        openapi_rows = fetch_openapi_latest()
+        print("OPENAPI", openapi_rows[0]["date"], "retail", openapi_rows[0]["retail"], "oi", openapi_rows[0]["marketOi"])
+    except Exception as e:
+        openapi_err = e
+        print("WARN openapi", e)
+
+    existing = merge_series(existing, openapi_rows)
+
     # 近段若有日曆洞（例如漏抓兩個交易日），強制拉近 40 日自補
     have_dates = sorted({r["date"] for r in existing if r.get("date")})
     hole = False
@@ -303,20 +380,31 @@ def main():
                 print("GAP", a, b, "days", gap)
                 break
     need_backfill = len(existing) < max(60, HIST_N // 4)
-    if need_backfill:
-        start = end - timedelta(days=int(HIST_N * 1.6))
-        print("BACKFILL", ymd_slash(start), ymd_slash(end))
-    elif hole:
-        start = end - timedelta(days=40)
-        print("HEAL", ymd_slash(start), ymd_slash(end))
+    use_web = need_backfill or hole or not openapi_rows
+    om = {}
+    if use_web:
+        if need_backfill:
+            start = end - timedelta(days=int(HIST_N * 1.6))
+            print("BACKFILL", ymd_slash(start), ymd_slash(end))
+        elif hole:
+            start = end - timedelta(days=40)
+            print("HEAL", ymd_slash(start), ymd_slash(end))
+        else:
+            start = end - timedelta(days=RECENT_DAYS)
+            print("REFRESH_WEB", ymd_slash(start), ymd_slash(end))
+        im, om = fetch_range_maps(start, end, proxies=proxies)
+        series = merge_series(existing, build_series(im, om))[:HIST_N]
+        src = (
+            "taifex:openapi+futContractsDateDown+futDataDown"
+            if openapi_rows
+            else "taifex:futContractsDateDown+futDataDown"
+        )
     else:
-        start = end - timedelta(days=RECENT_DAYS)
-        print("REFRESH", ymd_slash(start), ymd_slash(end))
+        print("REFRESH_OPENAPI_ONLY")
+        series = existing[:HIST_N]
+        src = "taifex:openapi"
 
-    im, om = fetch_range_maps(start, end, proxies=proxies)
-    series = merge_series(existing, build_series(im, om))[:HIST_N]
-
-    # 缺口觀察：近 20 個有 OI 的交易日是否都在 series
+    # 缺口觀察：近段有 OI 的交易日是否都在 series
     have = {r["date"] for r in series}
     missing = sorted(d for d in om.keys() if d not in have)
     if missing:
@@ -325,11 +413,13 @@ def main():
     payload = {
         "fetchedAt": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
         "date": series[0]["date"] if series else "",
-        "source": "taifex:futContractsDateDown+futDataDown",
+        "source": src,
         "label": "微台散戶多空比",
         "note": "ratio%=(散戶多−散戶空)/市場OI*100；散戶淨口=法人空未平倉合計−法人多未平倉合計",
         "series": series,
     }
+    if openapi_err:
+        payload["openapiErr"] = str(openapi_err)
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     latest = series[0] if series else {}
@@ -344,6 +434,8 @@ def main():
         latest.get("ratio"),
         "oi",
         latest.get("marketOi"),
+        "source",
+        src,
     )
 
 
