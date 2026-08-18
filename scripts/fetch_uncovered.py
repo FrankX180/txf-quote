@@ -8,6 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data" / "uncovered.json"
+OUT_MTX = ROOT / "data" / "mtx_retail.json"
+MTX_HIST_N = 800
 TZ = timezone(timedelta(hours=8))
 HDR = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
@@ -179,6 +181,38 @@ def cmoney_series():
     return out, pc_map
 
 
+def fetch_mtx_retail_series(n: int = MTX_HIST_N):
+    """CMoney 883765：小台（畫面常稱微台）散戶淨未平倉長序列 + 當日三大法人淨額。"""
+    idx, data = fetch_cmoney_map("883765")
+    # 同步當日拆解（對齊截圖 DtNo 47078707）
+    snap = {}
+    try:
+        _t, rows = fetch_cmoney_map("47078707")
+        # Title: 代號,名稱,日期,交易口數淨額,未平倉口數淨額
+        for r in rows:
+            name = str(r[1])
+            snap[name] = {
+                "tradeNet": float(r[3]),
+                "oiNet": float(r[4]),
+                "date": str(r[2]),
+            }
+    except Exception as e:
+        print("WARN mtx snap", e)
+    series = []
+    for row in data[:n]:
+        d = str(row[idx["日期"]])
+        series.append(
+            {
+                "date": d,
+                "retail": float(row[idx["散戶淨未平倉口數"]]),
+                "mtxForeign": float(row[idx["期貨多空未平倉口數淨額"]]),
+                "mtxDealer": float(row[idx["期貨多空未平倉口數淨額1"]]),
+                "mtxTrust": float(row[idx["期貨多空未平倉口數淨額2"]]),
+            }
+        )
+    return series, snap
+
+
 def fetch_cmoney_today_extra():
     url = f"{CMONEY}?Action=GetDtnoData&DtNo=43456965&FilterNo=0&ParamStr="
     j = get_json(url, 20)
@@ -306,6 +340,18 @@ def main():
     }
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    series, snap = fetch_mtx_retail_series(MTX_HIST_N)
+    mtx_payload = {
+        "fetchedAt": payload["fetchedAt"],
+        "date": series[0]["date"] if series else payload.get("date"),
+        "source": "cmoney:883765+47078707",
+        "label": "微台散戶淨未平倉",
+        "note": "數值＝小台散戶淨未平倉口數（多−空）；正＝偏多、負＝偏空",
+        "today": snap,
+        "series": series,
+    }
+    OUT_MTX.write_text(json.dumps(mtx_payload, ensure_ascii=False), encoding="utf-8")
+    print("OK mtx_retail", len(series), "date", mtx_payload["date"])
     print(
         "OK inst",
         len(inst),

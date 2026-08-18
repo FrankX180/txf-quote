@@ -41,7 +41,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/snapshot.json data/history-night.json data/history-day.json data/kline-minute.json data/uncovered.json data/kline-daily.json data/imb-*.json data/imb-latest.json
+          git add data/snapshot.json data/history-night.json data/history-day.json data/kline-minute.json data/uncovered.json data/mtx_retail.json data/kline-daily.json data/imb-*.json data/imb-latest.json
           git diff --cached --quiet && echo "no change" && exit 0
           git commit -m "行情快照 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           git push

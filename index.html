@@ -165,7 +165,7 @@
     }
     .chip.on, .mode.on { background: #b91c1c; color: #fff; }
     #khost { width: 100%; height: 320px; display: none; }
-    #khost.k-expand { height: 600px; }
+    #khost.k-expand { height: 700px; }
     .range-ma-gear {
       position: absolute;
       left: 6px;
@@ -438,7 +438,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.33</div>
+      <div class="ver foot-right">1.34</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -450,8 +450,21 @@
     let daySpan = 0;
     let chartMode = "line";
     let kInt = "1";
+    (function applyUrlBoot() {
+      try {
+        const q = new URLSearchParams(location.search);
+        const k = String(q.get("k") || q.get("view") || "").toLowerCase();
+        if (k === "d" || k === "day" || k === "dayk" || k === "dk") {
+          chartMode = "k";
+          kInt = "d";
+        }
+      } catch (e) {}
+    })();
     let dailyPack = { night: [], day: [], daily: [], week: [], month: [] };
     let uncover = { inst: [], top: [], date: "", today: null, history: [] };
+    let mtxRetailByDate = {};
+    let kMtxPane = null;
+    let mtxIndReady = false;
     let oiTab = "today";
     let oiInstSub = "oi";
     let minutePack = {
@@ -1999,7 +2012,7 @@
         return resample(src, 30 * 60 * 1000);
       }
       if (kInt === "w") return weekBarsLive();
-      return dayBarsLive();
+      return attachMtxRetail(dayBarsLive());
     }
 
     function fitCanvas(c, cssH) {
@@ -2665,6 +2678,97 @@
       return s;
     }
 
+    function ymdFromBar(b) {
+      if (!b) return "";
+      if (b.date) {
+        const s = String(b.date).replace(/-/g, "");
+        if (s.length >= 8) return s.slice(0, 8);
+      }
+      const ts = Number(b.timestamp);
+      if (!ts) return "";
+      const d = new Date(ts);
+      const y = d.getUTCFullYear();
+      const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+      const day = String(d.getUTCDate()).padStart(2, "0");
+      return "" + y + m + day;
+    }
+    function attachMtxRetail(bars) {
+      return (bars || []).map(function (b) {
+        const key = ymdFromBar(b);
+        const v = key && Object.prototype.hasOwnProperty.call(mtxRetailByDate, key)
+          ? mtxRetailByDate[key]
+          : null;
+        return Object.assign({}, b, { mtxRetail: v });
+      });
+    }
+    function mtxRetailBarStyles(data) {
+      const k = data && data.current && data.current.kLineData;
+      const v = k && k.mtxRetail;
+      if (v == null || !isFinite(Number(v))) return { color: "#888888" };
+      if (Number(v) > 0) return { color: "#1b8a3e" };
+      if (Number(v) < 0) return { color: "#d32f2f" };
+      return { color: "#888888" };
+    }
+    function ensureMtxRetailIndicator() {
+      if (mtxIndReady || typeof klinecharts === "undefined" || !klinecharts.registerIndicator) return;
+      mtxIndReady = true;
+      klinecharts.registerIndicator({
+        name: "MTX_RETAIL",
+        shortName: "微台",
+        series: "normal",
+        precision: 0,
+        figures: [{
+          key: "net",
+          title: "微台 ",
+          type: "bar",
+          baseValue: 0,
+          styles: mtxRetailBarStyles,
+        }],
+        calc: function (list) {
+          return (list || []).map(function (k) {
+            const v = k && k.mtxRetail;
+            return { net: v == null || !isFinite(Number(v)) ? null : Number(v) };
+          });
+        },
+        createTooltipDataSource: function (params) {
+          const ch = params && params.crosshair;
+          const ind = params && params.indicator;
+          const dataIdx = ch && ch.dataIndex != null ? ch.dataIndex : -1;
+          const row = ind && ind.result && dataIdx >= 0 ? ind.result[dataIdx] : null;
+          const k = ch && ch.kLineData;
+          let v = row && row.net != null ? row.net : (k ? k.mtxRetail : null);
+          if (v == null || !isFinite(Number(v))) {
+            return { name: "微台", values: [] };
+          }
+          const n = Number(v);
+          const color = n > 0 ? "#1b8a3e" : (n < 0 ? "#d32f2f" : "#888888");
+          const text = (n > 0 ? "+" : "") + Math.round(n).toLocaleString("en-US") + "口";
+          return {
+            name: "微台",
+            values: [{ title: "散戶淨 ", value: { text: text, color: color } }],
+          };
+        },
+      });
+    }
+    function syncKMtxPane() {
+      if (!kchart) return;
+      const want = chartMode === "k" && kInt === "d";
+      if (want) {
+        ensureMtxRetailIndicator();
+        if (!kMtxPane) {
+          try {
+            kMtxPane = kchart.createIndicator("MTX_RETAIL", false, { height: 100 });
+          } catch (e) {
+            kMtxPane = null;
+          }
+        }
+      } else if (kMtxPane) {
+        try { kchart.removeIndicator(kMtxPane, "MTX_RETAIL"); } catch (e1) {
+          try { kchart.removeIndicator(kMtxPane); } catch (e2) {}
+        }
+        kMtxPane = null;
+      }
+    }
     function rangeBarStyles(data) {
       const k = data && data.current && data.current.kLineData;
       if (k) {
@@ -2823,6 +2927,7 @@
       }
       kchart.applyNewData(data.length ? data : []);
       syncKRangePanes();
+      syncKMtxPane();
       if (kchart.resize) {
         requestAnimationFrame(function () {
           try { kchart.resize(); } catch (e) {}
@@ -3387,6 +3492,17 @@
         uncover = await gh("data/uncovered.json").then((r) => r.json());
       } catch (e) {
         uncover = { inst: [], top: [], date: "", today: null, history: [] };
+      }
+      try {
+        const mx = await gh("data/mtx_retail.json").then((r) => r.json());
+        const map = {};
+        (mx.series || []).forEach(function (r) {
+          if (!r || r.date == null || r.retail == null) return;
+          map[String(r.date)] = Number(r.retail);
+        });
+        mtxRetailByDate = map;
+      } catch (e) {
+        mtxRetailByDate = {};
       }
       // 1 分到齊後寫回當盤開高低（震幅／摘要用）
       if (snap) {
