@@ -100,10 +100,16 @@
     .oi-tab.on { background: #b91c1c; color: #fff; }
     .oi-panel { display: none; }
     .oi-panel.on { display: block; }
-    .oi-scroll {
-      max-height: 280px; overflow: auto;
-      border-top: 1px solid #f3f4f6;
+    .oi-subtabs {
+      display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px;
     }
+    .oi-subtab {
+      background: #fff; border: 1px solid #e5e7eb; border-radius: 4px; padding: 3px 9px;
+      font-size: 12px; cursor: pointer; font-weight: 600; color: #374151;
+    }
+    .oi-subtab.on { border-color: #b91c1c; color: #b91c1c; background: #fef2f2; }
+    .oi-subpanel { display: none; }
+    .oi-subpanel.on { display: block; }
     .oi .muted { color: #9ca3af; font-weight: 500; font-size: 12px; }
     .oi .note { margin: 6px 0 0; color: #6b7280; font-size: 12px; line-height: 1.4; }
     .imbrow {
@@ -399,7 +405,14 @@
             <button type="button" class="oi-tab" data-oi="mom">動能</button>
           </div>
           <div class="oi-panel on" id="oi-today"></div>
-          <div class="oi-panel" id="oi-inst20"></div>
+          <div class="oi-panel" id="oi-inst20">
+            <div class="oi-subtabs" id="oi-inst20-subtabs">
+              <button type="button" class="oi-subtab on" data-oi-sub="oi">未平倉</button>
+              <button type="button" class="oi-subtab" data-oi-sub="trade">每日交易</button>
+            </div>
+            <div class="oi-subpanel on" id="oi-inst20-oi"></div>
+            <div class="oi-subpanel" id="oi-inst20-trade"></div>
+          </div>
           <div class="oi-panel" id="oi-large"></div>
           <div class="oi-panel" id="oi-mom"></div>
         </div>
@@ -407,7 +420,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.30</div>
+      <div class="ver foot-right">1.31</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -422,6 +435,7 @@
     let dailyPack = { night: [], day: [], daily: [], week: [], month: [] };
     let uncover = { inst: [], top: [], date: "", today: null, history: [] };
     let oiTab = "today";
+    let oiInstSub = "oi";
     let minutePack = {
       night_1m: [], day_1m: [],
       night_5m: [], day_5m: [],
@@ -820,18 +834,34 @@
         if (el) el.classList.toggle("on", k === oiTab);
       });
     }
+    function setOiInstSub(sub) {
+      oiInstSub = sub || "oi";
+      document.querySelectorAll(".oi-subtab").forEach((b) => {
+        b.classList.toggle("on", b.getAttribute("data-oi-sub") === oiInstSub);
+      });
+      const oiEl = $("oi-inst20-oi");
+      const trEl = $("oi-inst20-trade");
+      if (oiEl) oiEl.classList.toggle("on", oiInstSub === "oi");
+      if (trEl) trEl.classList.toggle("on", oiInstSub === "trade");
+    }
+    function oiDayDiff(hist, i, key) {
+      const a = hist[i] && hist[i][key];
+      const b = hist[i + 1] && hist[i + 1][key];
+      if (a == null || b == null) return null;
+      return Number(a) - Number(b);
+    }
     function renderOi() {
       const todayEl = $("oi-today");
-      const inst20El = $("oi-inst20");
+      const oiEl = $("oi-inst20-oi");
+      const tradeEl = $("oi-inst20-trade");
       const largeEl = $("oi-large");
       const momEl = $("oi-mom");
-      if (!todayEl || !inst20El || !largeEl || !momEl) return;
+      if (!todayEl || !oiEl || !tradeEl || !largeEl || !momEl) return;
       const hist = uncover.history || [];
       const today = uncover.today || {};
       const inst = today.inst || uncover.inst || [];
       const dateLabel = uncover.date || today.date || "";
 
-      // 今日
       let h1 = `<h4>${dateLabel ? dateLabel + "｜" : ""}今日部位</h4>`;
       if (inst.length) {
         h1 += `<table><tr><th></th><th>多</th><th>空</th><th>淨</th></tr>`;
@@ -841,38 +871,51 @@
         });
         h1 += `</table>`;
       } else {
-        h1 += `<div class="muted">尚日多空尚未更新</div>`;
+        h1 += `<div class="muted">當日多空尚未更新</div>`;
       }
-      h1 += `<table style="margin-top:6px"><tr><td>十大淨</td><td>${signed(today.top10Net)}</td><td>特定人淨</td><td>${signed(today.top10SpecNet)}</td></tr>`;
-      h1 += `<tr><td>散戶淨</td><td>${signed(today.retailNet)}</td><td>外Δ</td><td>${signed(today.foreignDelta)}</td></tr>`;
-      h1 += `<tr><td>PC</td><td>${today.pc == null ? "—" : fmt(today.pc, 1)}</td><td>VIX</td><td>${today.vix == null ? "—" : fmt(today.vix, 2)}</td></tr></table>`;
+      h1 += `<table style="margin-top:6px">`;
+      h1 += `<tr><td>淨買超_十大</td><td>${signed(today.top10Net)}</td></tr>`;
+      h1 += `<tr><td>淨買超_特定人</td><td>${signed(today.top10SpecNet)}</td></tr>`;
+      h1 += `<tr><td>淨買超_散戶</td><td>${signed(today.retailNet)}</td></tr>`;
+      h1 += `<tr><td>PC</td><td>${today.pc == null ? "—" : fmt(today.pc, 1)}</td></tr>`;
+      h1 += `<tr><td>VIX</td><td>${today.vix == null ? "—" : fmt(today.vix, 2)}</td></tr>`;
+      h1 += `</table>`;
       todayEl.innerHTML = h1;
 
-      // 法人20日
-      let h2 = `<h4>法人淨額（近${hist.length || 20}日）</h4><div class="oi-scroll"><table><tr><th>日</th><th>外</th><th>投</th><th>自</th><th>散</th></tr>`;
+      let hOi = `<h4>未平倉淨額（近${hist.length || 20}日）</h4><table><tr><th>日</th><th>外</th><th>投</th><th>自</th><th>散</th></tr>`;
       hist.forEach((r) => {
-        h2 += `<tr><td>${oiShortDate(r.date)}</td><td>${signed(r.foreign)}</td><td>${signed(r.trust)}</td><td>${signed(r.dealer)}</td><td>${signed(r.retail)}</td></tr>`;
+        hOi += `<tr><td>${oiShortDate(r.date)}</td><td>${signed(r.foreign)}</td><td>${signed(r.trust)}</td><td>${signed(r.dealer)}</td><td>${signed(r.retail)}</td></tr>`;
       });
-      h2 += `</table></div><div class="note">單位：口；數字為淨未平倉（多−空）</div>`;
-      inst20El.innerHTML = h2;
+      hOi += `</table><div class="note">單位：口；數字為淨未平倉（多−空）</div>`;
+      oiEl.innerHTML = hOi;
 
-      // 大額
-      let h3 = `<h4>大額近月</h4><div class="oi-scroll"><table><tr><th>日</th><th>前十淨</th><th>特定淨</th><th>收盤</th></tr>`;
+      let hTr = `<h4>每日淨額變化（近${hist.length || 20}日）</h4><table><tr><th>日</th><th>外資</th><th>投信</th><th>自營</th><th>散戶</th></tr>`;
+      hist.forEach((r, i) => {
+        const f = r.foreignDelta != null ? r.foreignDelta : oiDayDiff(hist, i, "foreign");
+        const t = oiDayDiff(hist, i, "trust");
+        const d = oiDayDiff(hist, i, "dealer");
+        const s = r.retailDelta != null ? r.retailDelta : oiDayDiff(hist, i, "retail");
+        hTr += `<tr><td>${oiShortDate(r.date)}</td><td>${signed(f)}</td><td>${signed(t)}</td><td>${signed(d)}</td><td>${signed(s)}</td></tr>`;
+      });
+      hTr += `</table><div class="note">單位：口；相對前一交易日的未平倉淨額變化</div>`;
+      tradeEl.innerHTML = hTr;
+
+      let h3 = `<h4>大額近月</h4><table><tr><th>日</th><th>前十淨</th><th>特定淨</th><th>收盤</th></tr>`;
       hist.forEach((r) => {
         h3 += `<tr><td>${oiShortDate(r.date)}</td><td>${signed(r.top10)}</td><td>${signed(r.top10Spec)}</td><td>${r.close == null ? "—" : fmt(r.close)}</td></tr>`;
       });
-      h3 += `</table></div>`;
+      h3 += `</table>`;
       largeEl.innerHTML = h3;
 
-      // 動能
-      let h4 = `<h4>誰在變</h4><div class="oi-scroll"><table><tr><th>日</th><th>Δ外</th><th>Δ散</th><th>PC</th></tr>`;
+      let h4 = `<h4>誰在變</h4><table><tr><th>日</th><th>外資未平倉增減</th><th>散戶未平倉增減</th><th>Put/Call</th></tr>`;
       hist.forEach((r) => {
         h4 += `<tr><td>${oiShortDate(r.date)}</td><td>${signed(r.foreignDelta)}</td><td>${signed(r.retailDelta)}</td><td>${r.pc == null ? "—" : fmt(r.pc, 1)}</td></tr>`;
       });
-      h4 += `</table></div><div class="note">Δ＝當日淨額相對前日變化；PC＝Put/Call</div>`;
+      h4 += `</table><div class="note">增減＝當日淨額相對前一交易日的變化（口）</div>`;
       momEl.innerHTML = h4;
 
       setOiTab(oiTab);
+      setOiInstSub(oiInstSub);
     }
 
     function fmtTime(d, t) {
@@ -3126,6 +3169,12 @@
     document.querySelectorAll(".oi-tab").forEach((btn) => {
       btn.onclick = () => {
         setOiTab(btn.getAttribute("data-oi"));
+      };
+    });
+
+    document.querySelectorAll(".oi-subtab").forEach((btn) => {
+      btn.onclick = () => {
+        setOiInstSub(btn.getAttribute("data-oi-sub"));
       };
     });
 
