@@ -438,7 +438,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.35</div>
+      <div class="ver foot-right">1.36</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -457,6 +457,9 @@
         if (k === "d" || k === "day" || k === "dayk" || k === "dk") {
           chartMode = "k";
           kInt = "d";
+        } else if (k === "w" || k === "week" || k === "weekk" || k === "wk") {
+          chartMode = "k";
+          kInt = "w";
         }
       } catch (e) {}
     })();
@@ -2011,7 +2014,7 @@
         const src = m1.length ? m1 : m5.length ? m5 : m15;
         return resample(src, 30 * 60 * 1000);
       }
-      if (kInt === "w") return weekBarsLive();
+      if (kInt === "w") return attachMtxRetail(weekBarsLive());
       return attachMtxRetail(dayBarsLive());
     }
 
@@ -2692,12 +2695,40 @@
       const day = String(d.getUTCDate()).padStart(2, "0");
       return "" + y + m + day;
     }
+    function retailForWeekBar(b) {
+      // 週K不堆疊：取該週（週一～日）最後一個有資料的交易日（通常週五）
+      const wk = weekKey(b);
+      const parts = String(wk || "").split("-");
+      if (parts.length < 3) return null;
+      const y0 = Number(parts[0]);
+      const m0 = Number(parts[1]);
+      const d0 = Number(parts[2]);
+      if (!y0 || !m0 || !d0) return null;
+      let last = null;
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(y0, m0 - 1, d0 + i);
+        const key =
+          d.getFullYear() +
+          String(d.getMonth() + 1).padStart(2, "0") +
+          String(d.getDate()).padStart(2, "0");
+        if (Object.prototype.hasOwnProperty.call(mtxRetailByDate, key)) {
+          last = mtxRetailByDate[key];
+        }
+      }
+      return last;
+    }
     function attachMtxRetail(bars) {
+      const weekly = kInt === "w";
       return (bars || []).map(function (b) {
-        const key = ymdFromBar(b);
-        const v = key && Object.prototype.hasOwnProperty.call(mtxRetailByDate, key)
-          ? mtxRetailByDate[key]
-          : null;
+        let v = null;
+        if (weekly) {
+          v = retailForWeekBar(b);
+        } else {
+          const key = ymdFromBar(b);
+          v = key && Object.prototype.hasOwnProperty.call(mtxRetailByDate, key)
+            ? mtxRetailByDate[key]
+            : null;
+        }
         return Object.assign({}, b, { mtxRetail: v });
       });
     }
@@ -2752,7 +2783,7 @@
     }
     function syncKMtxPane() {
       if (!kchart) return;
-      const want = chartMode === "k" && kInt === "d";
+      const want = chartMode === "k" && (kInt === "d" || kInt === "w");
       if (want) {
         ensureMtxRetailIndicator();
         if (!kMtxPane) {
