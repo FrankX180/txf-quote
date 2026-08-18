@@ -267,6 +267,26 @@ def main():
             )
 
     date = yahoo_date or (history[0]["date"] if history else "") or extra.get("date") or ""
+    # Yahoo 偶發只有人名沒多空：用 history 淨額補今日部位
+    if history and (not inst or all(r.get("net") is None for r in inst)):
+        h0 = history[0]
+        inst = [
+            {"name": "外資及陸資", "long": None, "short": None, "net": h0.get("foreign")},
+            {"name": "投信", "long": None, "short": None, "net": h0.get("trust")},
+            {"name": "自營商", "long": None, "short": None, "net": h0.get("dealer")},
+            {
+                "name": "三大法人合計",
+                "long": None,
+                "short": None,
+                "net": (
+                    None
+                    if h0.get("foreign") is None and h0.get("trust") is None and h0.get("dealer") is None
+                    else float(h0.get("foreign") or 0)
+                    + float(h0.get("trust") or 0)
+                    + float(h0.get("dealer") or 0)
+                ),
+            },
+        ]
     # today card fields
     top10_net = None
     top10_spec = None
