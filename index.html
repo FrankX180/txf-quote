@@ -88,11 +88,24 @@
       display: block;
     }
     .side-oi {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      gap: 12px;
-      align-items: start;
+      display: block;
     }
+    .oi-tabs {
+      display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px;
+    }
+    .oi-tab {
+      background: #f3f4f6; border: 0; border-radius: 4px; padding: 4px 10px;
+      font-size: 13px; cursor: pointer; font-weight: 600; color: #374151;
+    }
+    .oi-tab.on { background: #b91c1c; color: #fff; }
+    .oi-panel { display: none; }
+    .oi-panel.on { display: block; }
+    .oi-scroll {
+      max-height: 280px; overflow: auto;
+      border-top: 1px solid #f3f4f6;
+    }
+    .oi .muted { color: #9ca3af; font-weight: 500; font-size: 12px; }
+    .oi .note { margin: 6px 0 0; color: #6b7280; font-size: 12px; line-height: 1.4; }
     .imbrow {
       display: flex;
       align-items: center;
@@ -199,11 +212,12 @@
     table.q td:nth-child(2) { padding-right: 8px; }
     table.q td:nth-child(3) { padding-left: 8px; }
     .oi { margin-top: 0; font-size: 13px; }
-    .oi h4 { margin: 0 0 4px; font-size: 13px; }
+    .oi h4 { margin: 0 0 6px; font-size: 13px; }
     .oi table { width: 100%; border-collapse: collapse; }
     .oi td, .oi th { padding: 3px 2px; border-bottom: 1px solid #f3f4f6; text-align: right; font-variant-numeric: tabular-nums; }
     .oi tr.tot td { border-top: 1px solid #6b7280; }
     .oi td:first-child, .oi th:first-child { text-align: left; color: #6b7280; }
+    .oi th { color: #6b7280; font-weight: 600; }
     table.q td.lab { color: #6b7280; }
     .ob { width: 100%; border-collapse: collapse; font-size: 15px; margin-top: 0; table-layout: fixed; font-weight: 700; }
     .ob col.c-qty { width: 18px; }
@@ -377,13 +391,23 @@
 
     <div class="card">
       <div class="side-oi">
-        <div class="oi" id="oi-inst"></div>
-        <div class="oi" id="oi-top"></div>
+        <div class="oi" id="oi-box">
+          <div class="oi-tabs" id="oi-tabs">
+            <button type="button" class="oi-tab on" data-oi="today">今日</button>
+            <button type="button" class="oi-tab" data-oi="inst20">法人20日</button>
+            <button type="button" class="oi-tab" data-oi="large">大額</button>
+            <button type="button" class="oi-tab" data-oi="mom">動能</button>
+          </div>
+          <div class="oi-panel on" id="oi-today"></div>
+          <div class="oi-panel" id="oi-inst20"></div>
+          <div class="oi-panel" id="oi-large"></div>
+          <div class="oi-panel" id="oi-mom"></div>
+        </div>
       </div>
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.29</div>
+      <div class="ver foot-right">1.30</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -396,7 +420,8 @@
     let chartMode = "line";
     let kInt = "1";
     let dailyPack = { night: [], day: [], daily: [], week: [], month: [] };
-    let uncover = { inst: [], top: [], date: "" };
+    let uncover = { inst: [], top: [], date: "", today: null, history: [] };
+    let oiTab = "today";
     let minutePack = {
       night_1m: [], day_1m: [],
       night_5m: [], day_5m: [],
@@ -773,38 +798,81 @@
       return `<span class="${c}">${fmt(x)}</span>`;
     }
 
+    function oiShortDate(ymd) {
+      const s = String(ymd || "").replace(/-/g, "");
+      if (s.length >= 8) return s.slice(4, 6) + "/" + s.slice(6, 8);
+      return s || "—";
+    }
+    function oiName(name) {
+      return String(name || "")
+        .replace("外資及陸資", "外")
+        .replace("投信", "投")
+        .replace("自營商", "自")
+        .replace("三大法人合計", "總");
+    }
+    function setOiTab(tab) {
+      oiTab = tab || "today";
+      document.querySelectorAll(".oi-tab").forEach((b) => {
+        b.classList.toggle("on", b.getAttribute("data-oi") === oiTab);
+      });
+      ["today", "inst20", "large", "mom"].forEach((k) => {
+        const el = $("oi-" + k);
+        if (el) el.classList.toggle("on", k === oiTab);
+      });
+    }
     function renderOi() {
-      const left = $("oi-inst");
-      const right = $("oi-top");
-      if (!left || !right) return;
-      const inst = uncover.inst || [];
-      const top = uncover.top || [];
+      const todayEl = $("oi-today");
+      const inst20El = $("oi-inst20");
+      const largeEl = $("oi-large");
+      const momEl = $("oi-mom");
+      if (!todayEl || !inst20El || !largeEl || !momEl) return;
+      const hist = uncover.history || [];
+      const today = uncover.today || {};
+      const inst = today.inst || uncover.inst || [];
+      const dateLabel = uncover.date || today.date || "";
+
+      // 今日
+      let h1 = `<h4>${dateLabel ? dateLabel + "｜" : ""}今日部位</h4>`;
       if (inst.length) {
-        let h = `<h4>${uncover.date ? uncover.date + "｜" : ""}法人未平倉</h4>`;
-        h += `<table><tr><th></th><th>多單</th><th>空單</th><th>淨額</th></tr>`;
+        h1 += `<table><tr><th></th><th>多</th><th>空</th><th>淨</th></tr>`;
         inst.forEach((r) => {
-          const nm = String(r.name || "")
-            .replace("外資及陸資", "外")
-            .replace("投信", "投")
-            .replace("自營商", "自")
-            .replace("三大法人合計", "總");
-          h += `<tr class="${nm === "總" ? "tot" : ""}"><td>${nm}</td><td class="up">${fmt(r.long)}</td><td class="dn">${fmt(r.short)}</td><td>${signed(r.net)}</td></tr>`;
+          const nm = oiName(r.name);
+          h1 += `<tr class="${nm === "總" ? "tot" : ""}"><td>${nm}</td><td class="up">${fmt(r.long)}</td><td class="dn">${fmt(r.short)}</td><td>${signed(r.net)}</td></tr>`;
         });
-        h += `</table>`;
-        left.innerHTML = h;
-      } else left.innerHTML = "";
-      if (top.length) {
-        const r = top[0];
-        let h = `<h4>${r.type || "前十大交易人合計"}</h4>`;
-        h += `<table><tr><th></th><th>部位數</th><th>百分比</th></tr>`;
-        h += `<tr><td>買方</td><td>${fmt(r.long)}</td><td>${r.longPct == null ? "—" : fmt(r.longPct, 1) + "%"}</td></tr>`;
-        h += `<tr><td>賣方</td><td>${fmt(r.short)}</td><td>${r.shortPct == null ? "—" : fmt(r.shortPct, 1) + "%"}</td></tr>`;
-        const net = (n(r.long) || 0) - (n(r.short) || 0);
-        h += `<tr><td>淨部位</td><td>${signed(net)}</td><td></td></tr>`;
-        if (r.open != null) h += `<tr><td>非沖銷部位</td><td>${fmt(r.open)}</td><td></td></tr>`;
-        h += `</table>`;
-        right.innerHTML = h;
-      } else right.innerHTML = "";
+        h1 += `</table>`;
+      } else {
+        h1 += `<div class="muted">尚日多空尚未更新</div>`;
+      }
+      h1 += `<table style="margin-top:6px"><tr><td>十大淨</td><td>${signed(today.top10Net)}</td><td>特定人淨</td><td>${signed(today.top10SpecNet)}</td></tr>`;
+      h1 += `<tr><td>散戶淨</td><td>${signed(today.retailNet)}</td><td>外Δ</td><td>${signed(today.foreignDelta)}</td></tr>`;
+      h1 += `<tr><td>PC</td><td>${today.pc == null ? "—" : fmt(today.pc, 1)}</td><td>VIX</td><td>${today.vix == null ? "—" : fmt(today.vix, 2)}</td></tr></table>`;
+      todayEl.innerHTML = h1;
+
+      // 法人20日
+      let h2 = `<h4>法人淨額（近${hist.length || 20}日）</h4><div class="oi-scroll"><table><tr><th>日</th><th>外</th><th>投</th><th>自</th><th>散</th></tr>`;
+      hist.forEach((r) => {
+        h2 += `<tr><td>${oiShortDate(r.date)}</td><td>${signed(r.foreign)}</td><td>${signed(r.trust)}</td><td>${signed(r.dealer)}</td><td>${signed(r.retail)}</td></tr>`;
+      });
+      h2 += `</table></div><div class="note">單位：口；數字為淨未平倉（多−空）</div>`;
+      inst20El.innerHTML = h2;
+
+      // 大額
+      let h3 = `<h4>大額近月</h4><div class="oi-scroll"><table><tr><th>日</th><th>前十淨</th><th>特定淨</th><th>收盤</th></tr>`;
+      hist.forEach((r) => {
+        h3 += `<tr><td>${oiShortDate(r.date)}</td><td>${signed(r.top10)}</td><td>${signed(r.top10Spec)}</td><td>${r.close == null ? "—" : fmt(r.close)}</td></tr>`;
+      });
+      h3 += `</table></div>`;
+      largeEl.innerHTML = h3;
+
+      // 動能
+      let h4 = `<h4>誰在變</h4><div class="oi-scroll"><table><tr><th>日</th><th>Δ外</th><th>Δ散</th><th>PC</th></tr>`;
+      hist.forEach((r) => {
+        h4 += `<tr><td>${oiShortDate(r.date)}</td><td>${signed(r.foreignDelta)}</td><td>${signed(r.retailDelta)}</td><td>${r.pc == null ? "—" : fmt(r.pc, 1)}</td></tr>`;
+      });
+      h4 += `</table></div><div class="note">Δ＝當日淨額相對前日變化；PC＝Put/Call</div>`;
+      momEl.innerHTML = h4;
+
+      setOiTab(oiTab);
     }
 
     function fmtTime(d, t) {
@@ -3055,6 +3123,12 @@
       };
     });
 
+    document.querySelectorAll(".oi-tab").forEach((btn) => {
+      btn.onclick = () => {
+        setOiTab(btn.getAttribute("data-oi"));
+      };
+    });
+
     // Worker/Yahoo chart 1m → night_1m / day_1m（與 fetch_minute 相同盤別規則）
     function barsFromYahooChart(chart) {
       const tsList = (chart && chart.timestamp) || [];
@@ -3245,7 +3319,7 @@
       try {
         uncover = await gh("data/uncovered.json").then((r) => r.json());
       } catch (e) {
-        uncover = { inst: [], top: [], date: "" };
+        uncover = { inst: [], top: [], date: "", today: null, history: [] };
       }
       // 1 分到齊後寫回當盤開高低（震幅／摘要用）
       if (snap) {
