@@ -111,13 +111,14 @@
     .oi-panel.on { display: block; }
     .oi .muted { color: #9ca3af; font-weight: 500; font-size: 12px; }
     .oi .note { margin: 6px 0 0; color: #6b7280; font-size: 12px; line-height: 1.4; }
-    .oi td.oi-close { padding: 4px 6px; vertical-align: middle; min-width: 120px; }
+    .oi td.oi-close { padding: 4px 6px; vertical-align: middle; min-width: 132px; }
     .oi-cbar-wrap {
       display: flex; flex-direction: row; align-items: center; gap: 6px;
-      min-width: 112px;
+      min-width: 120px;
     }
     .oi-cbar-track {
       flex: 1; height: 14px; min-width: 72px;
+      display: flex; justify-content: flex-end;
       background: #ffedd5; border-radius: 3px; overflow: hidden;
     }
     .oi-cbar {
@@ -127,6 +128,38 @@
     .oi-cnum {
       flex-shrink: 0; min-width: 3.6em; text-align: right;
       font-size: 11px; font-weight: 800; color: #9a3412; line-height: 1.1;
+    }
+    .oi td.oi-pick { padding: 4px 6px; vertical-align: middle; min-width: 128px; }
+    .oi th.oi-th-pick {
+      cursor: pointer; user-select: none; white-space: nowrap;
+    }
+    .oi th.oi-th-pick.on { color: #b91c1c; text-decoration: underline; }
+    .oi th.oi-pick-h { color: #6b7280; font-weight: 700; min-width: 4em; }
+    .oi-sbar-wrap {
+      display: flex; flex-direction: row; align-items: center; gap: 6px;
+      min-width: 120px;
+    }
+    .oi-sbar-track {
+      flex: 1; height: 14px; min-width: 76px;
+      display: flex; align-items: stretch;
+      background: #f3f4f6; border-radius: 3px; overflow: hidden;
+    }
+    .oi-sbar-half {
+      flex: 1; display: flex; align-items: stretch; min-width: 0;
+    }
+    .oi-sbar-half.L { justify-content: flex-end; }
+    .oi-sbar-half.R { justify-content: flex-start; }
+    .oi-sbar-mid {
+      width: 2px; flex-shrink: 0; background: #9ca3af;
+    }
+    .oi-sbar {
+      height: 100%; min-width: 2px; border-radius: 2px;
+    }
+    .oi-sbar.pos { background: var(--up); }
+    .oi-sbar.neg { background: var(--dn); }
+    .oi-snum {
+      flex-shrink: 0; min-width: 3.4em; text-align: right;
+      font-size: 11px; font-weight: 800; line-height: 1.1;
     }
     .oi-simple {
       display: inline-flex; align-items: center; gap: 6px;
@@ -462,7 +495,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.52</div>
+      <div class="ver foot-right">1.53</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -494,7 +527,15 @@
     let mtxIndReady = false;
     let oiTab = "today";
     let oiSimple = false;
+    let oiPick = { trade: null, oi: null, big: null };
     try { oiSimple = localStorage.getItem("txfOiSimple") === "1"; } catch (e) {}
+    try {
+      const raw = localStorage.getItem("txfOiPick");
+      if (raw) {
+        const o = JSON.parse(raw);
+        if (o && typeof o === "object") oiPick = Object.assign(oiPick, o);
+      }
+    } catch (e) {}
     let minutePack = {
       night_1m: [], day_1m: [],
       night_5m: [], day_5m: [],
@@ -943,13 +984,52 @@
       const n = Number(v);
       if (!isFinite(n)) return "—";
       const span = rng.mx - rng.mn;
-      // 以表內最低～最高做橫柱寬度（非從 0），高低差才明顯；映射 18%～100%
+      // 表內最低～最高 → 18%～100%；數字在左；右緣=0、往左長
       let pct = 100;
       if (span > 0) {
         const raw = (n - rng.mn) / span;
         pct = 18 + raw * 82;
       }
-      return `<div class="oi-cbar-wrap" title="${fmt(n)}"><div class="oi-cbar-track"><div class="oi-cbar" style="width:${pct.toFixed(1)}%"></div></div><span class="oi-cnum">${fmt(n)}</span></div>`;
+      return `<div class="oi-cbar-wrap" title="${fmt(n)}"><span class="oi-cnum">${fmt(n)}</span><div class="oi-cbar-track"><div class="oi-cbar" style="width:${pct.toFixed(1)}%"></div></div></div>`;
+    }
+    function oiAbsMax(vals) {
+      let m = 0;
+      (vals || []).forEach((v) => {
+        if (v == null || v === "") return;
+        const n = Math.abs(Number(v));
+        if (isFinite(n) && n > m) m = n;
+      });
+      return m;
+    }
+    function oiSignedBarCell(v, absMax, mode) {
+      if (v == null || v === "") return "";
+      const n = Number(v);
+      if (!isFinite(n)) return "";
+      const am = absMax > 0 ? absMax : (Math.abs(n) || 1);
+      const pct = Math.min(100, (Math.abs(n) / am) * 100);
+      const cls = n > 0 ? "up" : n < 0 ? "dn" : "flat";
+      let lab;
+      if (mode === "pc") lab = fmt(n, 1);
+      else lab = (oiSimple ? fmt(round50(n)) : fmt(n));
+      const left = n < 0
+        ? `<div class="oi-sbar neg" style="width:${pct.toFixed(1)}%"></div>`
+        : "";
+      const right = n > 0
+        ? `<div class="oi-sbar pos" style="width:${pct.toFixed(1)}%"></div>`
+        : "";
+      return `<div class="oi-sbar-wrap" title="${lab}"><span class="oi-snum ${cls}">${lab}</span><div class="oi-sbar-track"><div class="oi-sbar-half L">${left}</div><div class="oi-sbar-mid"></div><div class="oi-sbar-half R">${right}</div></div></div>`;
+    }
+    function oiPickTh(panel, key, label) {
+      const on = oiPick[panel] === key ? " on" : "";
+      return `<th class="oi-th-pick${on}" data-oi-panel="${panel}" data-oi-pick="${key}">${label}</th>`;
+    }
+    function oiPickHead(panel, labels) {
+      const k = oiPick[panel];
+      const lab = (k && labels[k]) ? labels[k] : "";
+      return `<th class="oi-pick-h">${lab}</th>`;
+    }
+    function saveOiPick() {
+      try { localStorage.setItem("txfOiPick", JSON.stringify(oiPick)); } catch (e) {}
     }
     function setOiTab(tab) {
       oiTab = tab || "today";
@@ -1015,29 +1095,51 @@
       h1 += `</table><div class="note">口數＝大台等值（大台＋小台/4＋微台/20）；PC／VIX 不換算</div>`;
       todayEl.innerHTML = h1;
 
-      let hTr = `<table><tr><th>日</th><th>收盤</th><th>外資</th><th>投信</th><th>自營</th><th>散戶</th></tr>`;
-      hist.forEach((r, i) => {
-        const f = r.foreignDelta != null ? r.foreignDelta : oiDayDiff(hist, i, "foreign");
-        const t = oiDayDiff(hist, i, "trust");
-        const d = oiDayDiff(hist, i, "dealer");
-        const s = r.retailDelta != null ? r.retailDelta : oiDayDiff(hist, i, "retail");
-        hTr += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td>${signedOi(f)}</td><td>${signedOi(t)}</td><td>${signedOi(d)}</td><td>${signedOi(s)}</td></tr>`;
+      const tradeLabs = { foreign: "外資", trust: "投信", dealer: "自營", retail: "散戶" };
+      const tradeRows = hist.map((r, i) => ({
+        date: r.date,
+        close: r.close,
+        foreign: r.foreignDelta != null ? r.foreignDelta : oiDayDiff(hist, i, "foreign"),
+        trust: oiDayDiff(hist, i, "trust"),
+        dealer: oiDayDiff(hist, i, "dealer"),
+        retail: r.retailDelta != null ? r.retailDelta : oiDayDiff(hist, i, "retail"),
+      }));
+      const tradePick = oiPick.trade;
+      const tradeAbs = tradePick ? oiAbsMax(tradeRows.map((r) => r[tradePick])) : 0;
+      let hTr = `<table><tr><th>日</th><th>收盤</th>${oiPickHead("trade", tradeLabs)}${oiPickTh("trade", "foreign", "外資")}${oiPickTh("trade", "trust", "投信")}${oiPickTh("trade", "dealer", "自營")}${oiPickTh("trade", "retail", "散戶")}</tr>`;
+      tradeRows.forEach((r) => {
+        const pickCell = tradePick
+          ? oiSignedBarCell(r[tradePick], tradeAbs)
+          : "";
+        hTr += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td class="oi-pick">${pickCell}</td><td>${signedOi(r.foreign)}</td><td>${signedOi(r.trust)}</td><td>${signedOi(r.dealer)}</td><td>${signedOi(r.retail)}</td></tr>`;
       });
-      hTr += `</table><div class="note">單位：大台等值口（大台＋小台/4＋微台/20）；相對前一交易日未平倉淨額變化</div>`;
+      hTr += `</table><div class="note">單位：大台等值口（大台＋小台/4＋微台/20）；相對前一交易日未平倉淨額變化；點表頭可在收盤右欄畫正負柱</div>`;
       tradeEl.innerHTML = hTr;
 
-      let hOi = `<table><tr><th>日</th><th>收盤</th><th>外資</th><th>投信</th><th>自營</th><th>散戶</th></tr>`;
+      const oiLabs = { foreign: "外資", trust: "投信", dealer: "自營", retail: "散戶" };
+      const oiPickKey = oiPick.oi;
+      const oiAbs = oiPickKey ? oiAbsMax(hist.map((r) => r[oiPickKey])) : 0;
+      let hOi = `<table><tr><th>日</th><th>收盤</th>${oiPickHead("oi", oiLabs)}${oiPickTh("oi", "foreign", "外資")}${oiPickTh("oi", "trust", "投信")}${oiPickTh("oi", "dealer", "自營")}${oiPickTh("oi", "retail", "散戶")}</tr>`;
       hist.forEach((r) => {
-        hOi += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td>${signedOi(r.foreign)}</td><td>${signedOi(r.trust)}</td><td>${signedOi(r.dealer)}</td><td>${signedOi(r.retail)}</td></tr>`;
+        const pickCell = oiPickKey
+          ? oiSignedBarCell(r[oiPickKey], oiAbs)
+          : "";
+        hOi += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td class="oi-pick">${pickCell}</td><td>${signedOi(r.foreign)}</td><td>${signedOi(r.trust)}</td><td>${signedOi(r.dealer)}</td><td>${signedOi(r.retail)}</td></tr>`;
       });
-      hOi += `</table><div class="note">單位：大台等值口（大台＋小台/4＋微台/20）；數字為淨未平倉（多−空）</div>`;
+      hOi += `</table><div class="note">單位：大台等值口（大台＋小台/4＋微台/20）；數字為淨未平倉（多−空）；點表頭可在收盤右欄畫正負柱</div>`;
       oiEl.innerHTML = hOi;
 
-      let hBig = `<table><tr><th>日</th><th>收盤</th><th>前十淨</th><th>特定淨</th><th>外資Δ</th><th>散戶Δ</th><th>PC</th></tr>`;
+      const bigLabs = { top10: "前十淨", top10Spec: "特定淨", foreignDelta: "外資Δ", retailDelta: "散戶Δ", pc: "PC" };
+      const bigPick = oiPick.big;
+      const bigAbs = bigPick ? oiAbsMax(hist.map((r) => r[bigPick])) : 0;
+      let hBig = `<table><tr><th>日</th><th>收盤</th>${oiPickHead("big", bigLabs)}${oiPickTh("big", "top10", "前十淨")}${oiPickTh("big", "top10Spec", "特定淨")}${oiPickTh("big", "foreignDelta", "外資Δ")}${oiPickTh("big", "retailDelta", "散戶Δ")}${oiPickTh("big", "pc", "PC")}</tr>`;
       hist.forEach((r) => {
-        hBig += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td>${signedOi(r.top10)}</td><td>${signedOi(r.top10Spec)}</td><td>${signedOi(r.foreignDelta)}</td><td>${signedOi(r.retailDelta)}</td><td>${r.pc == null ? "—" : fmt(r.pc, 1)}</td></tr>`;
+        const pickCell = bigPick
+          ? oiSignedBarCell(r[bigPick], bigAbs, bigPick === "pc" ? "pc" : "oi")
+          : "";
+        hBig += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td class="oi-pick">${pickCell}</td><td>${signedOi(r.top10)}</td><td>${signedOi(r.top10Spec)}</td><td>${signedOi(r.foreignDelta)}</td><td>${signedOi(r.retailDelta)}</td><td>${r.pc == null ? "—" : fmt(r.pc, 1)}</td></tr>`;
       });
-      hBig += `</table><div class="note">前十／特定＝大額淨未平倉（官方 TX+小台/4）；Δ＝大台等值日變化；PC／收盤不換算</div>`;
+      hBig += `</table><div class="note">前十／特定＝大額淨未平倉（官方 TX+小台/4）；Δ＝大台等值日變化；PC／收盤不換算；點表頭可在收盤右欄畫正負柱</div>`;
       bigEl.innerHTML = hBig;
 
       const sw = $("oiSimpleSw");
@@ -3526,6 +3628,21 @@
         try { localStorage.setItem("txfOiSimple", oiSimple ? "1" : "0"); } catch (err) {}
         renderOi();
       };
+    })();
+    (function bindOiPickTh() {
+      const root = document.querySelector(".oi");
+      if (!root || root._oiPickBound) return;
+      root._oiPickBound = true;
+      root.addEventListener("click", (e) => {
+        const th = e.target && e.target.closest ? e.target.closest("th.oi-th-pick") : null;
+        if (!th) return;
+        const panel = th.getAttribute("data-oi-panel");
+        const key = th.getAttribute("data-oi-pick");
+        if (!panel || !key || !Object.prototype.hasOwnProperty.call(oiPick, panel)) return;
+        oiPick[panel] = oiPick[panel] === key ? null : key;
+        saveOiPick();
+        renderOi();
+      });
     })();
 
     // Worker/Yahoo chart 1m → night_1m / day_1m（與 fetch_minute 相同盤別規則）
