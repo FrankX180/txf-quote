@@ -111,6 +111,18 @@
     .oi-panel.on { display: block; }
     .oi .muted { color: #9ca3af; font-weight: 500; font-size: 12px; }
     .oi .note { margin: 6px 0 0; color: #6b7280; font-size: 12px; line-height: 1.4; }
+    .oi td.oi-close { padding: 2px 4px; vertical-align: bottom; }
+    .oi-cbar-wrap { width: 56px; margin: 0 auto; text-align: center; }
+    .oi-cbar-track {
+      height: 52px; display: flex; align-items: flex-end; justify-content: center;
+    }
+    .oi-cbar {
+      width: 18px; min-height: 4px;
+      background: linear-gradient(180deg, #fdba74 0%, #f97316 55%, #ea580c 100%);
+      border-radius: 4px 4px 1px 1px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.35);
+    }
+    .oi-cnum { display: block; margin-top: 2px; font-size: 11px; font-weight: 800; color: #9a3412; line-height: 1.1; }
     .oi-simple {
       display: inline-flex; align-items: center; gap: 6px;
       flex-shrink: 0; user-select: none; cursor: pointer; margin-left: auto;
@@ -445,7 +457,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.50</div>
+      <div class="ver foot-right">1.51</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -909,6 +921,31 @@
         .replace("自營商", "自")
         .replace("三大法人合計", "總");
     }
+    function oiCloseRange(hist) {
+      let mn = Infinity, mx = -Infinity;
+      (hist || []).forEach((r) => {
+        if (r && r.close != null && isFinite(Number(r.close))) {
+          const v = Number(r.close);
+          if (v < mn) mn = v;
+          if (v > mx) mx = v;
+        }
+      });
+      if (!isFinite(mn) || !isFinite(mx)) return null;
+      return { mn: mn, mx: mx };
+    }
+    function oiCloseCell(v, rng) {
+      if (v == null || v === "" || !rng) return "—";
+      const n = Number(v);
+      if (!isFinite(n)) return "—";
+      const span = rng.mx - rng.mn;
+      // 以表內最低～最高縮放（非從 0），高低差才明顯；再映射到 18%～100%
+      let pct = 100;
+      if (span > 0) {
+        const raw = (n - rng.mn) / span;
+        pct = 18 + raw * 82;
+      }
+      return `<div class="oi-cbar-wrap" title="${fmt(n)}"><div class="oi-cbar-track"><div class="oi-cbar" style="height:${pct.toFixed(1)}%"></div></div><span class="oi-cnum">${fmt(n)}</span></div>`;
+    }
     function setOiTab(tab) {
       oiTab = tab || "today";
       document.querySelectorAll(".oi-tab").forEach((b) => {
@@ -947,6 +984,7 @@
       const bigEl = $("oi-big");
       if (!todayEl || !tradeEl || !oiEl || !bigEl) return;
       const hist = uncover.history || [];
+      const closeRng = oiCloseRange(hist);
       const today = uncover.today || {};
       const hist0 = hist[0] || {};
       const inst = healOiInst(today.inst || uncover.inst || [], hist0);
@@ -978,21 +1016,21 @@
         const t = oiDayDiff(hist, i, "trust");
         const d = oiDayDiff(hist, i, "dealer");
         const s = r.retailDelta != null ? r.retailDelta : oiDayDiff(hist, i, "retail");
-        hTr += `<tr><td>${oiShortDate(r.date)}</td><td>${r.close == null ? "—" : fmt(r.close)}</td><td>${signedOi(f)}</td><td>${signedOi(t)}</td><td>${signedOi(d)}</td><td>${signedOi(s)}</td></tr>`;
+        hTr += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td>${signedOi(f)}</td><td>${signedOi(t)}</td><td>${signedOi(d)}</td><td>${signedOi(s)}</td></tr>`;
       });
       hTr += `</table><div class="note">單位：大台等值口（大台＋小台/4＋微台/20）；相對前一交易日未平倉淨額變化</div>`;
       tradeEl.innerHTML = hTr;
 
       let hOi = `<table><tr><th>日</th><th>收盤</th><th>外資</th><th>投信</th><th>自營</th><th>散戶</th></tr>`;
       hist.forEach((r) => {
-        hOi += `<tr><td>${oiShortDate(r.date)}</td><td>${r.close == null ? "—" : fmt(r.close)}</td><td>${signedOi(r.foreign)}</td><td>${signedOi(r.trust)}</td><td>${signedOi(r.dealer)}</td><td>${signedOi(r.retail)}</td></tr>`;
+        hOi += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td>${signedOi(r.foreign)}</td><td>${signedOi(r.trust)}</td><td>${signedOi(r.dealer)}</td><td>${signedOi(r.retail)}</td></tr>`;
       });
       hOi += `</table><div class="note">單位：大台等值口（大台＋小台/4＋微台/20）；數字為淨未平倉（多−空）</div>`;
       oiEl.innerHTML = hOi;
 
       let hBig = `<table><tr><th>日</th><th>收盤</th><th>前十淨</th><th>特定淨</th><th>外資Δ</th><th>散戶Δ</th><th>PC</th></tr>`;
       hist.forEach((r) => {
-        hBig += `<tr><td>${oiShortDate(r.date)}</td><td>${r.close == null ? "—" : fmt(r.close)}</td><td>${signedOi(r.top10)}</td><td>${signedOi(r.top10Spec)}</td><td>${signedOi(r.foreignDelta)}</td><td>${signedOi(r.retailDelta)}</td><td>${r.pc == null ? "—" : fmt(r.pc, 1)}</td></tr>`;
+        hBig += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td>${signedOi(r.top10)}</td><td>${signedOi(r.top10Spec)}</td><td>${signedOi(r.foreignDelta)}</td><td>${signedOi(r.retailDelta)}</td><td>${r.pc == null ? "—" : fmt(r.pc, 1)}</td></tr>`;
       });
       hBig += `</table><div class="note">前十／特定＝大額淨未平倉（官方 TX+小台/4）；Δ＝大台等值日變化；PC／收盤不換算</div>`;
       bigEl.innerHTML = hBig;
