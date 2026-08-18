@@ -96,6 +96,7 @@
     .grid {
       display: block;
       min-width: 0;
+      position: relative;
     }
     .side, .side table, .side .sub, .side .oi, .side .bar-labs {
       font-family: "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
@@ -165,7 +166,8 @@
     }
     .chip.on, .mode.on { background: #b91c1c; color: #fff; }
     #khost { width: 100%; height: 320px; display: none; }
-    #khost.k-expand { height: 560px; }
+    /* fallback；實際高度由 syncSideLayout 依走勢圖+五檔實測覆寫 */
+    #khost.k-expand { height: 529px; }
     .range-ma-gear {
       position: absolute;
       left: 6px;
@@ -216,6 +218,15 @@
       border-radius: 4px; background: #fff; cursor: pointer;
     }
     .side.k-hidden { display: none !important; }
+    .side.k-hidden.k-measure {
+      display: block !important;
+      position: absolute;
+      visibility: hidden;
+      pointer-events: none;
+      left: 0;
+      right: 0;
+      z-index: -1;
+    }
     #kWrap { position: relative; width: 100%; }
     #kMonthNote {
       position: absolute;
@@ -438,7 +449,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.38</div>
+      <div class="ver foot-right">1.39</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2042,13 +2053,31 @@
       el.textContent = hasMonth ? "以結算日繪製月收盤日" : "月K資料缺";
       el.style.display = "block";
     }
+    let kExpandH = 0;
+    function refreshKExpandH() {
+      const side = document.querySelector(".board .side");
+      const chart = $("chart");
+      if (!side || !chart) return kExpandH;
+      const wasHidden = side.classList.contains("k-hidden");
+      if (wasHidden) side.classList.add("k-measure");
+      let ch = chart.offsetHeight;
+      if (ch <= 0) ch = parseFloat(getComputedStyle(chart).height) || 320;
+      const sh = side.offsetHeight || 0;
+      const mt = parseFloat(getComputedStyle(side).marginTop) || 0;
+      if (wasHidden) side.classList.remove("k-measure");
+      if (ch > 0 && sh > 0) kExpandH = Math.round(ch + mt + sh);
+      return kExpandH;
+    }
     function syncSideLayout() {
       const side = document.querySelector(".board .side");
       const kh = $("khost");
       const kOn = chartMode === "k";
+      refreshKExpandH();
       if (side) side.classList.toggle("k-hidden", kOn);
       if (kh) {
         kh.classList.toggle("k-expand", kOn);
+        if (kOn && kExpandH > 0) kh.style.height = kExpandH + "px";
+        else kh.style.height = "";
         if (kOn && kchart && kchart.resize) {
           requestAnimationFrame(() => {
             try { kchart.resize(); } catch (e) {}
