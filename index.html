@@ -526,7 +526,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.56</div>
+      <div class="ver foot-right">1.57</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1089,10 +1089,9 @@
       try { localStorage.setItem("txfOiPick", JSON.stringify(oiPick)); } catch (e) {}
     }
     function oiKeysThrough(keys, pick) {
-      if (!pick) return keys;
-      const i = keys.indexOf(pick);
-      if (i < 0) return keys;
-      return keys.slice(0, i + 1);
+      // 有選取時只聚焦該欄正負柱，其餘口數欄全部拿掉（含左側）
+      if (pick) return [];
+      return keys;
     }
     function oiHistView(rows, panel) {
       const all = rows || [];
