@@ -539,7 +539,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.59</div>
+      <div class="ver foot-right">1.60</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -725,8 +725,8 @@
       return healRefPrice(rawQ);
     }
 
-    // 當盤開高低：只用「目前盤別」最新交易日的 1 分 K + tick 追蹤
-    // 禁：走勢 multi-day minuteSeries、奇摩 regularMarketOpen/High/Low（夜／混盤）
+    // 當盤開高低：只用「目前盤別」本盤開盤日的 1 分 K + tick 追蹤
+    // 禁：上一夜／上一日殘棒、走勢 multi-day、奇摩混盤 OHLC
     function touchSessTrack(sk, px) {
       if (px == null || !sk) return;
       const d = tradingDayKey();
@@ -742,9 +742,13 @@
       const sk = sessKey();
       const all = minutePack[sk + "_1m"] || [];
       let rows = [];
-      if (all.length) {
-        const dLast = dateKey(all[all.length - 1].date) || tradingDayKey();
-        rows = all.filter((b) => dateKey(b.date) === dLast);
+      // 本盤進行中：強制用本盤開盤日，禁吃到上一夜最後一根的 date
+      const liveNow = sessKindAt(Date.now()) === sk;
+      const dWant = liveNow
+        ? (barDateAt(Date.now()) || tradingDayKey())
+        : (all.length ? dateKey(all[all.length - 1].date) : "") || tradingDayKey();
+      if (all.length && dWant) {
+        rows = all.filter((b) => dateKey(b.date) === dWant);
       }
       let o = null, h = -Infinity, l = Infinity, c = null;
       if (rows.length) {
@@ -780,9 +784,12 @@
         // 用指定 sk 算（不跟 UI session 走）
         const all = minutePack[(sk || "day") + "_1m"] || [];
         let rows = [];
-        if (all.length) {
-          const dLast = dateKey(all[all.length - 1].date) || tradingDayKey();
-          rows = all.filter((b) => dateKey(b.date) === dLast);
+        const liveNow = sessKindAt(Date.now()) === sk;
+        const dWant = liveNow
+          ? (barDateAt(Date.now()) || tradingDayKey())
+          : (all.length ? dateKey(all[all.length - 1].date) : "") || tradingDayKey();
+        if (all.length && dWant) {
+          rows = all.filter((b) => dateKey(b.date) === dWant);
         }
         let o = null, h = -Infinity, l = Infinity;
         if (rows.length) {
@@ -1839,6 +1846,14 @@
 
     function lastDates(nDays) {
       const { m1, m5, m15 } = packBars();
+      // 當日＋本盤進行中：強制本盤開盤日，避免夜盤一開還畫上一夜
+      if (nDays <= 1) {
+        const sk = sessKey();
+        if (sessKindAt(Date.now()) === sk) {
+          const dNow = barDateAt(Date.now());
+          if (dNow) return [dNow];
+        }
+      }
       // 日期以 1 分 K 為準（最完整）
       const bars = m1.concat(m5, m15);
       const dates = [];
@@ -1977,7 +1992,9 @@
         const hole = b.timestamp - prev.timestamp;
         const sk0 = sessKindAt(prev.timestamp);
         const sk1 = sessKindAt(b.timestamp);
-        const sameSess = sk0 !== "closed" && sk0 === sk1;
+        // 同 kind 不夠：跨曆日夜盤（昨晚→今晚）必須切開
+        const sameSess =
+          sk0 !== "closed" && sk0 === sk1 && barDateAt(prev.timestamp) === barDateAt(b.timestamp);
         if (sameSess && hole > step * 1.5 && hole <= maxFill) {
           const px = prev.close;
           for (let t = prev.timestamp + step; t < b.timestamp - step * 0.4; t += step) {
@@ -2089,7 +2106,9 @@
         // 同盤缺分鐘：先用前收補平中間棒，再寫當下分鐘（避免 1 分 K 斷洞破圖）
         const sk0 = sessKindAt(lastSlot);
         const sk1 = sessKindAt(slot);
-        const sameSess = sk0 !== "closed" && sk0 === sk1;
+        // 同 kind 不夠：跨曆日夜盤（昨晚→今晚）必須切開，否則會沿用昨夜 date／開盤價
+        const sameSess =
+          sk0 !== "closed" && sk0 === sk1 && barDateAt(lastSlot) === barDateAt(slot);
         if (sameSess && slot - lastSlot > 60000) {
           for (let t = lastSlot + 60000; t < slot; t += 60000) {
             if (sessKindAt(t) !== sk0) break;
@@ -2194,6 +2213,14 @@
         }
       }
       pts = pts.filter((p) => p && p.time != null && sessKindAt(p.time) !== "closed");
+      // 當日＋正在看本盤：只留本盤開盤後的點（擋上一夜殘棒／錯位均線／假高低點）
+      if (daySpan < 2) {
+        const sk = sessKey();
+        if (sessKindAt(Date.now()) === sk) {
+          const openMs = sessionOpenAt();
+          pts = pts.filter((p) => p.time >= openMs - 60000 && sessKindAt(p.time) === sk);
+        }
+      }
       return pts;
     }
 
