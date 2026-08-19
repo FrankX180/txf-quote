@@ -189,9 +189,13 @@
       flex-shrink: 0; min-width: 3.4em; text-align: right;
       font-size: 11px; font-weight: 800; line-height: 1.1;
     }
+    .oi-tabs-sw {
+      display: inline-flex; align-items: center; gap: 10px;
+      flex-shrink: 0; margin-left: auto;
+    }
     .oi-simple {
       display: inline-flex; align-items: center; gap: 6px;
-      flex-shrink: 0; user-select: none; cursor: pointer; margin-left: auto;
+      flex-shrink: 0; user-select: none; cursor: pointer; margin-left: 0;
       font-size: 12px; font-weight: 700; color: #374151;
     }
     .oi-simple .sw {
@@ -521,25 +525,26 @@
         <div class="oi" id="oi-box">
           <div class="oi-tabs" id="oi-tabs">
             <div class="oi-tabs-btns">
-              <button type="button" class="oi-tab on" data-oi="today">今日</button>
-              <button type="button" class="oi-tab" data-oi="trade">法人</button>
-              <button type="button" class="oi-tab" data-oi="oi">未平倉</button>
+              <button type="button" class="oi-tab on" data-oi="oi">法人未平倉</button>
               <button type="button" class="oi-tab" data-oi="big">大戶散戶</button>
             </div>
-            <div class="oi-simple" id="oiSimpleSw" title="簡化為 50 口進位" role="switch" aria-checked="false">
-              <span>簡</span><span class="sw"></span>
+            <div class="oi-tabs-sw">
+              <div class="oi-simple" id="oiNetSw" title="切換成法人每日淨進出" role="switch" aria-checked="false">
+                <span>淨進出</span><span class="sw"></span>
+              </div>
+              <div class="oi-simple" id="oiSimpleSw" title="簡化為 50 口進位" role="switch" aria-checked="false">
+                <span>簡</span><span class="sw"></span>
+              </div>
             </div>
           </div>
-          <div class="oi-panel on" id="oi-today"></div>
-          <div class="oi-panel" id="oi-trade"></div>
-          <div class="oi-panel" id="oi-oi"></div>
+          <div class="oi-panel on" id="oi-oi"></div>
           <div class="oi-panel" id="oi-big"></div>
         </div>
       </div>
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.61</div>
+      <div class="ver foot-right">1.62</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -578,17 +583,24 @@
     }
     let kMtxPane = null;
     let mtxIndReady = false;
-    let oiTab = "today";
+    let oiTab = "oi";
     let oiSimple = false;
-    let oiPick = { trade: null, oi: null, big: null };
-    let oiHistOpen = { trade: false, oi: false, big: false };
+    let oiNetFlow = false;
+    let oiPick = { oi: null, big: null };
+    let oiHistOpen = { oi: false, big: false };
     try { oiSimple = localStorage.getItem("txfOiSimple") === "1"; } catch (e) {}
+    try { oiNetFlow = localStorage.getItem("txfOiNetFlow") === "1"; } catch (e) {}
     try {
       const raw = localStorage.getItem("txfOiPick");
       if (raw) {
         const o = JSON.parse(raw);
-        if (o && typeof o === "object") oiPick = Object.assign(oiPick, o);
-        if (oiPick.trade === "retail" || oiPick.trade === "pc") oiPick.trade = null;
+        if (o && typeof o === "object") {
+          const nextOi = (o.oi != null ? o.oi : o.trade);
+          oiPick = {
+            oi: (nextOi === "pc" || nextOi === "vix") ? null : (nextOi || null),
+            big: o.big || null,
+          };
+        }
         if (["foreignDelta", "retailDelta"].indexOf(oiPick.big) >= 0) oiPick.big = null;
       }
     } catch (e) {}
@@ -1065,7 +1077,7 @@
       return m;
     }
     function oiSignedMeta(vals) {
-      let m = 0, hasPos = false, hasNeg = false;
+      let m = 0, lo = Infinity, hasPos = false, hasNeg = false;
       (vals || []).forEach((v) => {
         if (v == null || v === "") return;
         const n = Number(v);
@@ -1074,9 +1086,10 @@
         if (n < 0) hasNeg = true;
         const a = Math.abs(n);
         if (a > m) m = a;
+        if (a < lo) lo = a;
       });
       const side = (hasPos && hasNeg) ? "both" : (hasNeg ? "neg" : "pos");
-      return { absMax: m, side: side };
+      return { absMax: m, absMin: isFinite(lo) ? lo : 0, side: side };
     }
     function oiPcMeta(vals) {
       let mn = Infinity, mx = -Infinity;
@@ -1106,7 +1119,8 @@
     }
     function oiCumEnabled(panel, pick) {
       if (!pick) return false;
-      if (panel === "trade") return ["foreign", "trust", "dealer"].indexOf(pick) >= 0;
+      // 淨進出開啟時，法人未平倉頁的外資／投信／自營＝日變化，可畫累計折線
+      if (panel === "oi" && oiNetFlow) return ["foreign", "trust", "dealer"].indexOf(pick) >= 0;
       if (panel === "big") return ["top10", "top10Spec", "retail"].indexOf(pick) >= 0;
       return false;
     }
@@ -1140,9 +1154,16 @@
       const n = Number(v);
       if (!isFinite(n)) return "";
       const absMax = (meta && meta.absMax != null) ? meta.absMax : (typeof meta === "number" ? meta : 0);
+      const absMin = (meta && meta.absMin != null) ? Number(meta.absMin) : 0;
       const side = (meta && meta.side) || "both";
       const am = absMax > 0 ? absMax : (Math.abs(n) || 1);
-      const pct = Math.min(100, (Math.abs(n) / am) * 100);
+      // 高低值太近時，把表內最小～最大絕對值拉開到 12%～100%，柱差才看得見
+      let pct;
+      if (am > absMin && absMin > 0) {
+        pct = 12 + ((Math.abs(n) - absMin) / (am - absMin)) * 88;
+      } else {
+        pct = Math.min(100, (Math.abs(n) / am) * 100);
+      }
       const cls = n > 0 ? "up" : n < 0 ? "dn" : "flat";
       let lab;
       if (mode === "pc") lab = fmt(n, 1);
@@ -1176,6 +1197,7 @@
       const k = oiPick[panel];
       let lab = (k && labels[k]) ? labels[k] : "";
       if (k === "pc") lab = "Put Call Ratio";
+      if (k === "vix") lab = "VIX";
       const on = k ? " on" : "";
       return `<th class="oi-pick-h${on}">${lab}</th>`;
     }
@@ -1227,8 +1249,9 @@
       const pick = oiPick[panel];
       const keys = oiKeysThrough(allKeys, pick);
       const closeRng = oiCloseRange(list);
-      const meta = !pick ? null : (pick === "pc" ? oiPcMeta(list.map((r) => r[pick])) : oiSignedMeta(list.map((r) => r[pick])));
-      const mode = pick === "pc" ? "pc" : "oi";
+      const isLvl = (pick === "pc" || pick === "vix");
+      const meta = !pick ? null : (isLvl ? oiPcMeta(list.map((r) => r[pick])) : oiSignedMeta(list.map((r) => r[pick])));
+      const mode = isLvl ? "pc" : "oi";
       const cumOn = oiCumEnabled(panel, pick);
       let cumArr = null;
       let cumMeta = null;
@@ -1252,7 +1275,7 @@
       html += `</tr>`;
       list.forEach((r, i) => {
         let pickCell = "";
-        if (pick === "pc") {
+        if (pick === "pc" || pick === "vix") {
           pickCell = oiPcBarCell(r[pick], meta);
         } else if (pick) {
           let cumInfo = null;
@@ -1267,7 +1290,7 @@
         }
         html += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td class="oi-pick${pick ? " on" : ""}">${pickCell}</td>`;
         keys.forEach((k) => {
-          if (k === "pc") html += `<td>${r.pc == null ? "—" : fmt(r.pc, 1)}</td>`;
+          if (k === "pc" || k === "vix") html += `<td>${r[k] == null ? "—" : fmt(r[k], 1)}</td>`;
           else html += `<td>${signedOi(r[k])}</td>`;
         });
         html += `</tr>`;
@@ -1286,11 +1309,12 @@
       return html;
     }
     function setOiTab(tab) {
-      oiTab = tab || "today";
+      const t = tab || "oi";
+      oiTab = (t === "oi" || t === "big") ? t : "oi";
       document.querySelectorAll(".oi-tab").forEach((b) => {
         b.classList.toggle("on", b.getAttribute("data-oi") === oiTab);
       });
-      ["today", "trade", "oi", "big"].forEach((k) => {
+      ["oi", "big"].forEach((k) => {
         const el = $("oi-" + k);
         if (el) el.classList.toggle("on", k === oiTab);
       });
@@ -1321,87 +1345,76 @@
       ];
     }
     function renderOi() {
-      const todayEl = $("oi-today");
-      const tradeEl = $("oi-trade");
       const oiEl = $("oi-oi");
       const bigEl = $("oi-big");
-      if (!todayEl || !tradeEl || !oiEl || !bigEl) return;
+      if (!oiEl || !bigEl) return;
       const hist = uncover.history || [];
       const today = uncover.today || {};
-      const hist0 = hist[0] || {};
-      const inst = healOiInst(today.inst || uncover.inst || [], hist0);
-      const dateLabel = uncover.date || today.date || "";
+      const todayVix = today.vix;
+      const todayDate = String(today.date || uncover.date || "").replace(/\D/g, "");
 
-      let h1 = `<h4>${dateLabel ? dateLabel + "｜" : ""}今日部位</h4>`;
-      if (inst.length) {
-        h1 += `<table><tr><th></th><th>多</th><th>空</th><th>淨</th></tr>`;
-        inst.forEach((r) => {
-          const nm = oiName(r.name);
-          h1 += `<tr class="${nm === "總" ? "tot" : ""}"><td>${nm}</td><td class="up">${fmtOi(r.long)}</td><td class="dn">${fmtOi(r.short)}</td><td>${signedOi(r.net)}</td></tr>`;
-        });
-        h1 += `</table>`;
-      } else {
-        h1 += `<div class="muted">當日多空尚未更新</div>`;
-      }
-      h1 += `<table style="margin-top:6px">`;
-      h1 += `<tr><td>淨買超_十大</td><td>${signedOi(today.top10Net)}</td></tr>`;
-      h1 += `<tr><td>淨買超_特定人</td><td>${signedOi(today.top10SpecNet)}</td></tr>`;
-      h1 += `<tr><td>淨買超_散戶</td><td>${signedOi(today.retailNet)}</td></tr>`;
-      h1 += `<tr><td>PC</td><td>${today.pc == null ? "—" : fmt(today.pc, 1)}</td></tr>`;
-      h1 += `<tr><td>VIX</td><td>${today.vix == null ? "—" : fmt(today.vix, 1)}</td></tr>`;
-      h1 += `</table><div class="note">口數＝大台等值（大台＋小台/4＋微台/20）；PC／VIX 不換算</div>`;
-      todayEl.innerHTML = h1;
-
-      const tradeLabs = { foreign: "外資", trust: "投信", dealer: "自營" };
-      const tradeRows = hist.map((r, i) => ({
-        date: r.date,
-        close: r.close,
-        foreign: r.foreignDelta != null ? r.foreignDelta : oiDayDiff(hist, i, "foreign"),
-        trust: oiDayDiff(hist, i, "trust"),
-        dealer: oiDayDiff(hist, i, "dealer"),
-      }));
-      tradeEl.innerHTML = oiBuildHistTable(
-        "trade",
-        tradeRows,
-        ["foreign", "trust", "dealer"],
-        tradeLabs,
-        "單位：大台等值口（大台＋小台/4＋微台/20）；相對前一交易日未平倉淨額變化；點表頭可在收盤右欄畫正負柱"
-      );
-
+      // 淨進出開：舊「法人」日變化；關：淨未平倉水位（含散戶）
       const oiLabs = { foreign: "外資", trust: "投信", dealer: "自營", retail: "散戶" };
-      oiEl.innerHTML = oiBuildHistTable(
-        "oi",
-        hist,
-        ["foreign", "trust", "dealer", "retail"],
-        oiLabs,
-        "單位：大台等值口（大台＋小台/4＋微台/20）；數字為淨未平倉（多−空）；點表頭可在收盤右欄畫正負柱"
-      );
+      let oiRows;
+      let oiKeys;
+      let oiNote;
+      if (oiNetFlow) {
+        oiKeys = ["foreign", "trust", "dealer"];
+        oiRows = hist.map((r, i) => ({
+          date: r.date,
+          close: r.close,
+          foreign: r.foreignDelta != null ? r.foreignDelta : oiDayDiff(hist, i, "foreign"),
+          trust: oiDayDiff(hist, i, "trust"),
+          dealer: oiDayDiff(hist, i, "dealer"),
+        }));
+        oiNote = "單位：大台等值口（大台＋小台/4＋微台/20）；相對前一交易日未平倉淨額變化；點表頭可在收盤右欄畫正負柱";
+        if (oiPick.oi === "retail") {
+          oiPick.oi = null;
+          saveOiPick();
+        }
+      } else {
+        oiKeys = ["foreign", "trust", "dealer", "retail"];
+        oiRows = hist;
+        oiNote = "單位：大台等值口（大台＋小台/4＋微台/20）；數字為淨未平倉（多−空）；點表頭可在收盤右欄畫正負柱";
+      }
+      oiEl.innerHTML = oiBuildHistTable("oi", oiRows, oiKeys, oiLabs, oiNote);
 
       if (oiPick.big && ["foreignDelta", "retailDelta"].indexOf(oiPick.big) >= 0) {
         oiPick.big = null;
         saveOiPick();
       }
-      const bigLabs = { top10: "前十淨", top10Spec: "特定法人", retail: "散戶", pc: "PC" };
-      const bigRows = hist.map((r, i) => ({
-        date: r.date,
-        close: r.close,
-        top10: r.top10,
-        top10Spec: r.top10Spec,
-        retail: r.retailDelta != null ? r.retailDelta : oiDayDiff(hist, i, "retail"),
-        pc: r.pc,
-      }));
+      const bigLabs = { top10: "前十淨", top10Spec: "特定法人", retail: "散戶", pc: "PC", vix: "VIX" };
+      const bigRows = hist.map((r, i) => {
+        const d = String(r.date || "").replace(/\D/g, "");
+        let vix = r.vix;
+        if (vix == null && todayVix != null && todayDate && d === todayDate) vix = todayVix;
+        return {
+          date: r.date,
+          close: r.close,
+          top10: r.top10,
+          top10Spec: r.top10Spec,
+          retail: r.retailDelta != null ? r.retailDelta : oiDayDiff(hist, i, "retail"),
+          pc: r.pc,
+          vix: vix,
+        };
+      });
       bigEl.innerHTML = oiBuildHistTable(
         "big",
         bigRows,
-        ["top10", "top10Spec", "retail", "pc"],
+        ["top10", "top10Spec", "retail", "pc", "vix"],
         bigLabs,
-        "前十／特定法人＝大額淨未平倉（官方 TX+小台/4）；散戶＝淨額日變化（大台等值）；PC 不換算；點表頭可在收盤右欄畫正負柱"
+        "前十／特定法人＝大額淨未平倉（官方 TX+小台/4）；散戶＝淨額日變化（大台等值）；PC／VIX 不換算；點表頭可在收盤右欄畫正負柱"
       );
 
       const sw = $("oiSimpleSw");
       if (sw) {
         sw.classList.toggle("on", !!oiSimple);
         sw.setAttribute("aria-checked", oiSimple ? "true" : "false");
+      }
+      const nsw = $("oiNetSw");
+      if (nsw) {
+        nsw.classList.toggle("on", !!oiNetFlow);
+        nsw.setAttribute("aria-checked", oiNetFlow ? "true" : "false");
       }
       setOiTab(oiTab);
       requestAnimationFrame(() => {
@@ -3899,6 +3912,19 @@
         setOiTab(btn.getAttribute("data-oi"));
       };
     });
+    (function bindOiNetSw() {
+      const sw = $("oiNetSw");
+      if (!sw) return;
+      sw.classList.toggle("on", !!oiNetFlow);
+      sw.setAttribute("aria-checked", oiNetFlow ? "true" : "false");
+      sw.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        oiNetFlow = !oiNetFlow;
+        try { localStorage.setItem("txfOiNetFlow", oiNetFlow ? "1" : "0"); } catch (err) {}
+        renderOi();
+      };
+    })();
     (function bindOiSimpleSw() {
       const sw = $("oiSimpleSw");
       if (!sw) return;

@@ -587,6 +587,9 @@ def main():
         "pc": extra.get("pc", history[0].get("pc") if history else None),
         "vix": extra.get("vix"),
     }
+    # 今日 VIX 寫進 history[0]，大戶散戶欄才有值
+    if history and today.get("vix") is not None:
+        history[0]["vix"] = today["vix"]
 
     payload = {
         "fetchedAt": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
