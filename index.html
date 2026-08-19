@@ -581,7 +581,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.78</div>
+      <div class="ver foot-right">1.79</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2093,10 +2093,43 @@
       return take(m1);
     }
 
+    // 同時間戳：完整 OHLC／有量優先；扁棒（O=H=L=C 且量 0）或 filled 補點不可蓋真棒
+    function barRichness(row) {
+      if (!row) return -1;
+      if (row.filled) return 0;
+      const o = +row.open;
+      const h = +row.high;
+      const l = +row.low;
+      const c = +row.close;
+      const v = +row.volume || 0;
+      const range = (Number.isFinite(h) && Number.isFinite(l)) ? h - l : 0;
+      let score = 1;
+      if (v > 0) score += 2;
+      if (range > 0) score += 2;
+      if (Number.isFinite(o) && Number.isFinite(c) && o !== c) score += 1;
+      return score;
+    }
     function mergeBarLists(a, b) {
       const by = {};
       (a || []).concat(b || []).forEach((row) => {
-        if (row && row.timestamp) by[row.timestamp] = row;
+        if (!row || row.timestamp == null) return;
+        const ts = row.timestamp;
+        const prev = by[ts];
+        if (!prev) {
+          by[ts] = row;
+          return;
+        }
+        const rp = barRichness(prev);
+        const rn = barRichness(row);
+        if (rn > rp) {
+          by[ts] = row;
+          return;
+        }
+        if (rn < rp) return;
+        // 同分：量較大者勝；再相同則後寫覆蓋（利於當分鐘 live close）
+        const pv = +prev.volume || 0;
+        const nv = +row.volume || 0;
+        if (nv >= pv) by[ts] = row;
       });
       return Object.keys(by).sort((x, y) => x - y).map((k) => by[k]);
     }
@@ -2705,7 +2738,12 @@
       const m1 = joinBars(minutePack.night_1m, minutePack.day_1m);
       const m5 = joinBars(minutePack.night_5m, minutePack.day_5m);
       if (kInt === "1") {
-        const raw = m1.length ? m1 : m5;
+        // 跟走勢同一裁窗：當日（或 daySpan 天），避免多日 1 分擠成疏疏破圖
+        const span = daySpan < 1 ? 1 : daySpan;
+        const keep = lastDates(span);
+        const src = m1.length ? m1 : m5;
+        let raw = src.filter((b) => b && keep.indexOf(dateKey(b.date)) >= 0);
+        if (raw.length < 2) raw = src;
         return fillMinutes(raw, 60000);
       }
       if (kInt === "5") return m5.length ? m5 : resample(m1, 5 * 60 * 1000);
