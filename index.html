@@ -581,7 +581,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.82</div>
+      <div class="ver foot-right">1.83</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2783,7 +2783,7 @@
         }
       }
     }
-    function draw() {
+    function draw(forceFit) {
       const lineOn = chartMode === "line";
       syncSideLayout();
       $("chart").style.display = lineOn ? "block" : "none";
@@ -2792,7 +2792,7 @@
       if (kw) kw.style.display = lineOn ? "none" : "block";
       syncKMonthNote();
       if (!lineOn) {
-        renderK();
+        renderK(!!forceFit);
         return;
       }
       const c = $("chart");
@@ -3673,6 +3673,7 @@
         kRangePane = null;
       }
     }
+    let kViewSig = "";
     function fitKVisible(data) {
       if (!kchart || !data || !data.length) return;
       try {
@@ -3685,36 +3686,90 @@
         if (kchart.scrollToRealTime) kchart.scrollToRealTime(true);
       } catch (e) {}
     }
-    function renderK() {
+    function preserveKView(applyFn) {
+      if (!kchart || typeof applyFn !== "function") return;
+      let space = null, offR = null, fromTs = null;
+      try {
+        if (kchart.getBarSpace) space = kchart.getBarSpace();
+        if (kchart.getOffsetRightDistance) offR = kchart.getOffsetRightDistance();
+        const vr = kchart.getVisibleRange && kchart.getVisibleRange();
+        const old = kchart.getDataList ? kchart.getDataList() : null;
+        if (vr && old && old.length && vr.from >= 0 && vr.from < old.length && old[vr.from]) {
+          fromTs = old[vr.from].timestamp;
+        }
+      } catch (e) {}
+      applyFn();
+      try {
+        if (space != null && kchart.setBarSpace) kchart.setBarSpace(space);
+        if (offR != null && kchart.setOffsetRightDistance) kchart.setOffsetRightDistance(offR);
+        if (fromTs != null && kchart.scrollToTimestamp) kchart.scrollToTimestamp(fromTs, 0);
+      } catch (e) {}
+    }
+    function renderK(forceFit) {
       if (typeof klinecharts === "undefined") return;
       ensureRangeIndicators();
       let data = klineData();
-      // 一分圖棒數異常少：背景強制補雲端／奇摩後重畫
+      const sig = session + "|" + kInt;
+      const sigChanged = sig !== kViewSig;
+      const doFit = !!forceFit || !kchart || sigChanged;
+      // 一分圖棒數異常少：背景強制補雲端／奇摩後重畫（不重設使用者縮放）
       if (kInt === "1" && data.length < 20 && marketOpen()) {
         ensureLive1m(true).then(function (ok) {
           if (!ok || !kchart) return;
           const d2 = klineData();
           if (d2.length <= data.length) return;
-          kchart.applyNewData(d2);
-          fitKVisible(d2);
+          preserveKView(function () { kchart.applyNewData(d2); });
         });
       }
       if (!kchart) {
         kchart = klinecharts.init("khost", { styles: twStyles() });
         if (kchart.setPrecision) kchart.setPrecision({ price: 0, volume: 0 });
         else if (kchart.setPriceVolumePrecision) kchart.setPriceVolumePrecision(0, 0);
-      } else if (kchart.setStyles) {
-        kchart.setStyles(twStyles());
+        kchart.applyNewData(data.length ? data : []);
+        fitKVisible(data);
+        kViewSig = sig;
+        syncKRangePanes();
+        syncKMtxPane();
+        if (kchart.resize) {
+          requestAnimationFrame(function () {
+            try { kchart.resize(); } catch (e) {}
+          });
+        }
+        return;
       }
-      kchart.applyNewData(data.length ? data : []);
-      fitKVisible(data);
-      syncKRangePanes();
-      syncKMtxPane();
-      if (kchart.resize) {
-        requestAnimationFrame(function () {
-          try { kchart.resize(); } catch (e) {}
+      if (doFit) {
+        if (kchart.setStyles) kchart.setStyles(twStyles());
+        kchart.applyNewData(data.length ? data : []);
+        fitKVisible(data);
+        kViewSig = sig;
+        syncKRangePanes();
+        syncKMtxPane();
+        if (kchart.resize) {
+          requestAnimationFrame(function () {
+            try { kchart.resize(); } catch (e) {}
+          });
+        }
+        return;
+      }
+      // 輪詢／回填：只更新資料，保留使用者縮放與可視區間
+      const old = kchart.getDataList ? (kchart.getDataList() || []) : [];
+      let tipOnly = false;
+      if (old.length && data.length && old[0].timestamp === data[0].timestamp && data.length >= old.length) {
+        if (old.length === 1) tipOnly = true;
+        else if (old.length >= 2 && data.length >= 2 && old[old.length - 2].timestamp === data[data.length - 2].timestamp) {
+          tipOnly = true;
+        }
+      }
+      if (tipOnly && kchart.updateData) {
+        for (let i = old.length - 1; i < data.length; i++) kchart.updateData(data[i]);
+      } else {
+        preserveKView(function () {
+          kchart.applyNewData(data.length ? data : []);
         });
       }
+      kViewSig = sig;
+      syncKRangePanes();
+      syncKMtxPane();
     }
 
     function slimYahoo(d) {
@@ -4057,7 +4112,7 @@
           if (!kInt) kInt = "1";
         }
         markChips();
-        draw();
+        draw(true);
       };
     }
 
@@ -4066,7 +4121,7 @@
         chartMode = "k";
         kInt = btn.getAttribute("data-k");
         markChips();
-        draw();
+        draw(true);
       };
     });
     document.querySelectorAll(".chip[data-line]").forEach((btn) => {
@@ -4498,7 +4553,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "1.82";
+        const VER = "1.83";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
