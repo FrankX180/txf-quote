@@ -581,7 +581,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.74</div>
+      <div class="ver foot-right">1.75</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1105,7 +1105,7 @@
       const p = prev == null || prev === "" ? NaN : Number(prev);
       const cls = isFinite(p) ? (n > p ? "up" : n < p ? "dn" : "flat") : "flat";
       // 大盤／收盤柱固定橘色；數字仍跟漲跌紅綠
-      const fill = "rgba(249,115,22,0.50)";
+      const fill = "rgba(249,115,22,1)";
       return `<div class="oi-cbar-wrap" title="${fmt(n)}"><span class="oi-cnum ${cls}">${fmt(n)}</span><div class="oi-cbar-track"><div class="oi-cbar" style="width:${pct.toFixed(1)}%;background:${fill}"></div></div></div>`;
     }
     function oiAbsMax(vals) {
@@ -1147,7 +1147,7 @@
       return Math.min(100, (a / den) * 100);
     }
     function oiBarFill(key, n) {
-      if (n < 0) return "rgba(27,138,62,0.50)";
+      if (n < 0) return "rgba(27,138,62,1)";
       return key ? oiColFill(key) : "";
     }
     function oiPcMeta(vals) {
@@ -1260,14 +1260,14 @@
     }
     function oiColFill(key) {
       const map = {
-        foreign: "rgba(37,99,235,0.50)",
-        trust: "rgba(124,58,237,0.50)",
-        dealer: "rgba(217,119,6,0.50)",
-        retail: "rgba(13,148,136,0.50)",
-        top10: "rgba(225,29,72,0.50)",
-        top10Spec: "rgba(79,70,229,0.50)",
+        foreign: "rgba(37,99,235,1)",
+        trust: "rgba(124,58,237,1)",
+        dealer: "rgba(217,119,6,1)",
+        retail: "rgba(13,148,136,1)",
+        top10: "rgba(225,29,72,1)",
+        top10Spec: "rgba(79,70,229,1)",
       };
-      return map[key] || "rgba(107,114,128,0.50)";
+      return map[key] || "rgba(107,114,128,1)";
     }
     function oiColTh(key) {
       return "";
