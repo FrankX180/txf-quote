@@ -416,10 +416,13 @@ def main():
 
     oa_ok = inst_has_ls(oa_inst)
     yh_ok = inst_has_ls(yh_inst)
-    # 官方日 >= 奇摩日才用 OpenAPI；官方較舊不蓋較新奇摩（奇摩空值交後面 history 補淨額）
-    use_oa = bool(oa_ok and oa_date and (not yh_date or oa_date >= yh_date))
-    if not use_oa and oa_ok and not yh_ok and (not yh_date or not yh_inst):
+    # 兩邊都有多空才比日期；奇摩只有淨額／空殼時改用 OpenAPI（避免較新日期蓋掉完整多空）
+    if oa_ok and yh_ok:
+        use_oa = bool(oa_date and (not yh_date or oa_date >= yh_date))
+    elif oa_ok:
         use_oa = True
+    else:
+        use_oa = False
     if use_oa:
         inst, top, date_pick = oa_inst, oa_top, oa_date
         sources.append("openapi")
