@@ -189,6 +189,35 @@
       flex-shrink: 0; min-width: 3.4em; text-align: right;
       font-size: 11px; font-weight: 800; line-height: 1.1;
     }
+    .oi td.oi-inline { padding: 2px 4px; vertical-align: middle; min-width: 70px; }
+    .oi-inline-wrap {
+      position: relative; display: flex; align-items: center; justify-content: flex-end;
+      min-height: 18px; min-width: 64px;
+    }
+    .oi-inline-track {
+      position: absolute; left: 0; right: 0; top: 2px; bottom: 2px;
+      display: flex; align-items: stretch; pointer-events: none; z-index: 0;
+      background: #f8fafc; border-radius: 3px; overflow: hidden;
+    }
+    .oi-inline-track.one { display: flex; }
+    .oi-inline-track.one.pos { justify-content: flex-end; }
+    .oi-inline-track.one.neg { justify-content: flex-start; }
+    .oi-inline-half {
+      flex: 1; display: flex; align-items: stretch; min-width: 0;
+    }
+    .oi-inline-half.L { justify-content: flex-end; }
+    .oi-inline-half.R { justify-content: flex-start; }
+    .oi-inline-mid {
+      width: 1px; flex-shrink: 0; background: #d1d5db;
+    }
+    .oi-inline-bar {
+      height: 100%; min-width: 2px; border-radius: 2px;
+    }
+    .oi-inline-num {
+      position: relative; z-index: 1; font-size: 12px; font-weight: 800; line-height: 1.1;
+      padding: 0 2px;
+      text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 1px 0 #fff;
+    }
     .oi-tabs-sw {
       display: inline-flex; align-items: center; gap: 10px;
       flex-shrink: 0; margin-left: auto;
@@ -544,7 +573,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.65</div>
+      <div class="ver foot-right">1.66</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1149,7 +1178,7 @@
       if (side === "pos") return 100 - pct;
       return pct;
     }
-    function oiSignedBarCell(v, meta, mode, cumInfo) {
+    function oiSignedBarCell(v, meta, mode, cumInfo, key) {
       if (v == null || v === "") return "";
       const n = Number(v);
       if (!isFinite(n)) return "";
@@ -1175,23 +1204,83 @@
       const dot = cumInfo
         ? `<span class="oi-cum-dot" style="left:${cumInfo.leftPct.toFixed(2)}%" title="累計 ${cumLab}"></span>`
         : "";
+      const fill = key ? oiColFill(key).replace(/[\d.]+(?=\))/, "0.55") : "";
+      const barStyle = () => fill
+        ? `width:${pct.toFixed(1)}%;background:${fill}`
+        : `width:${pct.toFixed(1)}%`;
       if (side !== "both") {
         const barCls = n >= 0 ? "pos" : "neg";
         const oneCls = n >= 0 ? "pos" : "neg";
-        const bar = n === 0 ? "" : `<div class="oi-sbar ${barCls}" style="width:${pct.toFixed(1)}%"></div>`;
+        const bar = n === 0 ? "" : `<div class="oi-sbar ${barCls}" style="${barStyle()}"></div>`;
         return `<div class="oi-sbar-wrap" title="${title}"><span class="oi-snum ${cls}">${lab}</span><div class="oi-sbar-track one ${oneCls}">${bar}${dot}</div></div>`;
       }
       const left = n > 0
-        ? `<div class="oi-sbar pos" style="width:${pct.toFixed(1)}%"></div>`
+        ? `<div class="oi-sbar pos" style="${barStyle()}"></div>`
         : "";
       const right = n < 0
-        ? `<div class="oi-sbar neg" style="width:${pct.toFixed(1)}%"></div>`
+        ? `<div class="oi-sbar neg" style="${barStyle()}"></div>`
         : "";
       return `<div class="oi-sbar-wrap" title="${title}"><span class="oi-snum ${cls}">${lab}</span><div class="oi-sbar-track"><div class="oi-sbar-half L">${left}</div><div class="oi-sbar-mid"></div><div class="oi-sbar-half R">${right}</div>${dot}</div></div>`;
     }
+    function oiColFill(key) {
+      const map = {
+        foreign: "rgba(37,99,235,0.34)",
+        trust: "rgba(124,58,237,0.34)",
+        dealer: "rgba(217,119,6,0.36)",
+        retail: "rgba(13,148,136,0.34)",
+        top10: "rgba(225,29,72,0.32)",
+        top10Spec: "rgba(79,70,229,0.32)",
+      };
+      return map[key] || "rgba(107,114,128,0.28)";
+    }
+    function oiColTh(key) {
+      const map = {
+        foreign: "#2563eb",
+        trust: "#7c3aed",
+        dealer: "#d97706",
+        retail: "#0d9488",
+        top10: "#e11d48",
+        top10Spec: "#4f46e5",
+      };
+      return map[key] || "";
+    }
+    function oiInlineBarCell(v, meta, key) {
+      if (v == null || v === "") return "—";
+      const n = Number(v);
+      if (!isFinite(n)) return "—";
+      const fill = oiColFill(key);
+      const absMax = (meta && meta.absMax > 0) ? meta.absMax : (Math.abs(n) || 1);
+      const absMin = (meta && meta.absMin != null) ? Number(meta.absMin) : 0;
+      let pct;
+      if (absMax > absMin && absMin > 0) {
+        pct = 12 + ((Math.abs(n) - absMin) / (absMax - absMin)) * 88;
+      } else {
+        pct = Math.min(100, (Math.abs(n) / absMax) * 100);
+      }
+      const side = (meta && meta.side) || "both";
+      const cls = n > 0 ? "up" : n < 0 ? "dn" : "flat";
+      const lab = oiSimple ? fmt(round50(n)) : fmt(n);
+      let track;
+      if (side !== "both") {
+        const oneCls = n >= 0 ? "pos" : "neg";
+        const bar = n === 0 ? "" : `<div class="oi-inline-bar" style="width:${pct.toFixed(1)}%;background:${fill}"></div>`;
+        track = `<div class="oi-inline-track one ${oneCls}">${bar}</div>`;
+      } else {
+        const left = n > 0
+          ? `<div class="oi-inline-bar" style="width:${pct.toFixed(1)}%;background:${fill}"></div>`
+          : "";
+        const right = n < 0
+          ? `<div class="oi-inline-bar" style="width:${pct.toFixed(1)}%;background:${fill}"></div>`
+          : "";
+        track = `<div class="oi-inline-track"><div class="oi-inline-half L">${left}</div><div class="oi-inline-mid"></div><div class="oi-inline-half R">${right}</div></div>`;
+      }
+      return `<div class="oi-inline-wrap" title="${lab}">${track}<span class="oi-inline-num ${cls}">${lab}</span></div>`;
+    }
     function oiPickTh(panel, key, label) {
       const on = oiPick[panel] === key ? " on" : "";
-      return `<th class="oi-th-pick${on}" data-oi-panel="${panel}" data-oi-pick="${key}">${label}</th>`;
+      const thc = oiColTh(key);
+      const st = thc ? ` style="color:${thc}"` : "";
+      return `<th class="oi-th-pick${on}" data-oi-panel="${panel}" data-oi-pick="${key}"${st}>${label}</th>`;
     }
     function oiPickHead(panel, labels) {
       const k = oiPick[panel];
@@ -1253,6 +1342,11 @@
       const meta = !pick ? null : (isLvl ? oiPcMeta(list.map((r) => r[pick])) : oiSignedMeta(list.map((r) => r[pick])));
       const mode = isLvl ? "pc" : "oi";
       const cumOn = oiCumEnabled(panel, pick);
+      const keyMeta = {};
+      keys.forEach((k) => {
+        if (k === "pc" || k === "vix") return;
+        keyMeta[k] = oiSignedMeta(list.map((r) => r[k]));
+      });
       let cumArr = null;
       let cumMeta = null;
       if (cumOn) {
@@ -1286,15 +1380,16 @@
               level: oiCumIsLevel(panel, pick),
             };
           }
-          pickCell = oiSignedBarCell(r[pick], meta, mode, cumInfo);
+          pickCell = oiSignedBarCell(r[pick], meta, mode, cumInfo, pick);
         }
         html += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td class="oi-pick${pick ? " on" : ""}">${pickCell}</td>`;
         keys.forEach((k) => {
           if (k === "pc" || k === "vix") {
             const nv = r[k] == null ? null : Number(r[k]);
             html += `<td>${nv == null || !isFinite(nv) ? "—" : (oiSimple ? fmt(Math.round(nv)) : fmt(nv, 1))}</td>`;
+          } else {
+            html += `<td class="oi-inline">${oiInlineBarCell(r[k], keyMeta[k], k)}</td>`;
           }
-          else html += `<td>${signedOi(r[k])}</td>`;
         });
         html += `</tr>`;
       });
