@@ -138,8 +138,9 @@
     }
     .oi th.oi-th-pick {
       cursor: pointer; user-select: none; white-space: nowrap;
+      color: #6b7280;
     }
-    .oi th.oi-th-pick.on { color: #b91c1c; text-decoration: underline; }
+    .oi th.oi-th-pick.on { color: #6b7280; text-decoration: underline; }
     .oi th.oi-pick-h {
       color: #6b7280; font-weight: 700;
       min-width: 6px; width: 8px; max-width: 10px; padding: 2px;
@@ -155,7 +156,7 @@
       position: relative;
       flex: 1; height: 14px; min-width: 76px;
       display: flex; align-items: stretch;
-      background: #f3f4f6; border-radius: 3px; overflow: visible;
+      background: #f3f4f6; border-radius: 0; overflow: visible;
     }
     .oi-table-wrap.has-cum .oi-sbar-track { height: 18px; min-width: 96px; }
     .oi-cum-svg {
@@ -181,7 +182,7 @@
       width: 2px; flex-shrink: 0; background: #9ca3af;
     }
     .oi-sbar {
-      height: 100%; min-width: 2px; border-radius: 2px;
+      height: 100%; min-width: 2px; border-radius: 0;
     }
     .oi-sbar.pos { background: var(--up); }
     .oi-sbar.neg { background: var(--dn); }
@@ -203,7 +204,7 @@
     .oi-inline-track {
       position: absolute; left: 0; right: 0; top: 2px; bottom: 2px;
       display: flex; align-items: stretch; pointer-events: none; z-index: 0;
-      background: #f8fafc; border-radius: 3px; overflow: hidden;
+      background: #f8fafc; border-radius: 0; overflow: hidden;
     }
     .oi-inline-track.one { display: flex; }
     .oi-inline-track.one.pos { justify-content: flex-end; }
@@ -217,7 +218,7 @@
       width: 1px; flex-shrink: 0; background: #d1d5db;
     }
     .oi-inline-bar {
-      height: 100%; min-width: 2px; border-radius: 2px;
+      height: 100%; min-width: 2px; border-radius: 0;
     }
     .oi-inline-num {
       position: relative; z-index: 1; font-size: 12px; font-weight: 800; line-height: 1.1;
@@ -579,7 +580,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.67</div>
+      <div class="ver foot-right">1.68</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1223,7 +1224,7 @@
       const dot = cumInfo
         ? `<span class="oi-cum-dot" style="left:${cumInfo.leftPct.toFixed(2)}%" title="累計 ${cumLab}"></span>`
         : "";
-      const fill = key ? oiColFill(key).replace(/[\d.]+(?=\))/, "0.55") : "";
+      const fill = key ? oiColFill(key) : "";
       const barStyle = () => fill
         ? `width:${pct.toFixed(1)}%;background:${fill}`
         : `width:${pct.toFixed(1)}%`;
@@ -1243,25 +1244,17 @@
     }
     function oiColFill(key) {
       const map = {
-        foreign: "rgba(37,99,235,0.34)",
-        trust: "rgba(124,58,237,0.34)",
-        dealer: "rgba(217,119,6,0.36)",
-        retail: "rgba(13,148,136,0.34)",
-        top10: "rgba(225,29,72,0.32)",
-        top10Spec: "rgba(79,70,229,0.32)",
+        foreign: "rgba(37,99,235,0.50)",
+        trust: "rgba(124,58,237,0.50)",
+        dealer: "rgba(217,119,6,0.50)",
+        retail: "rgba(13,148,136,0.50)",
+        top10: "rgba(225,29,72,0.50)",
+        top10Spec: "rgba(79,70,229,0.50)",
       };
-      return map[key] || "rgba(107,114,128,0.28)";
+      return map[key] || "rgba(107,114,128,0.50)";
     }
     function oiColTh(key) {
-      const map = {
-        foreign: "#2563eb",
-        trust: "#7c3aed",
-        dealer: "#d97706",
-        retail: "#0d9488",
-        top10: "#e11d48",
-        top10Spec: "#4f46e5",
-      };
-      return map[key] || "";
+      return "";
     }
     function oiInlineBarCell(v, meta, key) {
       if (v == null || v === "") return "—";
