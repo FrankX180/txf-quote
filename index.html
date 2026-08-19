@@ -581,7 +581,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.75</div>
+      <div class="ver foot-right">1.76</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1119,14 +1119,18 @@
     }
     function oiSignedMeta(vals) {
       let maxPos = 0, maxNeg = 0, hasPos = false, hasNeg = false;
+      let mn = Infinity, mx = -Infinity, nOk = 0;
       (vals || []).forEach((v) => {
         if (v == null || v === "") return;
         const n = Number(v);
-        if (!isFinite(n) || n === 0) return;
+        if (!isFinite(n)) return;
+        nOk += 1;
+        if (n < mn) mn = n;
+        if (n > mx) mx = n;
         if (n > 0) {
           hasPos = true;
           if (n > maxPos) maxPos = n;
-        } else {
+        } else if (n < 0) {
           hasNeg = true;
           const a = -n;
           if (a > maxNeg) maxNeg = a;
@@ -1134,16 +1138,31 @@
       });
       const side = (hasPos && hasNeg) ? "both" : (hasNeg ? "neg" : "pos");
       const absMax = Math.max(maxPos, maxNeg);
-      return { absMax: absMax, absMin: 0, maxPos: maxPos, maxNeg: maxNeg, side: side };
+      return {
+        absMax: absMax,
+        absMin: 0,
+        maxPos: maxPos,
+        maxNeg: maxNeg,
+        side: side,
+        mn: nOk ? mn : 0,
+        mx: nOk ? mx : 0,
+      };
     }
     function oiSignedBarPct(n, meta) {
-      const a = Math.abs(Number(n));
+      const x = Number(n);
+      if (!isFinite(x)) return 0;
+      const side = (meta && meta.side) || "both";
+      // 同號水位（如淨未平倉）：每欄用自己的 min～max 拉滿整欄，落差才看得見
+      if (side !== "both" && meta && isFinite(meta.mn) && isFinite(meta.mx) && meta.mx > meta.mn) {
+        return Math.min(100, Math.max(0, ((x - meta.mn) / (meta.mx - meta.mn)) * 100));
+      }
+      const a = Math.abs(x);
       if (!(a > 0)) return 0;
       let den = 0;
-      if (n > 0) den = (meta && meta.maxPos > 0) ? meta.maxPos : ((meta && meta.absMax) || a);
+      if (x > 0) den = (meta && meta.maxPos > 0) ? meta.maxPos : ((meta && meta.absMax) || a);
       else den = (meta && meta.maxNeg > 0) ? meta.maxNeg : ((meta && meta.absMax) || a);
       if (!(den > 0)) return 0;
-      // 該側最大／最小絕對值 → 拉滿該側 100%（雙向時即欄寬左／右緣）
+      // 正負都有：各側最大絕對值 → 拉滿該側（左／右緣）
       return Math.min(100, (a / den) * 100);
     }
     function oiBarFill(key, n) {
