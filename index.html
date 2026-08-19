@@ -581,7 +581,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.76</div>
+      <div class="ver foot-right">1.77</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1152,9 +1152,14 @@
       const x = Number(n);
       if (!isFinite(x)) return 0;
       const side = (meta && meta.side) || "both";
-      // 同號水位（如淨未平倉）：每欄用自己的 min～max 拉滿整欄，落差才看得見
+      // 同號水位：每欄用自己的 min～max 拉滿整欄
+      // 正值：越大越長；負值：越負（絕對值越大）越長
       if (side !== "both" && meta && isFinite(meta.mn) && isFinite(meta.mx) && meta.mx > meta.mn) {
-        return Math.min(100, Math.max(0, ((x - meta.mn) / (meta.mx - meta.mn)) * 100));
+        const span = meta.mx - meta.mn;
+        if (side === "neg") {
+          return Math.min(100, Math.max(0, ((meta.mx - x) / span) * 100));
+        }
+        return Math.min(100, Math.max(0, ((x - meta.mn) / span) * 100));
       }
       const a = Math.abs(x);
       if (!(a > 0)) return 0;
