@@ -185,6 +185,12 @@
     }
     .oi-sbar.pos { background: var(--up); }
     .oi-sbar.neg { background: var(--dn); }
+    .oi-sbar.vix-ext { background: #2563eb !important; }
+    .oi-vix-ref {
+      position: absolute; top: -8px; bottom: -8px; width: 0;
+      border-left: 1.5px dashed #9ca3af;
+      z-index: 5; pointer-events: none;
+    }
     .oi-snum {
       flex-shrink: 0; min-width: 3.4em; text-align: right;
       font-size: 11px; font-weight: 800; line-height: 1.1;
@@ -573,7 +579,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.66</div>
+      <div class="ver foot-right">1.67</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1132,7 +1138,11 @@
       if (!isFinite(mn) || !isFinite(mx)) return null;
       return { mn: mn, mx: mx };
     }
-    function oiPcBarCell(v, meta) {
+    // 近100日 VIXTWN：中位36；Bottom/Top 6% ≈ 29.4 / 41.9
+    const VIX_REF = 36;
+    const VIX_LO = 29.4;
+    const VIX_HI = 41.9;
+    function oiPcBarCell(v, meta, key) {
       if (v == null || v === "" || !meta) return "";
       const n = Number(v);
       if (!isFinite(n)) return "";
@@ -1144,7 +1154,16 @@
         pct = 12 + raw * 88;
       }
       const lab = oiSimple ? fmt(Math.round(n)) : fmt(n, 1);
-      return `<div class="oi-sbar-wrap" title="${lab}"><span class="oi-snum">${lab}</span><div class="oi-sbar-track one pos"><div class="oi-sbar pos" style="width:${pct.toFixed(1)}%"></div></div></div>`;
+      const isVix = key === "vix";
+      const ext = isVix && (n < VIX_LO || n > VIX_HI);
+      const barCls = ext ? "pos vix-ext" : "pos";
+      let ref = "";
+      if (isVix && span > 0 && VIX_REF >= meta.mn && VIX_REF <= meta.mx) {
+        const refPct = 12 + ((VIX_REF - meta.mn) / span) * 88;
+        const left = 100 - Math.max(0, Math.min(100, refPct));
+        ref = `<span class="oi-vix-ref" style="left:${left.toFixed(2)}%" title="VIX ${VIX_REF}"></span>`;
+      }
+      return `<div class="oi-sbar-wrap" title="${lab}"><span class="oi-snum">${lab}</span><div class="oi-sbar-track one pos"><div class="oi-sbar ${barCls}" style="width:${pct.toFixed(1)}%"></div>${ref}</div></div>`;
     }
     function oiCumEnabled(panel, pick) {
       if (!pick) return false;
@@ -1370,7 +1389,7 @@
       list.forEach((r, i) => {
         let pickCell = "";
         if (pick === "pc" || pick === "vix") {
-          pickCell = oiPcBarCell(r[pick], meta);
+          pickCell = oiPcBarCell(r[pick], meta, pick);
         } else if (pick) {
           let cumInfo = null;
           if (cumOn && cumArr && cumArr[i] != null && isFinite(Number(cumArr[i]))) {
