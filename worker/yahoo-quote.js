@@ -363,33 +363,40 @@ async function appendPricePx(env, px, nowMs, source) {
   const slot = minuteSlot(nowMs);
   await ensureSchema(env.IMB_DB);
   const prev = await env.IMB_DB.prepare(
-    "SELECT o, h, l, c, v FROM price_1m WHERE day_key=? AND session=? AND t=?"
+    "SELECT o, h, l, c, v, source FROM price_1m WHERE day_key=? AND session=? AND t=?"
   )
     .bind(dayKey, sess, slot)
     .first();
+  // quote 只有「當下最新價」：可更新當根 close／伸縮高低，但不可把 chart 真棒打成扁棒、不可把量歸零
   let o = px;
   let h = px;
   let l = px;
   let c = px;
   let v = 0;
+  let src = source || "quote";
   if (prev && prev.c != null) {
     o = prev.o != null ? prev.o : px;
     h = Math.max(prev.h != null ? prev.h : px, px);
     l = Math.min(prev.l != null ? prev.l : px, px);
     c = px;
     v = Number(prev.v) || 0;
+    if (prev.source === "chart") src = "chart";
   }
   await env.IMB_DB.prepare(
     "INSERT INTO price_1m (day_key, session, t, o, h, l, c, v, ts, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
       "ON CONFLICT(day_key, session, t) DO UPDATE SET " +
-      "o=excluded.o, h=excluded.h, l=excluded.l, c=excluded.c, v=excluded.v, ts=excluded.ts, source=excluded.source"
+      "o=COALESCE(price_1m.o, excluded.o), " +
+      "h=CASE WHEN excluded.h IS NOT NULL AND (price_1m.h IS NULL OR excluded.h > price_1m.h) THEN excluded.h ELSE price_1m.h END, " +
+      "l=CASE WHEN excluded.l IS NOT NULL AND (price_1m.l IS NULL OR excluded.l < price_1m.l) THEN excluded.l ELSE price_1m.l END, " +
+      "c=excluded.c, " +
+      "v=CASE WHEN excluded.v IS NOT NULL AND excluded.v >= COALESCE(price_1m.v, 0) THEN excluded.v ELSE price_1m.v END, " +
+      "ts=excluded.ts, " +
+      "source=CASE WHEN price_1m.source='chart' OR excluded.source='chart' THEN 'chart' ELSE excluded.source END"
   )
-    .bind(dayKey, sess, slot, o, h, l, c, v, nowMs, source || "quote")
+    .bind(dayKey, sess, slot, o, h, l, c, v, nowMs, src)
     .run();
-  return { ok: true, dayKey, sess, slot, c: px };
+  return { ok: true, dayKey, sess, slot, c: px, source: src };
 }
-
-
 async function upsertPriceBars(env, bars) {
   if (!env.IMB_DB || !bars || !bars.length) return 0;
   await ensureSchema(env.IMB_DB);
@@ -401,7 +408,8 @@ async function upsertPriceBars(env, bars) {
     "l=CASE WHEN excluded.l IS NOT NULL AND (price_1m.l IS NULL OR excluded.l < price_1m.l) THEN excluded.l ELSE price_1m.l END, " +
     "c=excluded.c, " +
     "v=CASE WHEN excluded.v IS NOT NULL AND excluded.v >= COALESCE(price_1m.v, 0) THEN excluded.v ELSE price_1m.v END, " +
-    "ts=excluded.ts, source=excluded.source";
+    "ts=excluded.ts, " +
+    "source=CASE WHEN excluded.source='chart' OR price_1m.source='chart' THEN 'chart' ELSE COALESCE(excluded.source, price_1m.source) END";
   const stmts = [];
   for (const bar of bars) {
     if (!bar || bar.c == null) continue;
@@ -467,20 +475,33 @@ function barsFromChartJson(chart) {
 
 async function backfillChart1m(env) {
   if (!env.IMB_DB) return { ok: false, reason: "no-db" };
-  const r = await fetch(CHART1M, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
-      Referer: "https://tw.stock.yahoo.com/",
-    },
-  });
-  if (!r.ok) return { ok: false, reason: "yahoo-chart-fail", status: r.status };
-  const chart = await r.json();
-  const all = barsFromChartJson(chart);
-  const dayKey = tradingDayKey(Date.now());
-  const bars = all.filter((b) => b.dayKey === dayKey);
-  const n = await upsertPriceBars(env, bars.length ? bars : all);
-  return { ok: true, n, dayKey, raw: all.length };
+  let lastErr = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await fetch(CHART1M, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
+          Referer: "https://tw.stock.yahoo.com/",
+        },
+      });
+      if (!r.ok) {
+        lastErr = "yahoo-chart-fail:" + r.status;
+        continue;
+      }
+      const chart = await r.json();
+      const all = barsFromChartJson(chart);
+      const dayKey = tradingDayKey(Date.now());
+      // 當日優先；若過濾後太少（夜盤切日／奇摩落後）仍寫入全包，避免只剩 quote 扁棒
+      const today = all.filter((b) => b.dayKey === dayKey);
+      const bars = today.length >= Math.min(30, all.length) ? today : all;
+      const n = await upsertPriceBars(env, bars);
+      return { ok: true, n, dayKey, raw: all.length, today: today.length, attempt: attempt + 1 };
+    } catch (e) {
+      lastErr = String((e && e.message) || e);
+    }
+  }
+  return { ok: false, reason: lastErr || "chart-fail" };
 }
 
 async function loadPricePack(env, dayKey) {
@@ -594,14 +615,9 @@ async function fetchYahooQuote() {
 async function pollAndStore(env, opts) {
   const nowMs = Date.now();
   if (!sessionOf(nowMs)) return { skipped: true, reason: "closed" };
-  const { ok, body } = await fetchYahooQuote();
-  if (!ok) return { skipped: true, reason: "yahoo-fail" };
-  const rows = JSON.parse(body);
-  const imb = await appendImb(env, rows, nowMs);
-  const w = extractWtx(rows);
-  const px = await appendPricePx(env, w && w.px, nowMs, "quote");
-  const out = { imb, px };
-  // chart 回填只走 cron（約 1 分一次），避免本機 5 秒 poll 打爆奇摩
+  const out = {};
+  // 權威順序：先奇摩 chart OHLC 回填，再寫 quote 最新價（只補當根 close／高低）
+  // Cron 每分通常只有 1 筆最新價 → 單獨寫入必成 O=H=L=C 扁棒；chart 必須先落地
   if (opts && opts.chart) {
     try {
       out.chart = await backfillChart1m(env);
@@ -609,6 +625,16 @@ async function pollAndStore(env, opts) {
       out.chart = { ok: false, reason: String(e && e.message || e) };
     }
   }
+  const { ok, body } = await fetchYahooQuote();
+  if (!ok) {
+    out.skippedQuote = true;
+    out.reason = "yahoo-fail";
+    return out;
+  }
+  const rows = JSON.parse(body);
+  out.imb = await appendImb(env, rows, nowMs);
+  const w = extractWtx(rows);
+  out.px = await appendPricePx(env, w && w.px, nowMs, "quote");
   return out;
 }
 

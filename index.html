@@ -581,7 +581,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.80</div>
+      <div class="ver foot-right">1.81</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2104,6 +2104,7 @@
       const v = +row.volume || 0;
       const range = (Number.isFinite(h) && Number.isFinite(l)) ? h - l : 0;
       let score = 1;
+      if (row.source === "chart") score += 3;
       if (v > 0) score += 2;
       if (range > 0) score += 2;
       if (Number.isFinite(o) && Number.isFinite(c) && o !== c) score += 1;
@@ -2282,6 +2283,7 @@
             volume: 0,
             date: dstr,
             session: liveK,
+            source: "quote",
           },
         ];
         minutePack[key] = rows;
@@ -2293,11 +2295,13 @@
       const lastSlot = Math.floor(last.timestamp / 60000) * 60000;
       const dVol = tot != null && lastTot != null && tot >= lastTot ? tot - lastTot : 0;
       if (lastSlot === slot) {
+        // 當根：最新價只改 close／伸縮高低；chart 開盤不重寫
         last.close = px;
         last.high = Math.max(last.high, px);
         last.low = Math.min(last.low, px);
         if (dVol) last.volume = (last.volume || 0) + dVol;
         if (!last.date) last.date = dstr;
+        if (last.source !== "chart") last.source = last.source || "quote";
       } else if (slot > lastSlot) {
         // 同盤缺分鐘：先用前收補平中間棒，再寫當下分鐘（避免 1 分 K 斷洞破圖）
         const sk0 = sessKindAt(lastSlot);
@@ -2332,6 +2336,7 @@
           volume: dVol,
           date: sameSess ? (last.date || dstr) : dstr,
           session: liveK,
+          source: "quote",
         });
         minutePack[key] = rows;
       }
@@ -4230,6 +4235,7 @@
           timestamp: ts,
           open: o, high: h, low: l, close: +c,
           volume: v, date: sdate, session: sess,
+          source: "chart",
         };
         if (sess === "night") night.push(row);
         else day.push(row);
@@ -4274,8 +4280,9 @@
     }
 
     async function pullLive1m() {
-      const a = await pullCloudPx1m();
+      // 權威順序與 Worker 一致：先奇摩 chart OHLC，再合併雲端 px1m
       const b = await pullYahoo1m();
+      const a = await pullCloudPx1m();
       return a || b;
     }
 
@@ -4537,7 +4544,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "1.80";
+        const VER = "1.81";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
