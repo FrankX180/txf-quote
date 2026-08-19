@@ -544,7 +544,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.63</div>
+      <div class="ver foot-right">1.64</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1119,8 +1119,8 @@
     }
     function oiCumEnabled(panel, pick) {
       if (!pick) return false;
-      // 淨進出開啟時，法人未平倉頁的外資／投信／自營＝日變化，可畫累計折線
-      if (panel === "oi" && oiNetFlow) return ["foreign", "trust", "dealer"].indexOf(pick) >= 0;
+      // 淨進出開啟時，外資／投信／自營／散戶＝日變化，可畫累計折線
+      if (panel === "oi" && oiNetFlow) return ["foreign", "trust", "dealer", "retail"].indexOf(pick) >= 0;
       if (panel === "big") return ["top10", "top10Spec", "retail"].indexOf(pick) >= 0;
       return false;
     }
@@ -1359,19 +1359,16 @@
       let oiKeys;
       let oiNote;
       if (oiNetFlow) {
-        oiKeys = ["foreign", "trust", "dealer"];
+        oiKeys = ["foreign", "trust", "dealer", "retail"];
         oiRows = hist.map((r, i) => ({
           date: r.date,
           close: r.close,
           foreign: r.foreignDelta != null ? r.foreignDelta : oiDayDiff(hist, i, "foreign"),
           trust: oiDayDiff(hist, i, "trust"),
           dealer: oiDayDiff(hist, i, "dealer"),
+          retail: r.retailDelta != null ? r.retailDelta : oiDayDiff(hist, i, "retail"),
         }));
         oiNote = "單位：大台等值口（大台＋小台/4＋微台/20）；相對前一交易日未平倉淨額變化；點表頭可在收盤右欄畫正負柱";
-        if (oiPick.oi === "retail") {
-          oiPick.oi = null;
-          saveOiPick();
-        }
       } else {
         oiKeys = ["foreign", "trust", "dealer", "retail"];
         oiRows = hist;
