@@ -544,7 +544,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.64</div>
+      <div class="ver foot-right">1.65</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1114,7 +1114,7 @@
         const raw = (n - meta.mn) / span;
         pct = 12 + raw * 88;
       }
-      const lab = fmt(n, 1);
+      const lab = oiSimple ? fmt(Math.round(n)) : fmt(n, 1);
       return `<div class="oi-sbar-wrap" title="${lab}"><span class="oi-snum">${lab}</span><div class="oi-sbar-track one pos"><div class="oi-sbar pos" style="width:${pct.toFixed(1)}%"></div></div></div>`;
     }
     function oiCumEnabled(panel, pick) {
@@ -1166,7 +1166,7 @@
       }
       const cls = n > 0 ? "up" : n < 0 ? "dn" : "flat";
       let lab;
-      if (mode === "pc") lab = fmt(n, 1);
+      if (mode === "pc") lab = oiSimple ? fmt(Math.round(n)) : fmt(n, 1);
       else lab = (oiSimple ? fmt(round50(n)) : fmt(n));
       const cumLab = cumInfo ? (oiSimple ? fmt(round50(cumInfo.cum)) : fmt(cumInfo.cum)) : "";
       const title = cumInfo
@@ -1290,7 +1290,10 @@
         }
         html += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td class="oi-pick${pick ? " on" : ""}">${pickCell}</td>`;
         keys.forEach((k) => {
-          if (k === "pc" || k === "vix") html += `<td>${r[k] == null ? "—" : fmt(r[k], 1)}</td>`;
+          if (k === "pc" || k === "vix") {
+            const nv = r[k] == null ? null : Number(r[k]);
+            html += `<td>${nv == null || !isFinite(nv) ? "—" : (oiSimple ? fmt(Math.round(nv)) : fmt(nv, 1))}</td>`;
+          }
           else html += `<td>${signedOi(r[k])}</td>`;
         });
         html += `</tr>`;
