@@ -581,7 +581,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.73</div>
+      <div class="ver foot-right">1.74</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1104,11 +1104,8 @@
       }
       const p = prev == null || prev === "" ? NaN : Number(prev);
       const cls = isFinite(p) ? (n > p ? "up" : n < p ? "dn" : "flat") : "flat";
-      const fill = cls === "up"
-        ? "rgba(211,47,47,0.50)"
-        : cls === "dn"
-          ? "rgba(27,138,62,0.50)"
-          : "rgba(249,115,22,0.50)";
+      // 大盤／收盤柱固定橘色；數字仍跟漲跌紅綠
+      const fill = "rgba(249,115,22,0.50)";
       return `<div class="oi-cbar-wrap" title="${fmt(n)}"><span class="oi-cnum ${cls}">${fmt(n)}</span><div class="oi-cbar-track"><div class="oi-cbar" style="width:${pct.toFixed(1)}%;background:${fill}"></div></div></div>`;
     }
     function oiAbsMax(vals) {
@@ -1121,19 +1118,37 @@
       return m;
     }
     function oiSignedMeta(vals) {
-      let m = 0, lo = Infinity, hasPos = false, hasNeg = false;
+      let maxPos = 0, maxNeg = 0, hasPos = false, hasNeg = false;
       (vals || []).forEach((v) => {
         if (v == null || v === "") return;
         const n = Number(v);
         if (!isFinite(n) || n === 0) return;
-        if (n > 0) hasPos = true;
-        if (n < 0) hasNeg = true;
-        const a = Math.abs(n);
-        if (a > m) m = a;
-        if (a < lo) lo = a;
+        if (n > 0) {
+          hasPos = true;
+          if (n > maxPos) maxPos = n;
+        } else {
+          hasNeg = true;
+          const a = -n;
+          if (a > maxNeg) maxNeg = a;
+        }
       });
       const side = (hasPos && hasNeg) ? "both" : (hasNeg ? "neg" : "pos");
-      return { absMax: m, absMin: isFinite(lo) ? lo : 0, side: side };
+      const absMax = Math.max(maxPos, maxNeg);
+      return { absMax: absMax, absMin: 0, maxPos: maxPos, maxNeg: maxNeg, side: side };
+    }
+    function oiSignedBarPct(n, meta) {
+      const a = Math.abs(Number(n));
+      if (!(a > 0)) return 0;
+      let den = 0;
+      if (n > 0) den = (meta && meta.maxPos > 0) ? meta.maxPos : ((meta && meta.absMax) || a);
+      else den = (meta && meta.maxNeg > 0) ? meta.maxNeg : ((meta && meta.absMax) || a);
+      if (!(den > 0)) return 0;
+      // 該側最大／最小絕對值 → 拉滿該側 100%（雙向時即欄寬左／右緣）
+      return Math.min(100, (a / den) * 100);
+    }
+    function oiBarFill(key, n) {
+      if (n < 0) return "rgba(27,138,62,0.50)";
+      return key ? oiColFill(key) : "";
     }
     function oiPcMeta(vals) {
       let mn = Infinity, mx = -Infinity;
@@ -1196,11 +1211,13 @@
       return out;
     }
     function oiCumLeftPct(v, meta, trackSide) {
-      if (v == null || !meta || !(meta.absMax > 0)) return 50;
-      const pct = Math.min(100, (Math.abs(Number(v)) / meta.absMax) * 100);
+      if (v == null || !meta) return 50;
+      const n = Number(v);
+      if (!isFinite(n)) return 50;
+      const pct = oiSignedBarPct(n, meta);
       const side = trackSide || meta.side || "both";
       if (side === "both") {
-        if (Number(v) >= 0) return 50 - (pct / 100) * 50;
+        if (n >= 0) return 50 - (pct / 100) * 50;
         return 50 + (pct / 100) * 50;
       }
       if (side === "pos") return 100 - pct;
@@ -1210,17 +1227,8 @@
       if (v == null || v === "") return "";
       const n = Number(v);
       if (!isFinite(n)) return "";
-      const absMax = (meta && meta.absMax != null) ? meta.absMax : (typeof meta === "number" ? meta : 0);
-      const absMin = (meta && meta.absMin != null) ? Number(meta.absMin) : 0;
       const side = (meta && meta.side) || "both";
-      const am = absMax > 0 ? absMax : (Math.abs(n) || 1);
-      // 高低值太近時，把表內最小～最大絕對值拉開到 12%～100%，柱差才看得見
-      let pct;
-      if (am > absMin && absMin > 0) {
-        pct = 12 + ((Math.abs(n) - absMin) / (am - absMin)) * 88;
-      } else {
-        pct = Math.min(100, (Math.abs(n) / am) * 100);
-      }
+      const pct = oiSignedBarPct(n, meta);
       const cls = n > 0 ? "up" : n < 0 ? "dn" : "flat";
       let lab;
       if (mode === "pc") lab = oiSimple ? fmt(Math.round(n)) : fmt(n, 1);
@@ -1232,7 +1240,7 @@
       const dot = cumInfo
         ? `<span class="oi-cum-dot" style="left:${cumInfo.leftPct.toFixed(2)}%" title="累計 ${cumLab}"></span>`
         : "";
-      const fill = key ? oiColFill(key) : "";
+      const fill = oiBarFill(key, n);
       const barStyle = () => fill
         ? `width:${pct.toFixed(1)}%;background:${fill}`
         : `width:${pct.toFixed(1)}%`;
@@ -1268,15 +1276,8 @@
       if (v == null || v === "") return "—";
       const n = Number(v);
       if (!isFinite(n)) return "—";
-      const fill = oiColFill(key);
-      const absMax = (meta && meta.absMax > 0) ? meta.absMax : (Math.abs(n) || 1);
-      const absMin = (meta && meta.absMin != null) ? Number(meta.absMin) : 0;
-      let pct;
-      if (absMax > absMin && absMin > 0) {
-        pct = 12 + ((Math.abs(n) - absMin) / (absMax - absMin)) * 88;
-      } else {
-        pct = Math.min(100, (Math.abs(n) / absMax) * 100);
-      }
+      const fill = oiBarFill(key, n);
+      const pct = oiSignedBarPct(n, meta);
       const side = (meta && meta.side) || "both";
       const cls = n > 0 ? "up" : n < 0 ? "dn" : "flat";
       const lab = oiSimple ? fmt(round50(n)) : fmt(n);
