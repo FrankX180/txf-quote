@@ -581,7 +581,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.81</div>
+      <div class="ver foot-right">1.82</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2228,7 +2228,13 @@
     function save1m() {
       try {
         const o = { t: Date.now() };
-        MIN_KEYS.forEach((k) => { o[k] = trimBars(minutePack[k], 8); });
+        // 只持久化真棒：禁 filled／單價 quote 扁棒污染 reload
+        MIN_KEYS.forEach((k) => {
+          const rows = (minutePack[k] || []).filter(
+            (b) => b && !b.filled && b.source !== "quote"
+          );
+          o[k] = trimBars(rows, 8);
+        });
         localStorage.setItem("txfMin", JSON.stringify(o));
       } catch (e) {}
     }
@@ -2239,7 +2245,10 @@
         if (!j) return;
         MIN_KEYS.forEach((k) => {
           const src = j[k] || (k === "night_1m" ? j.night : k === "day_1m" ? j.day : null);
-          if (src && src.length) minutePack[k] = mergeBarLists(minutePack[k], src);
+          if (src && src.length) {
+            const clean = src.filter((b) => b && !b.filled && b.source !== "quote");
+            if (clean.length) minutePack[k] = mergeBarLists(minutePack[k], clean);
+          }
         });
       } catch (e) {}
     }
@@ -2261,7 +2270,7 @@
     }
     function bumpLiveBar() {
       const slot = Math.floor(Date.now() / 60000) * 60000;
-      // 休市（含 13:46–14:59）不寫 1 分，避免收盤價水平線拖到夜盤
+      // 休市不寫 1 分
       if (sessKindAt(slot) === "closed") return;
       const liveK = liveSess();
       if (sessKindAt(slot) !== liveK) return;
@@ -2270,76 +2279,16 @@
       if (px == null) return;
       const tot = n(q0 && q0.CTotalVolume);
       const key = liveK + "_1m";
-      let rows = minutePack[key] || [];
-      const dstr = barDateAt(slot) || (q0 && q0.CDate) || "";
-      if (!rows.length) {
-        rows = [
-          {
-            timestamp: slot,
-            open: px,
-            high: px,
-            low: px,
-            close: px,
-            volume: 0,
-            date: dstr,
-            session: liveK,
-            source: "quote",
-          },
-        ];
-        minutePack[key] = rows;
-        if (tot != null) lastTot = tot;
-        save1m();
-        return;
-      }
+      const rows = minutePack[key] || [];
+      if (!rows.length) return; // 無 chart 棒則不建；單價不成立 K
       const last = rows[rows.length - 1];
       const lastSlot = Math.floor(last.timestamp / 60000) * 60000;
+      if (lastSlot !== slot) return; // 當分尚無棒 → 等 Yahoo chart；禁用單價新建／填洞
       const dVol = tot != null && lastTot != null && tot >= lastTot ? tot - lastTot : 0;
-      if (lastSlot === slot) {
-        // 當根：最新價只改 close／伸縮高低；chart 開盤不重寫
-        last.close = px;
-        last.high = Math.max(last.high, px);
-        last.low = Math.min(last.low, px);
-        if (dVol) last.volume = (last.volume || 0) + dVol;
-        if (!last.date) last.date = dstr;
-        if (last.source !== "chart") last.source = last.source || "quote";
-      } else if (slot > lastSlot) {
-        // 同盤缺分鐘：先用前收補平中間棒，再寫當下分鐘（避免 1 分 K 斷洞破圖）
-        const sk0 = sessKindAt(lastSlot);
-        const sk1 = sessKindAt(slot);
-        // 同 kind 不夠：跨曆日夜盤（昨晚→今晚）必須切開，否則會沿用昨夜 date／開盤價
-        const sameSess =
-          sk0 !== "closed" && sk0 === sk1 && barDateAt(lastSlot) === barDateAt(slot);
-        if (sameSess && slot - lastSlot > 60000) {
-          for (let t = lastSlot + 60000; t < slot; t += 60000) {
-            if (sessKindAt(t) !== sk0) break;
-            rows.push({
-              timestamp: t,
-              open: last.close,
-              high: last.close,
-              low: last.close,
-              close: last.close,
-              volume: 0,
-              date: last.date || dstr,
-              session: liveK,
-              filled: true,
-            });
-          }
-        }
-        const openPx = sameSess ? last.close : px;
-        // 跨盤（日→夜）必須用 slot 的交易日 date，禁沿用昨夜 date（否則 2 日走勢漏夜盤）
-        rows.push({
-          timestamp: slot,
-          open: openPx,
-          high: Math.max(openPx, px),
-          low: Math.min(openPx, px),
-          close: px,
-          volume: dVol,
-          date: sameSess ? (last.date || dstr) : dstr,
-          session: liveK,
-          source: "quote",
-        });
-        minutePack[key] = rows;
-      }
+      last.close = px;
+      last.high = Math.max(last.high, px);
+      last.low = Math.min(last.low, px);
+      if (dVol) last.volume = (last.volume || 0) + dVol;
       if (tot != null) lastTot = tot;
       save1m();
     }
@@ -2759,9 +2708,10 @@
           });
         }
         if (raw.length < 2) raw = src;
-        return fillMinutes(raw, 60000);
+        // K 棒禁填洞：filled／單價扁棒不是 OHLC
+        return raw.filter(function (b) { return b && !b.filled; });
       }
-      if (kInt === "5") return m5.length ? m5 : resample(m1, 5 * 60 * 1000);
+      if (kInt === "5") return m5.length ? m5 : resample(m1.filter(function (b) { return b && !b.filled; }), 5 * 60 * 1000);
       if (kInt === "m") {
         // MoneyDJ 量幾乎全 0；月 K 不畫假量（volume 清 0）
         return monthBarsLive().map(function (b) {
@@ -3959,6 +3909,10 @@
           loadImbCloud().then(() => {
             if (chartMode === "line") draw();
           });
+          // D1 已有 cron 寫入的 chart 棒：定期合併，尾巴不靠單價建棒
+          pullCloudPx1m().then(function (ok) {
+            if (ok) draw();
+          });
         }
       } catch (e) {
         live = false;
@@ -4352,9 +4306,9 @@
       setTimeout(() => ensureLive1m(true), 8000);
       setTimeout(() => ensureLive1m(true), 20000);
       live1mTimer = setInterval(() => {
-        // 有缺段才拉；已齊則跳過（完整 kline 仍每 5 分由 klineTimer 跑）
-        ensureLive1m(false);
-      }, 30000);
+        // 每分打 Yahoo chart（經 Worker）+ 合併 D1 px1m；單價只補當根 close
+        ensureLive1m(true);
+      }, 60000);
     }
 
     async function loadKline() {
@@ -4544,7 +4498,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "1.81";
+        const VER = "1.82";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");

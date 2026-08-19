@@ -367,21 +367,16 @@ async function appendPricePx(env, px, nowMs, source) {
   )
     .bind(dayKey, sess, slot)
     .first();
-  // quote 只有「當下最新價」：可更新當根 close／伸縮高低，但不可把 chart 真棒打成扁棒、不可把量歸零
-  let o = px;
-  let h = px;
-  let l = px;
-  let c = px;
-  let v = 0;
-  let src = source || "quote";
-  if (prev && prev.c != null) {
-    o = prev.o != null ? prev.o : px;
-    h = Math.max(prev.h != null ? prev.h : px, px);
-    l = Math.min(prev.l != null ? prev.l : px, px);
-    c = px;
-    v = Number(prev.v) || 0;
-    if (prev.source === "chart") src = "chart";
+  // 單價不成立 K 棒：無既有當根（應先由 chart 寫入）→ 不建棒，只准更新已有棒的 close／高低
+  if (!prev || prev.c == null) {
+    return { ok: false, reason: "no-bar", dayKey, sess, slot };
   }
+  const o = prev.o != null ? prev.o : px;
+  const h = Math.max(prev.h != null ? prev.h : px, px);
+  const l = Math.min(prev.l != null ? prev.l : px, px);
+  const c = px;
+  const v = Number(prev.v) || 0;
+  const src = prev.source === "chart" ? "chart" : (source || "quote");
   await env.IMB_DB.prepare(
     "INSERT INTO price_1m (day_key, session, t, o, h, l, c, v, ts, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
       "ON CONFLICT(day_key, session, t) DO UPDATE SET " +
