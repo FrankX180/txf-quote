@@ -539,7 +539,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.60</div>
+      <div class="ver foot-right">1.61</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -567,6 +567,15 @@
     let dailyPack = { night: [], day: [], daily: [], week: [], month: [] };
     let uncover = { inst: [], top: [], date: "", today: null, history: [] };
     let mtxRetailByDate = {};
+    let mtxRetailDate = "";
+    // 微台散戶多空比資料日期標籤（worker 停更時一眼可見）
+    function tmfDateTag() {
+      if (!mtxRetailDate) return "";
+      const d = String(mtxRetailDate);
+      return d.length === 8
+        ? " · 微台" + d.slice(4, 6) + "/" + d.slice(6, 8)
+        : " · 微台" + d;
+    }
     let kMtxPane = null;
     let mtxIndReady = false;
     let oiTab = "today";
@@ -869,7 +878,7 @@
       $("chgline").className = "sub " + cls(diff);
       $("chgline").textContent =
         last == null ? "" : `${arrow(diff)} ${fmt(Math.abs(diff), 0)} (${diff >= 0 ? "" : ""}${fmt(rate, 2)}%)`;
-      $("stamp").textContent = fmtTime(x.CDate, x.CTime);
+      $("stamp").textContent = fmtTime(x.CDate, x.CTime) + tmfDateTag();
       $("sumline").innerHTML =
         `<span class="sessico" id="sessToggle" title="${session === "day" ? "日盤，點一下切夜盤" : "夜盤，點一下切日盤"}">${session === "day" ? "☀️" : "🌙"}</span>` +
         `<div class="sumtxt">` +
@@ -4160,6 +4169,9 @@
         eat(mxGh);
         eat(mx);
         mtxRetailByDate = map;
+        mtxRetailDate = mx && mx.date
+          ? String(mx.date)
+          : mxGh && mxGh.date ? String(mxGh.date) : "";
       } catch (e) {
         mtxRetailByDate = {};
       }

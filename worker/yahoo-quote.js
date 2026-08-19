@@ -1027,6 +1027,41 @@ function wantTmfRefresh(ms) {
   return false;
 }
 
+function twDateStr(ms) {
+  const p = twParts(ms);
+  return p.y + p.mo + p.d;
+}
+
+// 上一個工作日（六日往前找；國定假日的近似——誤判頂多多打一次網站下載，無害且自癒）
+function lastWorkdayTw(ms) {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Taipei",
+    weekday: "short",
+  });
+  for (let i = 1; i <= 4; i++) {
+    const t = ms - i * 86400000;
+    const wd = fmt.format(new Date(t));
+    if (wd !== "Sat" && wd !== "Sun") return twDateStr(t);
+  }
+  return twDateStr(ms - 86400000);
+}
+
+// 判斷 OpenAPI 給的「最新交易日」是否落後預期：落後 → 網站 14 天補抓
+// 15:00–20:00 視窗（今天資料應公布）→ 預期今天；08:00–10:00（補昨晚）→ 預期上一個工作日
+function tmfOpenApiStale(ms, openDate, prev) {
+  if (!openDate || openDate.length !== 8) return "openapi-bad-date";
+  const p = twParts(ms);
+  let expected = twDateStr(ms);
+  if (p.hm >= 800 && p.hm <= 1000) {
+    expected = lastWorkdayTw(ms);
+  }
+  if (openDate < expected) return "openapi-stale(" + openDate + "<" + expected + ")";
+  const top =
+    prev && prev.series && prev.series.length ? String(prev.series[0].date) : null;
+  if (top && openDate < top) return "openapi-rollback(" + openDate + "<" + top + ")";
+  return null;
+}
+
 async function maybeRefreshTmf(env) {
   if (!env.IMB_DB) return { ok: false, reason: "no-db" };
   const now = Date.now();
@@ -1035,9 +1070,15 @@ async function maybeRefreshTmf(env) {
   if (prev && prev._ts && now - Number(prev._ts) < 25 * 60 * 1000) {
     return { ok: false, reason: "throttled", ageMin: Math.round((now - Number(prev._ts)) / 60000) };
   }
-  // 日常 cron 只補最新交易日：走 OpenAPI（穩定 JSON）；失敗才退回網站下載
+  // 日常 cron：先試 OpenAPI（穩定 JSON）；官方停更／落後預期交易日 → 網站 14 天補抓
   try {
     const openRow = await fetchTmfOpenApiLatest();
+    const stale = tmfOpenApiStale(now, openRow.date, prev);
+    if (stale) {
+      const st = await refreshTmfRetail(env, 14);
+      st.stale = stale;
+      return st;
+    }
     return mergeSaveTmf(env, [openRow], {
       source: "taifex:openapi",
       via: "openapi",
@@ -1265,7 +1306,8 @@ export default {
         try {
           await maybeRefreshTmf(env);
         } catch (e) {
-          /* ignore tmf cron errors */
+          /* 記錄而非全吞：官方 OpenAPI 停更時可從 CF 日誌追蹤 */
+          console.error("tmf cron failed", String((e && e.message) || e));
         }
       })()
     );

@@ -380,13 +380,34 @@ def main():
                 print("GAP", a, b, "days", gap)
                 break
     need_backfill = len(existing) < max(60, HIST_N // 4)
-    use_web = need_backfill or hole or not openapi_rows
+    # 預期最新交易日：官方 OpenAPI 的微台資料會延遲（實例 8/18 整天仍給 8/17）
+    # 16:00–20:00 視窗預期=今天；08:00–10:00（補昨晚）預期=上一個工作日 → openapi 落後即以網站補
+    stale = False
+    if openapi_rows:
+        oa = str(openapi_rows[0]["date"])
+        hh = datetime.now(TZ).hour
+        if hh < 12:
+            exp = today
+            for _ in range(4):
+                exp = exp - timedelta(days=1)
+                if exp.weekday() < 5:
+                    break
+            exp = exp.strftime("%Y%m%d")
+        else:
+            exp = today.strftime("%Y%m%d")
+        if oa < exp:
+            stale = True
+            print("STALE", oa, "<", exp)
+        elif existing and existing[0].get("date") and oa < str(existing[0]["date"]):
+            stale = True
+            print("ROLLBACK", oa, "<", existing[0]["date"])
+    use_web = need_backfill or hole or not openapi_rows or stale
     om = {}
     if use_web:
         if need_backfill:
             start = end - timedelta(days=int(HIST_N * 1.6))
             print("BACKFILL", ymd_slash(start), ymd_slash(end))
-        elif hole:
+        elif hole or stale:
             start = end - timedelta(days=40)
             print("HEAL", ymd_slash(start), ymd_slash(end))
         else:
