@@ -1287,13 +1287,23 @@ export default {
       );
     }
 
+    const cacheHdr =
+      kind === "1m"
+        ? {
+            "Cache-Control": "no-store",
+            "CDN-Cache-Control": "no-store",
+            "Cloudflare-CDN-Cache-Control": "no-store",
+          }
+        : {
+            "Cache-Control": "public, max-age=0",
+            "CDN-Cache-Control": "public, max-age=5",
+            "Cloudflare-CDN-Cache-Control": "public, max-age=5",
+          };
     return new Response(body, {
       status: r.status,
       headers: {
         "content-type": "application/json; charset=utf-8",
-        "Cache-Control": "public, max-age=0",
-        "CDN-Cache-Control": "public, max-age=5",
-        "Cloudflare-CDN-Cache-Control": "public, max-age=5",
+        ...cacheHdr,
         ...CORS,
       },
     });

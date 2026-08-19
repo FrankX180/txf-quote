@@ -581,7 +581,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.79</div>
+      <div class="ver foot-right">1.80</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2743,6 +2743,16 @@
         const keep = lastDates(span);
         const src = m1.length ? m1 : m5;
         let raw = src.filter((b) => b && keep.indexOf(dateKey(b.date)) >= 0);
+        // 開盤已久卻只剩很少棒：用牆鐘補篩（防殘缺 date／舊快取）
+        if (raw.length < 20 && src.length >= 20 && span <= 1) {
+          const openMs = sessionOpenAt();
+          const sk = liveSess();
+          raw = src.filter((b) => {
+            if (!b || b.timestamp == null) return false;
+            if (keep.indexOf(dateKey(b.date)) >= 0) return true;
+            return sk && sessKindAt(b.timestamp) === sk && b.timestamp >= openMs - 60000;
+          });
+        }
         if (raw.length < 2) raw = src;
         return fillMinutes(raw, 60000);
       }
@@ -3708,10 +3718,32 @@
         kRangePane = null;
       }
     }
+    function fitKVisible(data) {
+      if (!kchart || !data || !data.length) return;
+      try {
+        if (kInt !== "1" && kInt !== "5" && kInt !== "30") return;
+        const el = $("khost");
+        const w = (el && el.clientWidth) || 600;
+        const want = Math.min(Math.max(data.length, 2), kInt === "1" ? 420 : 240);
+        const space = Math.max(1.5, Math.min(12, (w - 70) / want));
+        if (kchart.setBarSpace) kchart.setBarSpace(space);
+        if (kchart.scrollToRealTime) kchart.scrollToRealTime(true);
+      } catch (e) {}
+    }
     function renderK() {
       if (typeof klinecharts === "undefined") return;
       ensureRangeIndicators();
-      const data = klineData();
+      let data = klineData();
+      // 一分圖棒數異常少：背景強制補雲端／奇摩後重畫
+      if (kInt === "1" && data.length < 20 && marketOpen()) {
+        ensureLive1m(true).then(function (ok) {
+          if (!ok || !kchart) return;
+          const d2 = klineData();
+          if (d2.length <= data.length) return;
+          kchart.applyNewData(d2);
+          fitKVisible(d2);
+        });
+      }
       if (!kchart) {
         kchart = klinecharts.init("khost", { styles: twStyles() });
         if (kchart.setPrecision) kchart.setPrecision({ price: 0, volume: 0 });
@@ -3720,6 +3752,7 @@
         kchart.setStyles(twStyles());
       }
       kchart.applyNewData(data.length ? data : []);
+      fitKVisible(data);
       syncKRangePanes();
       syncKMtxPane();
       if (kchart.resize) {
@@ -4208,7 +4241,7 @@
     async function pullCloudPx1m() {
       try {
         const day = imbDayKey();
-        const y = await fetch(LIVE + "?kind=px1m&day=" + day, { cache: "no-cache" }).then((r) =>
+        const y = await fetch(LIVE + "?kind=px1m&day=" + day + "&t=" + Date.now(), { cache: "no-cache" }).then((r) =>
           r.ok ? r.json() : null
         );
         if (!y) return false;
@@ -4226,7 +4259,7 @@
 
     async function pullYahoo1m() {
       try {
-        const y = await fetch(LIVE + "?kind=1m", { cache: "no-cache" }).then((r) =>
+        const y = await fetch(LIVE + "?kind=1m&t=" + Date.now(), { cache: "no-cache" }).then((r) =>
           r.ok ? r.json() : null
         );
         if (!y || !y.timestamp || !y.timestamp.length) return false;
@@ -4296,8 +4329,7 @@
             patchQuoteOHLC("day", n(snap.day && snap.day.CLastPrice));
             patchQuoteOHLC("night", n(snap.night && snap.night.CLastPrice));
           }
-          if (chartMode === "line") draw();
-          else render();
+          draw();
         }
       } finally {
         live1mBusy = false;
@@ -4388,6 +4420,7 @@
       renderOi();
       drawMiniK();
       render();
+      if (chartMode === "k") draw();
     }
 
     function visitorSid() {
@@ -4502,6 +4535,16 @@
     })();
     session = liveSess();
     markChips();
+    (function purgeOldMinCache() {
+      try {
+        const VER = "1.80";
+        if (localStorage.getItem("txfMinVer") !== VER) {
+          localStorage.removeItem("txfMin");
+          localStorage.removeItem("txf1m");
+          localStorage.setItem("txfMinVer", VER);
+        }
+      } catch (e) {}
+    })();
     loadLocal1m();
     loadImbBars();
     loadNightImbBase();
