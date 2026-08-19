@@ -111,23 +111,24 @@
     .oi-panel.on { display: block; }
     .oi .muted { color: #9ca3af; font-weight: 500; font-size: 12px; }
     .oi .note { margin: 6px 0 0; color: #6b7280; font-size: 12px; line-height: 1.4; }
-    .oi td.oi-close { padding: 4px 6px; vertical-align: middle; min-width: 132px; }
+    .oi td.oi-close { padding: 2px 3px; vertical-align: middle; min-width: 40px; }
     .oi-cbar-wrap {
-      display: flex; flex-direction: row; align-items: center; gap: 6px;
-      min-width: 120px;
+      display: flex; flex-direction: column; align-items: stretch; gap: 1px;
+      min-width: 36px;
     }
     .oi-cbar-track {
-      flex: 1; height: 14px; min-width: 72px;
-      display: flex; justify-content: flex-end;
-      background: #ffedd5; border-radius: 3px; overflow: hidden;
+      position: relative;
+      flex: 0 0 auto; height: 5px; min-width: 0; width: 100%;
+      display: flex; justify-content: flex-end; align-items: stretch;
+      background: #f8fafc; border-radius: 0; overflow: hidden;
     }
     .oi-cbar {
-      height: 100%; min-width: 4px;
-      background: #f97316; border-radius: 3px;
+      height: 100%; min-width: 2px;
+      background: #f97316; border-radius: 0;
     }
     .oi-cnum {
-      flex-shrink: 0; min-width: 3.6em; text-align: right;
-      font-size: 11px; font-weight: 800; color: #9a3412; line-height: 1.1;
+      flex-shrink: 0; min-width: 0; width: 100%; text-align: right;
+      font-size: 11px; font-weight: 800; line-height: 1.15;
     }
     .oi td.oi-pick {
       padding: 2px 2px; vertical-align: middle;
@@ -580,7 +581,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.71</div>
+      <div class="ver foot-right">1.72</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1090,18 +1091,25 @@
       if (!isFinite(mn) || !isFinite(mx)) return null;
       return { mn: mn, mx: mx };
     }
-    function oiCloseCell(v, rng) {
+    function oiCloseCell(v, rng, prev) {
       if (v == null || v === "" || !rng) return "—";
       const n = Number(v);
       if (!isFinite(n)) return "—";
       const span = rng.mx - rng.mn;
-      // 表內最低～最高 → 18%～100%；數字在左；右緣=0、往左長
+      // 表內最低～最高 → 18%～100%；數字在上、柱在下
       let pct = 100;
       if (span > 0) {
         const raw = (n - rng.mn) / span;
         pct = 18 + raw * 82;
       }
-      return `<div class="oi-cbar-wrap" title="${fmt(n)}"><span class="oi-cnum">${fmt(n)}</span><div class="oi-cbar-track"><div class="oi-cbar" style="width:${pct.toFixed(1)}%"></div></div></div>`;
+      const p = prev == null || prev === "" ? NaN : Number(prev);
+      const cls = isFinite(p) ? (n > p ? "up" : n < p ? "dn" : "flat") : "flat";
+      const fill = cls === "up"
+        ? "rgba(211,47,47,0.50)"
+        : cls === "dn"
+          ? "rgba(27,138,62,0.50)"
+          : "rgba(249,115,22,0.50)";
+      return `<div class="oi-cbar-wrap" title="${fmt(n)}"><span class="oi-cnum ${cls}">${fmt(n)}</span><div class="oi-cbar-track"><div class="oi-cbar" style="width:${pct.toFixed(1)}%;background:${fill}"></div></div></div>`;
     }
     function oiAbsMax(vals) {
       let m = 0;
@@ -1394,7 +1402,8 @@
           }
           pickCell = oiSignedBarCell(r[pick], meta, mode, cumInfo, pick);
         }
-        html += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng)}</td><td class="oi-pick${pick ? " on" : ""}">${pickCell}</td>`;
+        const prevClose = (i + 1 < list.length && list[i + 1]) ? list[i + 1].close : null;
+        html += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng, prevClose)}</td><td class="oi-pick${pick ? " on" : ""}">${pickCell}</td>`;
         keys.forEach((k) => {
           if (k === "pc" || k === "vix") {
             const nv = r[k] == null ? null : Number(r[k]);
