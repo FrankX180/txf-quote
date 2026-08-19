@@ -26,6 +26,7 @@ HIST_N = 20
 MTX_DIV = 4.0
 TMF_DIV = 20.0
 TMF_JSON = ROOT / "data" / "tmf_retail.json"
+VIX_CSV = Path(r"E:\CyndiTD\Program\derived\VIX\VIXTWN_daily_master.csv")
 OA_CODES = (
     ("臺股期貨", 1.0),
     ("小型臺指期貨", MTX_DIV),
@@ -62,7 +63,75 @@ def mtx_retail_approx(foreign_mtx, trust_mtx, dealer_mtx):
         return None
     return -(
         float(foreign_mtx or 0) + float(trust_mtx or 0) + float(dealer_mtx or 0)
-    )
+)
+
+
+def ymd8(s):
+    return re.sub(r"\D", "", str(s or ""))[:8]
+
+
+def load_vix_map():
+    """本機 VIXTWN：既有 uncovered → PG index_daily_prices → CyndiTD CSV（後蓋前）。"""
+    m = {}
+    if OUT.exists():
+        try:
+            old = json.loads(OUT.read_text(encoding="utf-8"))
+            for r in old.get("history") or []:
+                d = ymd8(r.get("date"))
+                if d and r.get("vix") is not None:
+                    m[d] = float(r["vix"])
+            td = ymd8((old.get("today") or {}).get("date") or old.get("date"))
+            tv = (old.get("today") or {}).get("vix")
+            if td and tv is not None:
+                m[td] = float(tv)
+        except Exception as e:
+            print("WARN vix old", e)
+    try:
+        import os
+
+        import psycopg2
+
+        pw = os.environ.get("PG_PASSWORD") or os.environ.get("PGPASSWORD")
+        if pw:
+            conn = psycopg2.connect(
+                host=os.environ.get("PGHOST", "127.0.0.1"),
+                port=int(os.environ.get("PGPORT", "5432")),
+                dbname=os.environ.get("PGDATABASE", "stock_research"),
+                user=os.environ.get("PGUSER", "postgres"),
+                password=pw,
+            )
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT trade_date::text, close_price
+                FROM index_daily_prices
+                WHERE index_id = 'VIXTWN' AND close_price IS NOT NULL
+                """
+            )
+            for d, v in cur.fetchall():
+                k = ymd8(d)
+                if k:
+                    m[k] = float(v)
+            conn.close()
+    except Exception as e:
+        print("WARN vix pg", e)
+    if VIX_CSV.exists():
+        try:
+            import csv
+
+            with VIX_CSV.open(encoding="utf-8", newline="") as f:
+                for row in csv.DictReader(f):
+                    k = ymd8(row.get("date"))
+                    c = row.get("close")
+                    if not k or len(k) != 8 or c in (None, ""):
+                        continue
+                    try:
+                        m[k] = float(c)
+                    except (TypeError, ValueError):
+                        continue
+        except Exception as e:
+            print("WARN vix csv", e)
+    return m
 
 
 def apply_txeq_add_to_ls(row, add):
@@ -575,6 +644,18 @@ def main():
         top10_net = history[0].get("top10") if history[0].get("top10") is not None else top10_net
         top10_spec = history[0].get("top10Spec") if history[0].get("top10Spec") is not None else top10_spec
 
+    vix_map = load_vix_map()
+    if vix_map:
+        sources.append("vix")
+    for rec in history:
+        d = ymd8(rec.get("date"))
+        if d and d in vix_map:
+            rec["vix"] = vix_map[d]
+    today_vix = extra.get("vix")
+    if today_vix is None:
+        today_vix = vix_map.get(ymd8(date))
+    if today_vix is None and history:
+        today_vix = history[0].get("vix")
     today = {
         "date": date,
         "inst": inst,
@@ -585,12 +666,11 @@ def main():
         "foreignDelta": history[0].get("foreignDelta") if history else None,
         "retailDelta": history[0].get("retailDelta") if history else None,
         "pc": extra.get("pc", history[0].get("pc") if history else None),
-        "vix": extra.get("vix"),
+        "vix": today_vix,
     }
-    # 今日 VIX 寫進 history[0]，大戶散戶欄才有值
     if history and today.get("vix") is not None:
         history[0]["vix"] = today["vix"]
-
+    n_vix = sum(1 for r in history[:HIST_N] if r.get("vix") is not None)
     payload = {
         "fetchedAt": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
         "date": ymd_slash(date) if len(date) == 8 else date,
@@ -611,6 +691,8 @@ def main():
         len(top),
         "hist",
         len(payload["history"]),
+        "vix",
+        n_vix,
         "date",
         payload["date"],
         "src",

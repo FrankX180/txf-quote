@@ -544,7 +544,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.62</div>
+      <div class="ver foot-right">1.63</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1196,7 +1196,7 @@
     function oiPickHead(panel, labels) {
       const k = oiPick[panel];
       let lab = (k && labels[k]) ? labels[k] : "";
-      if (k === "pc") lab = "Put Call Ratio";
+      if (k === "pc") lab = "P/C%";
       if (k === "vix") lab = "VIX";
       const on = k ? " on" : "";
       return `<th class="oi-pick-h${on}">${lab}</th>`;
@@ -1383,7 +1383,7 @@
         oiPick.big = null;
         saveOiPick();
       }
-      const bigLabs = { top10: "前十淨", top10Spec: "特定法人", retail: "散戶", pc: "PC", vix: "VIX" };
+      const bigLabs = { top10: "前十淨", top10Spec: "特定法人", retail: "散戶", pc: "P/C%", vix: "VIX" };
       const bigRows = hist.map((r, i) => {
         const d = String(r.date || "").replace(/\D/g, "");
         let vix = r.vix;
@@ -1403,7 +1403,7 @@
         bigRows,
         ["top10", "top10Spec", "retail", "pc", "vix"],
         bigLabs,
-        "前十／特定法人＝大額淨未平倉（官方 TX+小台/4）；散戶＝淨額日變化（大台等值）；PC／VIX 不換算；點表頭可在收盤右欄畫正負柱"
+        "前十／特定法人＝大額淨未平倉（官方 TX+小台/4）；散戶＝淨額日變化（大台等值）；P/C%／VIX 不換算；點表頭可在收盤右欄畫正負柱"
       );
 
       const sw = $("oiSimpleSw");
