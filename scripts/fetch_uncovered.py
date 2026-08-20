@@ -797,28 +797,6 @@ def cmoney_series():
 
 
 
-def fetch_cmoney_today_extra():
-    url = f"{CMONEY}?Action=GetDtnoData&DtNo=43456965&FilterNo=0&ParamStr="
-    j = get_json(url, 20)
-    data = j.get("Data") or []
-    if not data:
-        return {}
-    row = data[0]
-    # Title order fixed in catalog
-    return {
-        "date": str(row[0]),
-        "txNet": float(row[1]),
-        "foreign": float(row[2]),
-        "trust": float(row[3]),
-        "dealer": float(row[4]),
-        "top10": float(row[5]),
-        "top10Spec": float(row[6]),
-        "retail": float(row[7]),
-        "pc": float(row[11]),
-        "vix": float(row[12]),
-    }
-
-
 class _AhTableParser(HTMLParser):
     def __init__(self):
         super().__init__()
