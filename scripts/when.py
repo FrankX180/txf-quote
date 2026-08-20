@@ -86,7 +86,8 @@ def want_daily_k(dt=None):
 
 
 def want_uncovered(dt=None):
-    """日盤法人 15:00–20:00；夜盤成交 平日/週六 08:00–10:00（夜盤收後上架）。"""
+    """日盤法人 14:30–20:00（官方約兩點多公布；最慢 15:00 前要更新完）；
+    夜盤成交 平日/週六 08:00–10:00（夜盤收後上架）。"""
     if forced():
         return True
     d = dt or now_tw()
@@ -97,19 +98,19 @@ def want_uncovered(dt=None):
     # 週六早上：補周五夜盤
     if wd == 5:
         return 800 <= h <= 1000
-    if 1500 <= h <= 2000:
+    if 1430 <= h <= 2000:
         return True
     return 800 <= h <= 1000
 
 
 def want_tmf_retail(dt=None):
-    """微台與法人同窗；另加平日 08:00–10:00 補洞（前一日若晚上抓失敗可自癒）。"""
+    """微台與法人同窗（14:30–20:00）；另加平日 08:00–10:00 補洞。"""
     if forced():
         return True
     d = dt or now_tw()
     h = hm(d)
     if d.weekday() >= 5:
         return False
-    if 1500 <= h <= 2000:
+    if 1430 <= h <= 2000:
         return True
     return 800 <= h <= 1000
