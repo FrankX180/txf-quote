@@ -576,8 +576,8 @@ def night_close_from_snap():
         return None
 
 
-def fetch_latest_night(day_hist_date: str):
-    """抓比日盤 history 更新的最新夜盤列；沒有則 None。"""
+def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
+    """抓比日盤 history 更新的最新夜盤列；水位＝日盤 OI＋夜盤成交淨口。沒有則 None。"""
     day8 = ymd8(day_hist_date)
     now = datetime.now(TZ)
     old = {}
@@ -604,22 +604,49 @@ def fetch_latest_night(day_hist_date: str):
             continue
         if abs(nets["foreign"]) + abs(nets["trust"]) + abs(nets["dealer"]) < 1e-9:
             continue
-        return {
+        trade = dict(nets)
+        row = {
             "date": d8,
             "session": "night",
-            "foreign": nets["foreign"],
-            "trust": nets["trust"],
-            "dealer": nets["dealer"],
-            "retail": nets["retail"],
+            "foreignDelta": trade["foreign"],
+            "trustDelta": trade["trust"],
+            "dealerDelta": trade["dealer"],
+            "retailDelta": trade["retail"],
             "close": close,
-            "unitNote": "夜盤三大法人成交淨口（大台等值）；非未平倉水位",
+            "unitNote": "夜盤列＝日盤淨未平倉＋當夜三大法人成交淨口（大台等值估水位）",
         }
+        if base_row:
+            row["foreign"] = round(float(base_row.get("foreign") or 0) + trade["foreign"], 2)
+            row["trust"] = round(float(base_row.get("trust") or 0) + trade["trust"], 2)
+            row["dealer"] = round(float(base_row.get("dealer") or 0) + trade["dealer"], 2)
+            row["retail"] = round(float(base_row.get("retail") or 0) + trade["retail"], 2)
+        else:
+            row["foreign"] = trade["foreign"]
+            row["trust"] = trade["trust"]
+            row["dealer"] = trade["dealer"]
+            row["retail"] = trade["retail"]
+        return row
     od = ymd8(old.get("date"))
     if od and (not day8 or od > day8) and old.get("foreign") is not None:
+        row = dict(old)
         if close is not None:
-            old = dict(old)
-            old["close"] = close
-        return old
+            row["close"] = close
+        # 舊 night 只有成交淨口：補成水位＋Delta
+        if row.get("foreignDelta") is None and base_row:
+            trade_f = float(row.get("foreign") or 0)
+            trade_t = float(row.get("trust") or 0)
+            trade_d = float(row.get("dealer") or 0)
+            trade_r = float(row.get("retail") or 0)
+            row["foreignDelta"] = trade_f
+            row["trustDelta"] = trade_t
+            row["dealerDelta"] = trade_d
+            row["retailDelta"] = trade_r
+            row["foreign"] = round(float(base_row.get("foreign") or 0) + trade_f, 2)
+            row["trust"] = round(float(base_row.get("trust") or 0) + trade_t, 2)
+            row["dealer"] = round(float(base_row.get("dealer") or 0) + trade_d, 2)
+            row["retail"] = round(float(base_row.get("retail") or 0) + trade_r, 2)
+            row["unitNote"] = "夜盤列＝日盤淨未平倉＋當夜三大法人成交淨口（大台等值估水位）"
+        return row
     return None
 
 
@@ -833,7 +860,7 @@ def main():
     day0 = history[0]["date"] if history else date
     night = None
     try:
-        night = fetch_latest_night(day0)
+        night = fetch_latest_night(day0, history[0] if history else None)
     except Exception as e:
         print("WARN night", e)
     if night:

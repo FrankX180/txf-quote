@@ -581,7 +581,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.84</div>
+      <div class="ver foot-right">1.85</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1521,16 +1521,45 @@
       }
       const night = uncover.night;
       if (night && night.date) {
+        const base = hist[0] || {};
+        const hasDelta = night.foreignDelta != null;
+        const dF = hasDelta ? Number(night.foreignDelta) : Number(night.foreign || 0);
+        const dT = hasDelta ? Number(night.trustDelta || 0) : Number(night.trust || 0);
+        const dD = hasDelta ? Number(night.dealerDelta || 0) : Number(night.dealer || 0);
+        const dR = hasDelta ? Number(night.retailDelta || 0) : Number(night.retail || 0);
+        let nForeign;
+        let nTrust;
+        let nDealer;
+        let nRetail;
+        if (oiNetFlow) {
+          nForeign = dF;
+          nTrust = dT;
+          nDealer = dD;
+          nRetail = dR;
+        } else if (hasDelta) {
+          nForeign = night.foreign;
+          nTrust = night.trust;
+          nDealer = night.dealer;
+          nRetail = night.retail;
+        } else {
+          // 舊 JSON：night.* 曾是成交淨口 → 加回日盤水位
+          nForeign = Number(base.foreign || 0) + dF;
+          nTrust = Number(base.trust || 0) + dT;
+          nDealer = Number(base.dealer || 0) + dD;
+          nRetail = Number(base.retail || 0) + dR;
+        }
         oiRows = [{
           date: night.date,
           session: "night",
           close: night.close,
-          foreign: night.foreign,
-          trust: night.trust,
-          dealer: night.dealer,
-          retail: night.retail,
+          foreign: nForeign,
+          trust: nTrust,
+          dealer: nDealer,
+          retail: nRetail,
         }].concat(oiRows);
-        oiNote += "；最上列日期帶(夜)＝夜盤三大法人成交淨口（非未平倉水位）";
+        oiNote += oiNetFlow
+          ? "；最上列日期帶(夜)＝當夜三大法人成交淨口"
+          : "；最上列日期帶(夜)＝日盤淨未平倉＋當夜成交淨口（估水位）";
       }
       oiEl.innerHTML = oiBuildHistTable("oi", oiRows, oiKeys, oiLabs, oiNote);
 
@@ -1554,13 +1583,17 @@
         };
       });
       if (night && night.date) {
+        const hasDelta = night.foreignDelta != null;
+        const nRetailDelta = hasDelta
+          ? night.retailDelta
+          : night.retail;
         bigRows = [{
           date: night.date,
           session: "night",
           close: night.close,
           top10: null,
           top10Spec: null,
-          retail: night.retail,
+          retail: nRetailDelta,
           pc: null,
           vix: null,
         }].concat(bigRows);
@@ -4579,7 +4612,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "1.84";
+        const VER = "1.85";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
