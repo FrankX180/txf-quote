@@ -563,7 +563,7 @@
           <div class="oi-tabs" id="oi-tabs">
             <div class="oi-tabs-btns">
               <button type="button" class="oi-tab on" data-oi="oi">法人未平倉</button>
-              <button type="button" class="oi-tab" data-oi="big">大戶散戶</button>
+              <button type="button" class="oi-tab" data-oi="big">特法&amp;VIX</button>
             </div>
             <div class="oi-tabs-sw">
               <div class="oi-simple" id="oiNetSw" title="切換成法人每日淨進出" role="switch" aria-checked="false">
@@ -581,7 +581,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.85</div>
+      <div class="ver foot-right">1.86</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -621,6 +621,9 @@
     let kMtxPane = null;
     let mtxIndReady = false;
     let oiTab = "oi";
+    let oiChartActive = false;
+    let kOiPanes = [];
+    let oiIndReady = false;
     let oiSimple = false;
     let oiNetFlow = false;
     let oiPick = { oi: null, big: null };
@@ -638,7 +641,7 @@
             big: o.big || null,
           };
         }
-        if (["foreignDelta", "retailDelta"].indexOf(oiPick.big) >= 0) oiPick.big = null;
+        if (oiPick.big === "retail" || ["foreignDelta", "retailDelta"].indexOf(oiPick.big) >= 0) oiPick.big = null;
       }
     } catch (e) {}
     let minutePack = {
@@ -1218,7 +1221,7 @@
       if (!pick) return false;
       // 淨進出開啟時，外資／投信／自營／散戶＝日變化，可畫累計折線
       if (panel === "oi" && oiNetFlow) return ["foreign", "trust", "dealer", "retail"].indexOf(pick) >= 0;
-      if (panel === "big") return ["top10", "top10Spec", "retail"].indexOf(pick) >= 0;
+      if (panel === "big") return ["top10", "top10Spec"].indexOf(pick) >= 0;
       return false;
     }
     function oiCumIsLevel(panel, pick) {
@@ -1296,31 +1299,6 @@
     }
     function oiColTh(key) {
       return "";
-    }
-    function oiInlineBarCell(v, meta, key) {
-      if (v == null || v === "") return "—";
-      const n = Number(v);
-      if (!isFinite(n)) return "—";
-      const fill = oiBarFill(key, n);
-      const pct = oiSignedBarPct(n, meta);
-      const side = (meta && meta.side) || "both";
-      const cls = n > 0 ? "up" : n < 0 ? "dn" : "flat";
-      const lab = oiSimple ? fmt(round50(n)) : fmt(n);
-      let track;
-      if (side !== "both") {
-        const oneCls = n >= 0 ? "pos" : "neg";
-        const bar = n === 0 ? "" : `<div class="oi-inline-bar" style="width:${pct.toFixed(1)}%;background:${fill}"></div>`;
-        track = `<div class="oi-inline-track one ${oneCls}">${bar}</div>`;
-      } else {
-        const left = n > 0
-          ? `<div class="oi-inline-bar" style="width:${pct.toFixed(1)}%;background:${fill}"></div>`
-          : "";
-        const right = n < 0
-          ? `<div class="oi-inline-bar" style="width:${pct.toFixed(1)}%;background:${fill}"></div>`
-          : "";
-        track = `<div class="oi-inline-track"><div class="oi-inline-half L">${left}</div><div class="oi-inline-mid"></div><div class="oi-inline-half R">${right}</div></div>`;
-      }
-      return `<div class="oi-inline-wrap" title="${lab}"><span class="oi-inline-num ${cls}">${lab}</span>${track}</div>`;
     }
     function oiPickTh(panel, key, label) {
       const on = oiPick[panel] === key ? " on" : "";
@@ -1435,7 +1413,14 @@
             const nv = r[k] == null ? null : Number(r[k]);
             html += `<td>${nv == null || !isFinite(nv) ? "—" : (oiSimple ? fmt(Math.round(nv)) : fmt(nv, 1))}</td>`;
           } else {
-            html += `<td class="oi-inline">${oiInlineBarCell(r[k], keyMeta[k], k)}</td>`;
+            const nv = r[k] == null ? null : Number(r[k]);
+            if (nv == null || !isFinite(nv)) {
+              html += `<td>—</td>`;
+            } else {
+              const cls = nv > 0 ? "up" : nv < 0 ? "dn" : "flat";
+              const lab = oiSimple ? fmt(round50(nv)) : fmt(nv);
+              html += `<td class="${cls}">${lab}</td>`;
+            }
           }
         });
         html += `</tr>`;
@@ -1567,11 +1552,11 @@
       }
       oiEl.innerHTML = oiBuildHistTable("oi", oiRows, oiKeys, oiLabs, oiNote);
 
-      if (oiPick.big && ["foreignDelta", "retailDelta"].indexOf(oiPick.big) >= 0) {
+      if (oiPick.big === "retail" || ["foreignDelta", "retailDelta"].indexOf(oiPick.big) >= 0) {
         oiPick.big = null;
         saveOiPick();
       }
-      const bigLabs = { top10: "前十淨", top10Spec: "特定法人", retail: "散戶", pc: "P/C%", vix: "VIX" };
+      const bigLabs = { top10: "前十淨", top10Spec: "特定法人", pc: "P/C%", vix: "VIX" };
       let bigRows = hist.map((r, i) => {
         const d = String(r.date || "").replace(/\D/g, "");
         let vix = r.vix;
@@ -1581,23 +1566,17 @@
           close: r.close,
           top10: r.top10,
           top10Spec: r.top10Spec,
-          retail: r.retailDelta != null ? r.retailDelta : oiDayDiff(hist, i, "retail"),
           pc: r.pc,
           vix: vix,
         };
       });
       if (showNight) {
-        const hasDelta = night.foreignDelta != null;
-        const nRetailDelta = hasDelta
-          ? night.retailDelta
-          : night.retail;
         bigRows = [{
           date: night.date,
           session: "night",
           close: night.close,
           top10: null,
           top10Spec: null,
-          retail: nRetailDelta,
           pc: null,
           vix: null,
         }].concat(bigRows);
@@ -1605,9 +1584,9 @@
       bigEl.innerHTML = oiBuildHistTable(
         "big",
         bigRows,
-        ["top10", "top10Spec", "retail", "pc", "vix"],
+        ["top10", "top10Spec", "pc", "vix"],
         bigLabs,
-        "前十／特定法人＝大額淨未平倉（官方 TX+小台/4）；散戶＝淨額日變化（大台等值）；P/C%／VIX 不換算；點表頭可在收盤右欄畫正負柱"
+        "前十／特定法人＝大額淨未平倉（官方 TX+小台/4）；P/C%／VIX 不換算；點表頭可在收盤右欄畫正負柱"
       );
 
       const sw = $("oiSimpleSw");
@@ -2787,8 +2766,8 @@
         const src = m1.length ? m1 : m5.length ? m5 : m15;
         return resample(src, 30 * 60 * 1000);
       }
-      if (kInt === "w") return attachMtxRetail(weekBarsLive());
-      return attachMtxRetail(dayBarsLive());
+      if (kInt === "w") return attachOiFields(attachMtxRetail(weekBarsLive()));
+      return attachOiFields(attachMtxRetail(dayBarsLive()));
     }
 
     function fitCanvas(c, cssH) {
@@ -3575,7 +3554,7 @@
     }
     function syncKMtxPane() {
       if (!kchart) return;
-      const want = chartMode === "k" && (kInt === "d" || kInt === "w");
+      const want = !oiChartActive && chartMode === "k" && (kInt === "d" || kInt === "w");
       if (want) {
         ensureMtxRetailIndicator();
         if (!kMtxPane) {
@@ -3591,6 +3570,189 @@
         }
         kMtxPane = null;
       }
+    }
+    function oiHistFieldMap() {
+      const hist = uncover.history || [];
+      const map = {};
+      hist.forEach(function (r, i) {
+        const d = String(r.date || "").replace(/\D/g, "");
+        if (!d) return;
+        const foreign = oiNetFlow
+          ? (r.foreignDelta != null ? r.foreignDelta : oiDayDiff(hist, i, "foreign"))
+          : r.foreign;
+        const trust = oiNetFlow ? oiDayDiff(hist, i, "trust") : r.trust;
+        const dealer = oiNetFlow ? oiDayDiff(hist, i, "dealer") : r.dealer;
+        const retail = oiNetFlow
+          ? (r.retailDelta != null ? r.retailDelta : oiDayDiff(hist, i, "retail"))
+          : r.retail;
+        map[d] = {
+          foreign: foreign,
+          trust: trust,
+          dealer: dealer,
+          retail: retail,
+          top10: r.top10,
+          top10Spec: r.top10Spec,
+          pc: r.pc,
+          vix: r.vix,
+        };
+      });
+      return map;
+    }
+    function oiFieldsForWeekBar(b, map) {
+      const wk = weekKey(b);
+      const parts = String(wk || "").split("-");
+      if (parts.length < 3) return null;
+      const y0 = Number(parts[0]);
+      const m0 = Number(parts[1]);
+      const d0 = Number(parts[2]);
+      if (!y0 || !m0 || !d0) return null;
+      let last = null;
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(y0, m0 - 1, d0 + i);
+        const key =
+          d.getFullYear() +
+          String(d.getMonth() + 1).padStart(2, "0") +
+          String(d.getDate()).padStart(2, "0");
+        if (Object.prototype.hasOwnProperty.call(map, key)) last = map[key];
+      }
+      return last;
+    }
+    function attachOiFields(bars) {
+      const map = oiHistFieldMap();
+      const weekly = kInt === "w";
+      return (bars || []).map(function (b) {
+        let row = null;
+        if (weekly) row = oiFieldsForWeekBar(b, map);
+        else {
+          const key = ymdFromBar(b);
+          row = key && Object.prototype.hasOwnProperty.call(map, key) ? map[key] : null;
+        }
+        return Object.assign({}, b, {
+          oiForeign: row ? row.foreign : null,
+          oiTrust: row ? row.trust : null,
+          oiDealer: row ? row.dealer : null,
+          oiRetail: row ? row.retail : null,
+          oiTop10: row ? row.top10 : null,
+          oiTop10Spec: row ? row.top10Spec : null,
+          oiPc: row ? row.pc : null,
+          oiVix: row ? row.vix : null,
+        });
+      });
+    }
+    function oiIndBarStyles(field, key) {
+      return function (data) {
+        const k = data && data.current && data.current.kLineData;
+        const v = k ? k[field] : null;
+        if (v == null || !isFinite(Number(v))) return { color: "#888888" };
+        const n = Number(v);
+        if (key === "pc" || key === "vix") return { color: oiColFill(key === "vix" ? "top10" : "dealer") };
+        if (n < 0) return { color: "#1b8a3e" };
+        return { color: oiColFill(key) };
+      };
+    }
+    function registerOiBarInd(name, shortName, field, key, prec) {
+      klinecharts.registerIndicator({
+        name: name,
+        shortName: shortName,
+        series: "normal",
+        precision: prec == null ? 0 : prec,
+        figures: [{
+          key: "v",
+          title: shortName + " ",
+          type: "bar",
+          baseValue: 0,
+          styles: oiIndBarStyles(field, key),
+        }],
+        calc: function (list) {
+          return (list || []).map(function (k) {
+            const v = k && k[field];
+            return { v: v == null || !isFinite(Number(v)) ? null : Number(v) };
+          });
+        },
+        createTooltipDataSource: function (params) {
+          const ch = params && params.crosshair;
+          const ind = params && params.indicator;
+          const dataIdx = ch && ch.dataIndex != null ? ch.dataIndex : -1;
+          const row = ind && ind.result && dataIdx >= 0 ? ind.result[dataIdx] : null;
+          const k = ch && ch.kLineData;
+          let v = row && row.v != null ? row.v : (k ? k[field] : null);
+          if (v == null || !isFinite(Number(v))) return { name: shortName, values: [] };
+          const n = Number(v);
+          const color = (key === "pc" || key === "vix")
+            ? oiColFill(key === "vix" ? "top10" : "dealer")
+            : (n < 0 ? "#1b8a3e" : oiColFill(key));
+          const text = (key === "pc" || key === "vix")
+            ? (Math.round(n * 10) / 10).toFixed(1)
+            : ((n > 0 ? "+" : "") + Math.round(n));
+          return {
+            name: shortName,
+            values: [{ title: shortName + " ", value: { text: text, color: color } }],
+          };
+        },
+      });
+    }
+    function ensureOiIndicators() {
+      if (oiIndReady || typeof klinecharts === "undefined" || !klinecharts.registerIndicator) return;
+      oiIndReady = true;
+      registerOiBarInd("OI_FOREIGN", "外資", "oiForeign", "foreign", 0);
+      registerOiBarInd("OI_TRUST", "投信", "oiTrust", "trust", 0);
+      registerOiBarInd("OI_DEALER", "自營", "oiDealer", "dealer", 0);
+      registerOiBarInd("OI_RETAIL", "散戶", "oiRetail", "retail", 0);
+      registerOiBarInd("OI_TOP10", "前十淨", "oiTop10", "top10", 0);
+      registerOiBarInd("OI_TOP10SPEC", "特法", "oiTop10Spec", "top10Spec", 0);
+      registerOiBarInd("OI_PC", "P/C%", "oiPc", "pc", 1);
+      registerOiBarInd("OI_VIX", "VIX", "oiVix", "vix", 1);
+    }
+    function clearKOiPanes() {
+      if (!kchart || !kOiPanes.length) {
+        kOiPanes = [];
+        return;
+      }
+      kOiPanes.forEach(function (p) {
+        try { kchart.removeIndicator(p.id, p.name); } catch (e1) {
+          try { kchart.removeIndicator(p.id); } catch (e2) {}
+        }
+      });
+      kOiPanes = [];
+    }
+    function syncKOiPanes() {
+      if (!kchart) return;
+      const want = oiChartActive && chartMode === "k" && kInt === "d";
+      const names = oiTab === "big"
+        ? [
+          { name: "OI_TOP10", h: 64 },
+          { name: "OI_TOP10SPEC", h: 64 },
+          { name: "OI_PC", h: 56 },
+          { name: "OI_VIX", h: 56 },
+        ]
+        : [
+          { name: "OI_FOREIGN", h: 64 },
+          { name: "OI_TRUST", h: 64 },
+          { name: "OI_DEALER", h: 64 },
+          { name: "OI_RETAIL", h: 64 },
+        ];
+      if (!want) {
+        clearKOiPanes();
+        return;
+      }
+      ensureOiIndicators();
+      const cur = kOiPanes.map(function (p) { return p.name; }).join(",");
+      const next = names.map(function (x) { return x.name; }).join(",");
+      if (cur === next && kOiPanes.length === names.length) return;
+      clearKOiPanes();
+      names.forEach(function (x) {
+        try {
+          const id = kchart.createIndicator(x.name, false, { height: x.h });
+          if (id) kOiPanes.push({ id: id, name: x.name });
+        } catch (e) {}
+      });
+    }
+    function goOiDailyChart() {
+      oiChartActive = true;
+      chartMode = "k";
+      kInt = "d";
+      markChips();
+      draw(true);
     }
     function rangeBarStyles(data) {
       const k = data && data.current && data.current.kLineData;
@@ -3715,7 +3877,7 @@
     }
     function syncKRangePanes() {
       if (!kchart) return;
-      const want = chartMode === "k" && (kInt === "d" || kInt === "w" || kInt === "m");
+      const want = !oiChartActive && chartMode === "k" && (kInt === "d" || kInt === "w" || kInt === "m");
       if (want) {
         ensureRangeIndicators();
         if (!kRangePane) {
@@ -3792,6 +3954,7 @@
         kchart.applyNewData(data.length ? data : []);
         fitKVisible(data);
         kViewSig = sig;
+        syncKOiPanes();
         syncKRangePanes();
         syncKMtxPane();
         if (kchart.resize) {
@@ -3806,6 +3969,7 @@
         kchart.applyNewData(data.length ? data : []);
         fitKVisible(data);
         kViewSig = sig;
+        syncKOiPanes();
         syncKRangePanes();
         syncKMtxPane();
         if (kchart.resize) {
@@ -3832,6 +3996,7 @@
         });
       }
       kViewSig = sig;
+      syncKOiPanes();
       syncKRangePanes();
       syncKMtxPane();
     }
@@ -4147,7 +4312,7 @@
       const kg = $("kGroup");
       if (lg) lg.hidden = kOn;
       if (kg) kg.hidden = !kOn;
-      const showRangeMa = kOn && (kInt === "d" || kInt === "w" || kInt === "m");
+      const showRangeMa = !oiChartActive && kOn && (kInt === "d" || kInt === "w" || kInt === "m");
       const gear = $("rangeMaGear");
       const pop = $("rangeMaPop");
       if (gear) gear.hidden = !showRangeMa;
@@ -4212,6 +4377,7 @@
     const btnKMode = $("btnKMode");
     if (btnKMode) {
       btnKMode.onclick = () => {
+        oiChartActive = false;
         if (chartMode === "k") {
           chartMode = "line";
         } else {
@@ -4225,6 +4391,7 @@
 
     document.querySelectorAll(".chip[data-k]").forEach((btn) => {
       btn.onclick = () => {
+        oiChartActive = false;
         chartMode = "k";
         kInt = btn.getAttribute("data-k");
         markChips();
@@ -4233,6 +4400,7 @@
     });
     document.querySelectorAll(".chip[data-line]").forEach((btn) => {
       btn.onclick = () => {
+        oiChartActive = false;
         chartMode = "line";
         daySpan = Number(btn.getAttribute("data-line"));
         markChips();
@@ -4243,6 +4411,7 @@
     document.querySelectorAll(".oi-tab").forEach((btn) => {
       btn.onclick = () => {
         setOiTab(btn.getAttribute("data-oi"));
+        goOiDailyChart();
       };
     });
     (function bindOiNetSw() {
@@ -4256,6 +4425,7 @@
         oiNetFlow = !oiNetFlow;
         try { localStorage.setItem("txfOiNetFlow", oiNetFlow ? "1" : "0"); } catch (err) {}
         renderOi();
+        if (oiChartActive && chartMode === "k" && kInt === "d") draw(true);
       };
     })();
     (function bindOiSimpleSw() {
