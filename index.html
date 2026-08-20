@@ -2198,8 +2198,9 @@
       return Object.keys(by).sort((x, y) => x - y).map((k) => by[k]);
     }
 
-    // 盤別：日 08:45–13:45、夜 15:00–次日 05:00；休市／周末不當同盤
+    // 盤別：日 08:45–13:45、夜 14:58–次日 05:00；休市／周末不當同盤
     // 夜盤：周一～周五晚（周五夜→周六 05:00）；周一凌晨與周日無夜盤
+    // 注意：必須與 marketOpen()/liveSess() 的 14:58 對齊，否則 14:58–14:59 會變成 closed 不更新五檔
     function sessKindAt(ts) {
       const d = new Date(ts);
       const dow = d.getDay(); // 0=日 … 6=六
@@ -2214,8 +2215,8 @@
         if (dow >= 1 && dow <= 5) return "day";
         return "closed";
       }
-      // 夜盤開盤後：周一～五 15:00 起
-      if (hm >= 15 * 60) {
+      // 夜盤開盤後：周一～五 14:58 起（與 marketOpen 一致）
+      if (hm >= 14 * 60 + 58) {
         if (dow >= 1 && dow <= 5) return "night";
         return "closed";
       }
@@ -3887,9 +3888,13 @@
       if (!wtx) return;
       const q0 = slimYahoo(wtx);
       const nowTs = Date.now();
-      const tradeSk = sessKindAt(nowTs); // day / night / closed（含周末）
-      const bookSk = bookSessNow(); // 08:30 起可更新日盤五檔
+      let tradeSk = sessKindAt(nowTs); // day / night / closed（含周末）
+      // 奇摩仍給 orderbook 時（常標 close），若本地時段已是夜盤顯示，強制走夜盤更新五檔
       const freezeSk = liveSess();
+      const hasBook = Array.isArray(wtx.orderbook) && wtx.orderbook.length > 0;
+      if (tradeSk === "closed" && freezeSk === "night" && hasBook) tradeSk = "night";
+      if (tradeSk === "closed" && freezeSk === "day" && hasBook) tradeSk = "day";
+      const bookSk = bookSessNow(); // 08:30 起可更新日盤五檔
       snap = Object.assign({}, snap || {}, {
         fetchedAt: new Date().toLocaleString("zh-TW", { hour12: false }),
         source: "yahoo via wtx.19850926.xyz",
@@ -3969,12 +3974,23 @@
         patchQuoteOHLC(bookSk, px);
         saveLastBook(bookSk, snap[bookSk]);
       } else {
-        // 休市／周末：只動凍結盤最新價；昨收／漲跌鎖定（奇摩收盤後 previousClose 會滾成夜盤基準）
+        // 休市／周末：仍更新凍結盤最新價＋五檔（奇摩收盤後 orderbook 還會動；舊邏輯不寫五檔會卡死）
         liveK = freezeSk;
         const prev = Object.assign({}, (snap && snap[freezeSk]) || {});
         if (q0.CLastPrice != null && q0.CLastPrice !== "") prev.CLastPrice = q0.CLastPrice;
+        if (q0.CTime != null && q0.CTime !== "") prev.CTime = q0.CTime;
+        if (q0.CTotalVolume != null && q0.CTotalVolume !== "") prev.CTotalVolume = q0.CTotalVolume;
+        if (q0.inMarket != null && q0.inMarket !== "") prev.inMarket = q0.inMarket;
+        if (q0.outMarket != null && q0.outMarket !== "") prev.outMarket = q0.outMarket;
+        for (let i = 1; i <= 5; i++) {
+          ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach((k) => {
+            const key = k + i;
+            if (q0[key] != null && q0[key] !== "") prev[key] = q0[key];
+          });
+        }
         healRefPrice(prev);
         snap[freezeSk] = prev;
+        saveLastBook(freezeSk, snap[freezeSk]);
       }
       render();
     }
@@ -4042,19 +4058,41 @@
     }
 
     async function load() {
-      const [s, hn, hd, liveRows] = await Promise.all([
-        gh("data/snapshot.json").then((r) => r.json()),
-        gh("data/history-night.json").then((r) => (r.ok ? r.json() : [])).catch(() => []),
-        gh("data/history-day.json").then((r) => (r.ok ? r.json() : [])).catch(() => []),
-        fetch(LIVE)
-          .then((r) => r.json())
-          .catch(() => null),
-      ]);
+      // 分拆載入：任一來源失敗不擋整頁；Worker 成功就能更新五檔
+      let s = null;
+      let hn = [];
+      let hd = [];
+      let liveRows = null;
+      try {
+        const r = await gh("data/snapshot.json");
+        if (r && r.ok) s = await r.json();
+      } catch (e) {}
+      try {
+        const r = await gh("data/history-night.json");
+        if (r && r.ok) hn = await r.json();
+      } catch (e) {
+        hn = [];
+      }
+      try {
+        const r = await gh("data/history-day.json");
+        if (r && r.ok) hd = await r.json();
+      } catch (e) {
+        hd = [];
+      }
+      try {
+        liveRows = await fetch(LIVE).then((r) => r.json());
+      } catch (e) {
+        liveRows = null;
+      }
       if (!live) {
-        snap = applyStoredBooks(s);
-        hist.night = hn;
-        hist.day = hd;
-        render();
+        if (s) {
+          snap = applyStoredBooks(s);
+          hist.night = Array.isArray(hn) ? hn : [];
+          hist.day = Array.isArray(hd) ? hd : [];
+          render();
+        } else if ($("stamp") && $("stamp").textContent.indexOf("載入") >= 0) {
+          $("stamp").textContent = "讀取快照中…";
+        }
       } else if (s) {
         // live 已起：只回填另一盤五檔，不蓋當盤；污染則用本機 lastBook
         const sk = liveSess();
@@ -4067,7 +4105,7 @@
         });
         if (fixed[other]) snap[other] = fixed[other];
       }
-      // 開頁必打 Worker：snapshot 可能停在中午；收盤後也要最新收
+      // 開頁必打 Worker：snapshot 可能停在中午；收盤後也要最新收／五檔
       if (Array.isArray(liveRows) && liveRows.length) {
         applyLive(liveRows);
         if (!marketOpen()) {
@@ -4076,6 +4114,12 @@
             $("live").className = "live";
             $("live").textContent = "快照";
           }
+        }
+      } else if (!snap) {
+        if ($("stamp")) $("stamp").textContent = "尚無資料（Worker/快照皆失敗）";
+        if ($("live")) {
+          $("live").className = "live";
+          $("live").textContent = "未連線";
         }
       }
     }
