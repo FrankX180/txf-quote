@@ -581,7 +581,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.86</div>
+      <div class="ver foot-right">1.87</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1325,8 +1325,10 @@
     function oiHistView(rows, panel) {
       const all = rows || [];
       const open = !!oiHistOpen[panel];
+      const maxShow = 40;
       const canMore = all.length > 10;
-      if (open || !canMore) return { rows: all, open: open, canMore: canMore };
+      if (open) return { rows: all.slice(0, maxShow), open: true, canMore: canMore };
+      if (!canMore) return { rows: all, open: false, canMore: false };
       return { rows: all.slice(0, 10), open: false, canMore: true };
     }
     function oiPaintCumLines() {

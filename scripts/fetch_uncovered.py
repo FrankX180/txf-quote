@@ -37,7 +37,8 @@ OA_INST = (
 OA_LARGE = "https://openapi.taifex.com.tw/v1/OpenInterestOfLargeTradersFutures"
 WEARN = "https://stock.wearn.com/taifexphoto.asp"
 CMONEY = "https://www.cmoney.tw/MobileService/ashx/GetDtnoData.ashx"
-HIST_N = 20
+HIST_N = 500  # 副圖／表歷史深度（PG 可回填）
+TAIFEX_WIN = 20  # 官網下載穩定窗（更長常空頁）
 MTX_DIV = 4.0
 TMF_DIV = 20.0
 TMF_JSON = ROOT / "data" / "tmf_retail.json"
@@ -169,7 +170,7 @@ def parse_taifex_inst_csv(text: str):
     return out
 
 
-def fetch_taifex_inst_hist(n: int = HIST_N):
+def fetch_taifex_inst_hist(n: int = TAIFEX_WIN):
     """抓近 n 個日曆窗（約 2n 天）期交所三大法人未平倉，含今日若已上架。"""
     end = datetime.now(TZ).date()
     start = end - timedelta(days=max(n * 2 + 7, 21))
@@ -186,7 +187,7 @@ def fetch_taifex_inst_hist(n: int = HIST_N):
     return [(d, m[d]) for d in dates]
 
 
-def fetch_taifex_pc_map(n: int = HIST_N):
+def fetch_taifex_pc_map(n: int = TAIFEX_WIN):
     """官網 Put/Call：用未平倉比率 PutCallOIRatio% 當 pc。長區間下載常空，改短窗。"""
     end = datetime.now(TZ).date()
     # 官網長區間常回空頁；28 天內穩定，35 天起常空
@@ -237,7 +238,7 @@ def fetch_taifex_pc_map(n: int = HIST_N):
     return out
 
 
-def fetch_taifex_large_hist(n: int = HIST_N):
+def fetch_taifex_large_hist(n: int = TAIFEX_WIN):
     """官網期貨大額：TX 近月 Type0=前十大、Type1=特定法人；淨額=買-賣。"""
     end = datetime.now(TZ).date()
     start = end - timedelta(days=max(n * 2 + 7, 21))
@@ -390,7 +391,7 @@ def _taifex_num_cell(s):
         return None
 
 
-def fetch_taifex_tx_close_map(n: int = HIST_N):
+def fetch_taifex_tx_close_map(n: int = TAIFEX_WIN):
     """官網 futDataDown：一次抓區間 TX 一般盤收盤／結算價。
 
     策略：取當日「一般」時段、非週選中，**最近到期月份**（月份代碼最小）。
@@ -509,6 +510,205 @@ def load_vix_map():
         except Exception as e:
             print("WARN vix csv", e)
     return m
+
+
+def _pg_connect():
+    import os
+
+    import psycopg2
+
+    pw = os.environ.get("PG_PASSWORD") or os.environ.get("PGPASSWORD")
+    if not pw:
+        return None
+    return psycopg2.connect(
+        host=os.environ.get("PGHOST", "127.0.0.1"),
+        port=int(os.environ.get("PGPORT", "5432")),
+        dbname=os.environ.get("PGDATABASE", "stock_research"),
+        user=os.environ.get("PGUSER", "postgres"),
+        password=pw,
+    )
+
+
+def load_pg_chip_maps(limit: int = HIST_N):
+    """本機 PG 回填：法人未平倉／大額前十／P/C%／收盤參考。
+
+    - 法人：futures_institutional oi_long−oi_short；TX+MTX/4+TMF/20
+    - 大額：large_trader_futures TX 近月（最小 YYYYMM）type0/1 top10 買−賣
+    - PC：options_pcr.pcr_volume * 100（對齊官網量比%）
+    - 收盤：options_pcr.taiex_index（僅補洞，非近月期貨價）
+    """
+    inst_map, large_map, pc_map, close_map = {}, {}, {}, {}
+    conn = None
+    try:
+        conn = _pg_connect()
+        if not conn:
+            print("WARN pg chips no password")
+            return inst_map, large_map, pc_map, close_map
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT trade_date::text, product, investor_type,
+                   COALESCE(oi_long,0) - COALESCE(oi_short,0)
+            FROM futures_institutional
+            WHERE product IN ('TX','MTX','TMF')
+              AND oi_long IS NOT NULL
+            ORDER BY trade_date DESC
+            """
+        )
+        bags = {}
+        who_map = {
+            "外資及陸資": "foreign",
+            "外資": "foreign",
+            "投信": "trust",
+            "自營商": "dealer",
+        }
+        div_map = {"TX": 1.0, "MTX": MTX_DIV, "TMF": TMF_DIV}
+        for d0, prod, inv, net in cur.fetchall():
+            d = ymd8(d0)
+            if not d:
+                continue
+            key = who_map.get(str(inv or "").strip())
+            if not key:
+                continue
+            slot = bags.setdefault(d, {"foreign": 0.0, "trust": 0.0, "dealer": 0.0, "_hit": False})
+            slot[key] = float(slot.get(key) or 0) + float(net or 0) / float(div_map.get(prod, 1.0))
+            slot["_hit"] = True
+        for d, slot in bags.items():
+            if not slot.get("_hit"):
+                continue
+            f = round(float(slot["foreign"]), 2)
+            t = round(float(slot["trust"]), 2)
+            de = round(float(slot["dealer"]), 2)
+            inst_map[d] = {
+                "foreign": f,
+                "trust": t,
+                "dealer": de,
+                "retail": retail_from_inst(f, t, de),
+            }
+        # 大額：只取 TX 近月
+        cur.execute(
+            """
+            SELECT trade_date, expiry, trader_type, top10_buy, top10_sell,
+                   top5_buy, top5_sell
+            FROM large_trader_futures
+            WHERE product = 'TX'
+              AND expiry ~ '^[0-9]{6}$'
+              AND expiry NOT IN ('666666', '999999')
+              AND trader_type IN (0, 1)
+            ORDER BY trade_date DESC, expiry ASC
+            """
+        )
+        by_day = {}
+        for d0, exp, typ, t10b, t10s, t5b, t5s in cur.fetchall():
+            d = ymd8(d0)
+            if not d:
+                continue
+            day = by_day.setdefault(d, {"near": None, "0": None, "1": None})
+            if day["near"] is None:
+                day["near"] = str(exp)
+            if str(exp) != day["near"]:
+                continue
+            day[str(int(typ))] = {
+                "top10": float(t10b or 0) - float(t10s or 0),
+                "top5": float(t5b or 0) - float(t5s or 0),
+                "top10Buy": float(t10b or 0),
+                "top10Sell": float(t10s or 0),
+                "top5Buy": float(t5b or 0),
+                "top5Sell": float(t5s or 0),
+            }
+        for d, day in by_day.items():
+            t0 = day.get("0") or {}
+            t1 = day.get("1") or {}
+            if not t0 and not t1:
+                continue
+            large_map[d] = {
+                "top5": t0.get("top5"),
+                "top10": t0.get("top10"),
+                "top5Spec": (t1 or t0).get("top5"),
+                "top10Spec": t1.get("top10"),
+                "top": [],
+                "near": day.get("near"),
+            }
+        cur.execute(
+            """
+            SELECT trade_date::text, pcr_volume, taiex_index
+            FROM options_pcr
+            WHERE pcr_volume IS NOT NULL OR taiex_index IS NOT NULL
+            ORDER BY trade_date DESC
+            """
+        )
+        for d0, vol, idx in cur.fetchall():
+            d = ymd8(d0)
+            if not d:
+                continue
+            if vol is not None:
+                pc_map[d] = round(float(vol) * 100.0, 2)
+            if idx is not None:
+                close_map[d] = float(idx)
+        # 只留最近 limit 個交易日（以法人日期為主；不足再併大額／PC）
+        dates = sorted(set(inst_map) | set(large_map) | set(pc_map), reverse=True)[: max(int(limit), 1)]
+        keep = set(dates)
+        inst_map = {d: inst_map[d] for d in dates if d in inst_map}
+        large_map = {d: large_map[d] for d in keep if d in large_map}
+        pc_map = {d: pc_map[d] for d in keep if d in pc_map}
+        close_map = {d: close_map[d] for d in keep if d in close_map}
+        print(
+            "OK pg chips",
+            "inst",
+            len(inst_map),
+            "large",
+            len(large_map),
+            "pc",
+            len(pc_map),
+        )
+    except Exception as e:
+        print("WARN pg chips", e)
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    return inst_map, large_map, pc_map, close_map
+
+
+def extend_history_with_pg(history, pg_inst, pg_large, pg_pc, pg_close, n=HIST_N):
+    """官網列優先；缺欄／缺日用 PG 補到 n 根。"""
+    by = {}
+    for rec in history or []:
+        d = ymd8(rec.get("date"))
+        if d:
+            by[d] = dict(rec)
+            by[d]["date"] = d
+    all_dates = set(by) | set(pg_inst or {}) | set(pg_large or {}) | set(pg_pc or {})
+    out = []
+    for d in sorted(all_dates, reverse=True):
+        base = by.get(d) or {"date": d}
+        pi = (pg_inst or {}).get(d) or {}
+        pl = (pg_large or {}).get(d) or {}
+        for k in ("foreign", "trust", "dealer", "retail"):
+            if base.get(k) is None and pi.get(k) is not None:
+                base[k] = pi[k]
+        for k in ("top5", "top10", "top5Spec", "top10Spec"):
+            if base.get(k) is None and pl.get(k) is not None:
+                base[k] = pl[k]
+        if base.get("pc") is None and (pg_pc or {}).get(d) is not None:
+            base["pc"] = pg_pc[d]
+        if base.get("close") is None and (pg_close or {}).get(d) is not None:
+            base["close"] = pg_close[d]
+        # 至少要有法人或大額或 PC 才進表
+        if (
+            base.get("foreign") is None
+            and base.get("trust") is None
+            and base.get("dealer") is None
+            and base.get("top10") is None
+            and base.get("pc") is None
+        ):
+            continue
+        out.append(base)
+        if len(out) >= n:
+            break
+    return out
 
 
 def extract(html: str, marker: str):
@@ -717,7 +917,7 @@ def fetch_openapi_tx():
     return inst, top, date
 
 
-def fetch_wearn_hist(n: int = HIST_N):
+def fetch_wearn_hist(n: int = TAIFEX_WIN):
     html = get_text(WEARN, 30)
     text = re.sub(r"<script[\s\S]*?</script>", "", html, flags=re.I)
     text = re.sub(r"<style[\s\S]*?</style>", "", text, flags=re.I)
@@ -990,7 +1190,7 @@ def main():
     sources = []
     taifex_rows = []
     try:
-        taifex_rows = fetch_taifex_inst_hist(HIST_N)
+        taifex_rows = fetch_taifex_inst_hist(TAIFEX_WIN)
     except Exception as e:
         print("WARN taifex down", e)
     if taifex_rows:
@@ -999,14 +1199,14 @@ def main():
     # 大額／PC／VIX：官網主源（不再等 CMoney／玩股）
     large_map = {}
     try:
-        large_map = fetch_taifex_large_hist(HIST_N)
+        large_map = fetch_taifex_large_hist(TAIFEX_WIN)
         if large_map:
             sources.append("taifex_large")
     except Exception as e:
         print("WARN taifex large", e)
     pc_map = {}
     try:
-        pc_map = fetch_taifex_pc_map(HIST_N)
+        pc_map = fetch_taifex_pc_map(TAIFEX_WIN)
         if pc_map:
             sources.append("taifex_pc")
     except Exception as e:
@@ -1020,7 +1220,7 @@ def main():
         print("WARN taifex vix", e)
     close_map = {}
     try:
-        close_map = fetch_taifex_tx_close_map(HIST_N)
+        close_map = fetch_taifex_tx_close_map(TAIFEX_WIN)
         if close_map:
             sources.append("taifex_close")
     except Exception as e:
@@ -1038,7 +1238,7 @@ def main():
     wearn = []
     if need_wearn:
         try:
-            wearn = fetch_wearn_hist(HIST_N)
+            wearn = fetch_wearn_hist(TAIFEX_WIN)
         except Exception as e:
             print("WARN wearn", e)
         if wearn:
@@ -1133,6 +1333,51 @@ def main():
             )
 
     # 保險：任何來源組完後都再強制一次等號
+    for rec in history:
+        rec["retail"] = retail_from_inst(rec.get("foreign"), rec.get("trust"), rec.get("dealer"))
+
+    # PG 回填：加長歷史／補缺欄（官網值優先）
+    pg_inst, pg_large, pg_pc, pg_close = {}, {}, {}, {}
+    try:
+        pg_inst, pg_large, pg_pc, pg_close = load_pg_chip_maps(HIST_N)
+        if pg_inst or pg_large or pg_pc:
+            sources.append("pg")
+        for d, slot in (pg_large or {}).items():
+            if d not in large_map:
+                large_map[d] = slot
+            else:
+                for k in ("top5", "top10", "top5Spec", "top10Spec"):
+                    if large_map[d].get(k) is None and slot.get(k) is not None:
+                        large_map[d][k] = slot[k]
+        for d, v in (pg_pc or {}).items():
+            pc_map.setdefault(d, v)
+        for d, v in (pg_close or {}).items():
+            close_map.setdefault(d, v)
+        # 已組出的 history 列若缺大額／PC／收盤，先就地圖補一輪
+        for rec in history:
+            d = ymd8(rec.get("date"))
+            lg = large_map.get(d) or {}
+            for k in ("top5", "top10", "top5Spec", "top10Spec"):
+                if rec.get(k) is None and lg.get(k) is not None:
+                    rec[k] = lg[k]
+            if rec.get("pc") is None and d in pc_map:
+                rec["pc"] = pc_map[d]
+            if rec.get("close") is None and d in close_map:
+                rec["close"] = close_map[d]
+        history = extend_history_with_pg(history, pg_inst, large_map, pc_map, close_map, HIST_N)
+        # 官網法人沒進 sources 時，玩股／CMoney 備援水位可能與 OI 不一致 → PG oi 覆蓋
+        if "taifex" not in sources and pg_inst:
+            for rec in history:
+                d = ymd8(rec.get("date"))
+                pi = pg_inst.get(d)
+                if not pi:
+                    continue
+                for k in ("foreign", "trust", "dealer", "retail"):
+                    if pi.get(k) is not None:
+                        rec[k] = pi[k]
+    except Exception as e:
+        print("WARN pg extend", e)
+
     for rec in history:
         rec["retail"] = retail_from_inst(rec.get("foreign"), rec.get("trust"), rec.get("dealer"))
 
