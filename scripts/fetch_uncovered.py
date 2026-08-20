@@ -1261,6 +1261,11 @@ def main():
         night = fetch_latest_night(day0, history[0] if history else None)
     except Exception as e:
         print("WARN night", e)
+    # 完整交易日＝昨夜 + 今日日盤；日盤籌碼已公布後，同日(夜)暫行列要拿掉
+    day0_8 = ymd8(day0)
+    if night and day0_8 and ymd8(night.get("date")) == day0_8:
+        print("DROP same-day night", night.get("date"), "(day chips ready)")
+        night = None
     if night:
         sources.append("night_ah")
     payload = {

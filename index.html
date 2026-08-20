@@ -1520,7 +1520,11 @@
         oiNote = "單位：大台等值口（大台＋小台/4＋微台/20）；數字為淨未平倉（多−空）；點表頭可在收盤右欄畫正負柱";
       }
       const night = uncover.night;
-      if (night && night.date) {
+      const day0 = String((hist[0] && hist[0].date) || uncover.date || "").replace(/\D/g, "");
+      const nightDate = night && night.date ? String(night.date).replace(/\D/g, "") : "";
+      // 日盤籌碼已是完整交易日（含昨夜）後，不再疊同日(夜)暫行列
+      const showNight = !!(night && nightDate && (!day0 || nightDate !== day0));
+      if (showNight) {
         const base = hist[0] || {};
         const hasDelta = night.foreignDelta != null;
         const dF = hasDelta ? Number(night.foreignDelta) : Number(night.foreign || 0);
@@ -1582,7 +1586,7 @@
           vix: vix,
         };
       });
-      if (night && night.date) {
+      if (showNight) {
         const hasDelta = night.foreignDelta != null;
         const nRetailDelta = hasDelta
           ? night.retailDelta
