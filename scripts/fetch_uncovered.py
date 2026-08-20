@@ -1,7 +1,7 @@
 # 法人／大額未平倉 → data/uncovered.json
 # 主路：期交所官網下載 futContractsDateDown（TX+MTX+TMF 大台等值）
-# PC／VIX／大額：期交所官網（pcRatioDown／VIX 月檔／largeTraderFutDown）
-# 備援：OpenAPI／Yahoo／玩股收盤；CMoney 僅在官網法人失敗時備援
+# PC／VIX／大額／收盤：期交所官網（pcRatioDown／VIX 月檔／largeTraderFutDown／futDataDown）
+# 備援：OpenAPI／Yahoo／玩股收盤補洞；CMoney 僅在官網法人失敗時備援
 # 散戶一律：retail = -(外資+投信+自營)（大台等值）
 # 口數一律大台等值：TX + MTX/4 + TMF/20（點值 200/50/10）
 import csv
@@ -67,6 +67,8 @@ TAIFEX_LARGE_VIEW = "https://www.taifex.com.tw/cht/3/largeTraderFutView"
 TAIFEX_VIX_MONTH = (
     "https://www.taifex.com.tw/file/taifex/Dailydownload/vix/log2data/{yyyymm}new.txt"
 )
+TAIFEX_FUT_DOWN = "https://www.taifex.com.tw/cht/3/futDataDown"
+TAIFEX_FUT_VIEW = "https://www.taifex.com.tw/cht/3/futDailyMarketView"
 
 
 def get_text(url: str, timeout: int = 30) -> str:
@@ -385,6 +387,71 @@ def fetch_taifex_vix_map(months_back: int = 3):
             # 優先收盤（第一個有效數），沒有才用最後
             out[parts[0]] = nums[0]
     return out
+
+
+def _taifex_num_cell(s):
+    s = str(s or "").strip().replace(",", "")
+    if not s or s in ("-", "—"):
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def fetch_taifex_tx_close_map(n: int = HIST_N):
+    """官網 futDataDown：一次抓區間 TX 一般盤收盤／結算價。
+
+    策略：取當日「一般」時段、非週選月份中，成交量最大的近月契約；
+    收盤價優先，結算價為 0／空則退回收盤價。約 1 個月區間一次即可覆蓋 20 交易日。
+    """
+    end = datetime.now(TZ).date()
+    # 官網區間上限約 31 天；超過常回 HTML 空頁。30 日曆天足夠覆蓋 20 交易日。
+    start = end - timedelta(days=30)
+    text = taifex_post_text(
+        TAIFEX_FUT_DOWN,
+        {
+            "down_type": "1",
+            "commodity_id": "TX",
+            "queryStartDate": start.strftime("%Y/%m/%d"),
+            "queryEndDate": end.strftime("%Y/%m/%d"),
+        },
+        TAIFEX_FUT_VIEW,
+    )
+    head = (text or "")[:80]
+    if not text or "交易日期" not in head:
+        return {}
+    best = {}  # date -> (volume, close, settle)
+    for row in csv.reader(io.StringIO(text.strip())):
+        if len(row) < 12:
+            continue
+        if str(row[0]).strip() == "交易日期":
+            continue
+        if str(row[1]).strip() != "TX":
+            continue
+        mon = str(row[2]).strip()
+        # 週選合約月份含 /
+        if "/" in mon or not mon.isdigit():
+            continue
+        sess = str(row[17]).strip() if len(row) > 17 else ""
+        if "盤後" in sess:
+            continue
+        d = str(row[0]).replace("/", "").replace("-", "")
+        if len(d) != 8 or not d.isdigit():
+            continue
+        close = _taifex_num_cell(row[6])
+        settle = _taifex_num_cell(row[10])
+        vol = _taifex_num_cell(row[9]) or 0.0
+        # 結算價 0 在轉倉／特殊日常見，改用收盤；否則優先結算價（官方日結）
+        px = settle if settle not in (None, 0.0) else close
+        if px is None:
+            continue
+        # 若結算有效用結算；否則收盤
+        use = settle if settle not in (None, 0.0) else close
+        prev = best.get(d)
+        if prev is None or vol >= prev[0]:
+            best[d] = (vol, use)
+    return {d: v[1] for d, v in best.items()}
 
 
 def ymd8(s):
@@ -1000,16 +1067,23 @@ def main():
             sources.append("taifex_vix")
     except Exception as e:
         print("WARN taifex vix", e)
+    close_map = {}
+    try:
+        close_map = fetch_taifex_tx_close_map(HIST_N)
+        if close_map:
+            sources.append("taifex_close")
+    except Exception as e:
+        print("WARN taifex close", e)
 
-    # 備援：玩股收盤價；OpenAPI／奇摩大額僅在官網缺日時補
+    # 備援：玩股只補收盤缺洞／舊大額；OpenAPI／奇摩大額僅在官網缺日時補
     wearn = []
     try:
         wearn = fetch_wearn_hist(HIST_N)
     except Exception as e:
         print("WARN wearn", e)
-    if wearn:
-        sources.append("wearn")
     wearn_by = {w["date"]: w for w in wearn}
+    if wearn and any(d not in close_map for d in wearn_by):
+        sources.append("wearn")
 
     oa_inst, oa_top, oa_date = [], [], ""
     try:
@@ -1051,7 +1125,7 @@ def main():
                     "top10": lg.get("top10", w.get("top10")),
                     "top5Spec": lg.get("top5Spec", w.get("top5Spec")),
                     "top10Spec": lg.get("top10Spec", w.get("top10Spec")),
-                    "close": w.get("close"),
+                    "close": close_map.get(d, w.get("close")),
                     "pc": pc_map.get(d),
                 }
             )
@@ -1086,7 +1160,7 @@ def main():
                     "top10": lg.get("top10", w["top10"]),
                     "top5Spec": lg.get("top5Spec", w["top5Spec"]),
                     "top10Spec": lg.get("top10Spec", w["top10Spec"]),
-                    "close": w["close"],
+                    "close": close_map.get(d, w["close"]),
                     "pc": pc_map.get(d, c.get("pc", cm_pc.get(d))),
                 }
             )
@@ -1227,7 +1301,7 @@ def main():
         "date": ymd_slash(date) if len(date) == 8 else date,
         "source": "+".join(sources),
         "unit": "tx_eq",
-        "unitNote": "大台等值=TX+MTX/4+TMF/20；散戶=−(F+T+D)；PC/VIX/大額=期交所官網",
+        "unitNote": "大台等值=TX+MTX/4+TMF/20；散戶=−(F+T+D)；PC/VIX/大額/收盤=期交所官網",
         "inst": inst,
         "top": top,
         "today": today,
