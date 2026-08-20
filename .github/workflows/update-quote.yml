@@ -14,6 +14,10 @@ on:
       - "scripts/when.py"
       - "scripts/fetch_imb.py"
       - ".github/workflows/update-quote.yml"
+# 避免排程／push 重疊互搶 data/*.json
+concurrency:
+  group: update-quote
+  cancel-in-progress: true
 permissions:
   contents: write
 jobs:
@@ -45,9 +49,28 @@ jobs:
         continue-on-error: true
       - name: Commit snapshot
         run: |
+          set -e
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/snapshot.json data/history-night.json data/history-day.json data/kline-minute.json data/uncovered.json data/tmf_retail.json data/kline-daily.json data/imb-*.json data/imb-latest.json
           git diff --cached --quiet && echo "no change" && exit 0
           git commit -m "行情快照 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          git push
+          # 與本機／並行 push 搶寫時自動 rebase 重試
+          for i in 1 2 3 4 5 6; do
+            if git push; then
+              echo "push ok attempt $i"
+              exit 0
+            fi
+            echo "push conflict, rebase retry $i"
+            git pull --rebase origin "${GITHUB_REF_NAME}" || git pull --rebase origin HEAD || true
+            # rebase 時 ours=遠端、theirs=本次 job；保留本次抓到的 data
+            if [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; then
+              git checkout --theirs -- data/uncovered.json data/tmf_retail.json data/snapshot.json data/kline-minute.json data/kline-daily.json data/history-day.json data/history-night.json data/imb-latest.json 2>/dev/null || true
+              git checkout --theirs -- data/imb-*.json 2>/dev/null || true
+              git add data || true
+              GIT_EDITOR=true git rebase --continue || true
+            fi
+            sleep $((i * 2))
+          done
+          echo "push failed after retries" >&2
+          exit 1

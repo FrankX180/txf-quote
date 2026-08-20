@@ -923,7 +923,11 @@ def night_close_from_snap():
 
 
 def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
-    """抓比日盤 history 更新的最新夜盤列；水位＝日盤 OI＋夜盤成交淨口。沒有則 None。"""
+    """抓日盤之後的最新夜盤列；水位＝日盤 OI＋夜盤成交淨口。沒有則 None。
+
+    夜盤與日盤可同曆日（例 8/20 日盤後的 8/20 夜盤），故用 d8 < day8 才跳過，
+    同日夜盤要保留。
+    """
     day8 = ymd8(day_hist_date)
     now = datetime.now(TZ)
     old = {}
@@ -938,7 +942,8 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
         if d.weekday() == 6:
             continue
         d8 = d.strftime("%Y%m%d")
-        if day8 and d8 <= day8:
+        # 只跳過「早於」日盤日的夜盤；同日夜盤（日盤收後）要抓
+        if day8 and d8 < day8:
             continue
         slash = d.strftime("%Y/%m/%d")
         try:
@@ -962,6 +967,7 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
             "unitNote": "夜盤列＝日盤淨未平倉＋當夜三大法人成交淨口（大台等值估水位）",
         }
         if base_row:
+            # 同日夜盤：加在該日日盤水位上；若 night 日 > day8，也仍以最新日盤列為底
             row["foreign"] = round(float(base_row.get("foreign") or 0) + trade["foreign"], 2)
             row["trust"] = round(float(base_row.get("trust") or 0) + trade["trust"], 2)
             row["dealer"] = round(float(base_row.get("dealer") or 0) + trade["dealer"], 2)
@@ -973,7 +979,7 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
             row["retail"] = trade["retail"]
         return row
     od = ymd8(old.get("date"))
-    if od and (not day8 or od > day8) and old.get("foreign") is not None:
+    if od and (not day8 or od >= day8) and old.get("foreign") is not None:
         row = dict(old)
         if close is not None:
             row["close"] = close
