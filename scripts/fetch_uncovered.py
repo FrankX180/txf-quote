@@ -1,6 +1,7 @@
 # 法人／大額未平倉 → data/uncovered.json
 # 主路：期交所官網下載 futContractsDateDown（TX+MTX+TMF 大台等值）
-# 備援：OpenAPI／Yahoo／玩股大額；PC／VIX 仍可吃 CMoney
+# PC／VIX／大額：期交所官網（pcRatioDown／VIX 月檔／largeTraderFutDown）
+# 備援：OpenAPI／Yahoo／玩股收盤；CMoney 僅在官網法人失敗時備援
 # 散戶一律：retail = -(外資+投信+自營)（大台等值）
 # 口數一律大台等值：TX + MTX/4 + TMF/20（點值 200/50/10）
 import csv
@@ -59,6 +60,13 @@ TAIFEX_WHO = {
     "投信": "trust",
     "自營商": "dealer",
 }
+TAIFEX_PC_DOWN = "https://www.taifex.com.tw/cht/3/pcRatioDown"
+TAIFEX_PC_VIEW = "https://www.taifex.com.tw/cht/3/pcRatio"
+TAIFEX_LARGE_DOWN = "https://www.taifex.com.tw/cht/3/largeTraderFutDown"
+TAIFEX_LARGE_VIEW = "https://www.taifex.com.tw/cht/3/largeTraderFutView"
+TAIFEX_VIX_MONTH = (
+    "https://www.taifex.com.tw/file/taifex/Dailydownload/vix/log2data/{yyyymm}new.txt"
+)
 
 
 def get_text(url: str, timeout: int = 30) -> str:
@@ -183,6 +191,200 @@ def fetch_taifex_inst_hist(n: int = HIST_N):
     m = parse_taifex_inst_csv(text)
     dates = sorted(m.keys(), reverse=True)[:n]
     return [(d, m[d]) for d in dates]
+
+
+def fetch_taifex_pc_map(n: int = HIST_N):
+    """官網 Put/Call：用未平倉比率 PutCallOIRatio% 當 pc。長區間下載常空，改短窗。"""
+    end = datetime.now(TZ).date()
+    # 官網長區間常回空頁；28 天內穩定，35 天起常空
+    start = end - timedelta(days=28)
+    text = taifex_post_text(
+        TAIFEX_PC_DOWN,
+        {
+            "queryStartDate": start.strftime("%Y/%m/%d"),
+            "queryEndDate": end.strftime("%Y/%m/%d"),
+        },
+        TAIFEX_PC_VIEW,
+    )
+    out = {}
+    head = (text or "")[:120].lstrip("\ufeff")
+    if not text or "日期" not in head:
+        # 備援 OpenAPI（常略慢一日）
+        try:
+            raw = get_json("https://openapi.taifex.com.tw/v1/PutCallRatio", 40)
+            if isinstance(raw, dict):
+                raw = raw.get("data") or raw.get("Data") or []
+            for r in raw or []:
+                d = _ymd8(r.get("Date"))
+                v = num(r.get("PutCallOIRatio%"))
+                if d and v is not None:
+                    out[d] = float(v)
+        except Exception as e:
+            print("WARN pc openapi", e)
+        return out
+    for row in csv.reader(io.StringIO(text.strip())):
+        if not row:
+            continue
+        c0 = str(row[0]).strip().lstrip("\ufeff")
+        if c0 == "日期":
+            continue
+        d = c0.replace("/", "").replace("-", "")
+        if len(d) != 8 or not d.isdigit():
+            continue
+        try:
+            # 欄位：日期,Put量,Call量,量比,PutOI,CallOI,OI比（可能多一個空欄）
+            if len(row) >= 7 and str(row[6]).strip() != "":
+                out[d] = float(str(row[6]).replace(",", ""))
+            else:
+                vals = [c for c in row[1:] if str(c).strip() != ""]
+                if vals:
+                    out[d] = float(str(vals[-1]).replace(",", ""))
+        except ValueError:
+            continue
+    return out
+
+
+def fetch_taifex_large_hist(n: int = HIST_N):
+    """官網期貨大額：TX 近月 Type0=前十大、Type1=特定法人；淨額=買-賣。"""
+    end = datetime.now(TZ).date()
+    start = end - timedelta(days=max(n * 2 + 7, 21))
+    text = taifex_post_text(
+        TAIFEX_LARGE_DOWN,
+        {
+            "queryStartDate": start.strftime("%Y/%m/%d"),
+            "queryEndDate": end.strftime("%Y/%m/%d"),
+        },
+        TAIFEX_LARGE_VIEW,
+    )
+    if not text or "日期" not in text[:120]:
+        return {}
+    # date -> list of near-month rows by type
+    bags = {}
+    for row in csv.reader(io.StringIO(text.strip())):
+        if len(row) < 10 or row[0].strip() == "日期":
+            continue
+        code = (row[1] or "").strip()
+        if code != "TX":
+            continue
+        d = str(row[0]).replace("/", "").replace("-", "")
+        mon = (row[3] or "").strip()
+        typ = (row[4] or "").strip()
+        if len(d) != 8 or typ not in ("0", "1"):
+            continue
+        # 跳過週選代碼／全月份彙總碼
+        if mon in ("666666", "999999") or not mon.isdigit() or len(mon) != 6:
+            continue
+        try:
+            top5b = float(str(row[5]).replace(",", "") or 0)
+            top5s = float(str(row[6]).replace(",", "") or 0)
+            top10b = float(str(row[7]).replace(",", "") or 0)
+            top10s = float(str(row[8]).replace(",", "") or 0)
+            oi = float(str(row[9]).replace(",", "") or 0)
+        except ValueError:
+            continue
+        bags.setdefault(d, []).append(
+            {
+                "mon": mon,
+                "typ": typ,
+                "top5": top5b - top5s,
+                "top10": top10b - top10s,
+                "top5Buy": top5b,
+                "top5Sell": top5s,
+                "top10Buy": top10b,
+                "top10Sell": top10s,
+                "oi": oi,
+            }
+        )
+    out = {}
+    for d, rows in bags.items():
+        near = max(r["mon"] for r in rows)
+        near_rows = [r for r in rows if r["mon"] == near]
+        t0 = next((r for r in near_rows if r["typ"] == "0"), None)
+        t1 = next((r for r in near_rows if r["typ"] == "1"), None)
+        if not t0 and not t1:
+            continue
+        top = []
+        if t0:
+            top.append(
+                {
+                    "type": "前十大交易人合計",
+                    "long": t0["top10Buy"],
+                    "short": t0["top10Sell"],
+                    "open": t0["oi"],
+                    "longPct": (t0["top10Buy"] / t0["oi"] * 100.0) if t0["oi"] else None,
+                    "shortPct": (t0["top10Sell"] / t0["oi"] * 100.0) if t0["oi"] else None,
+                }
+            )
+        if t1:
+            top.append(
+                {
+                    "type": "特定法人合計",
+                    "long": t1["top10Buy"],
+                    "short": t1["top10Sell"],
+                    "open": t1["oi"],
+                    "longPct": (t1["top10Buy"] / t1["oi"] * 100.0) if t1["oi"] else None,
+                    "shortPct": (t1["top10Sell"] / t1["oi"] * 100.0) if t1["oi"] else None,
+                }
+            )
+        out[d] = {
+            "top5": (t0 or {}).get("top5"),
+            "top10": (t0 or {}).get("top10"),
+            "top5Spec": (t1 or t0 or {}).get("top5"),
+            "top10Spec": (t1 or {}).get("top10"),
+            "top": top,
+            "near": near,
+        }
+    return out
+
+
+def fetch_taifex_vix_map(months_back: int = 3):
+    """官網 VIX 月檔 log2data/{yyyymm}new.txt；取收盤欄。"""
+    out = {}
+    now = datetime.now(TZ)
+    for i in range(months_back + 1):
+        y = now.year
+        m = now.month - i
+        while m <= 0:
+            m += 12
+            y -= 1
+        yyyymm = f"{y:04d}{m:02d}"
+        url = TAIFEX_VIX_MONTH.format(yyyymm=yyyymm)
+        try:
+            raw = urllib.request.urlopen(
+                urllib.request.Request(url, headers=HDR), timeout=30, context=SSL_CTX
+            ).read()
+            text = None
+            for enc in ("cp950", "big5", "utf-8"):
+                try:
+                    text = raw.decode(enc)
+                    break
+                except Exception:
+                    continue
+            if text is None:
+                text = raw.decode("utf-8", "replace")
+        except Exception as e:
+            print("WARN vix month", yyyymm, e)
+            continue
+        for line in text.splitlines():
+            parts = re.split(r"\s+", line.strip())
+            if not parts or not parts[0].isdigit() or len(parts[0]) != 8:
+                continue
+            # 格式：日期 時間(HHMMSS00) 收盤 收盤前1分均
+            nums = []
+            for p in parts[1:]:
+                try:
+                    v = float(p)
+                except ValueError:
+                    continue
+                # 時間碼通常 > 100000，略過
+                if v >= 100000:
+                    continue
+                nums.append(v)
+            if not nums:
+                continue
+            # 優先收盤（第一個有效數），沒有才用最後
+            out[parts[0]] = nums[0]
+    return out
 
 
 def ymd8(s):
@@ -776,6 +978,39 @@ def main():
     if taifex_rows:
         sources.append("taifex")
 
+    # 大額／PC／VIX：官網主源（不再等 CMoney／玩股）
+    large_map = {}
+    try:
+        large_map = fetch_taifex_large_hist(HIST_N)
+        if large_map:
+            sources.append("taifex_large")
+    except Exception as e:
+        print("WARN taifex large", e)
+    pc_map = {}
+    try:
+        pc_map = fetch_taifex_pc_map(HIST_N)
+        if pc_map:
+            sources.append("taifex_pc")
+    except Exception as e:
+        print("WARN taifex pc", e)
+    vix_official = {}
+    try:
+        vix_official = fetch_taifex_vix_map(3)
+        if vix_official:
+            sources.append("taifex_vix")
+    except Exception as e:
+        print("WARN taifex vix", e)
+
+    # 備援：玩股收盤價；OpenAPI／奇摩大額僅在官網缺日時補
+    wearn = []
+    try:
+        wearn = fetch_wearn_hist(HIST_N)
+    except Exception as e:
+        print("WARN wearn", e)
+    if wearn:
+        sources.append("wearn")
+    wearn_by = {w["date"]: w for w in wearn}
+
     oa_inst, oa_top, oa_date = [], [], ""
     try:
         oa_inst, oa_top, oa_date = fetch_openapi_tx()
@@ -786,56 +1021,25 @@ def main():
         yh_inst, yh_top, yh_date = fetch_yahoo()
     except Exception as e:
         print("WARN yahoo", e)
-
-    # 大額前十：OpenAPI／奇摩仍可用；今日法人淨額以官網 history 為準
     oa_ok = inst_has_ls(oa_inst)
     yh_ok = inst_has_ls(yh_inst)
-    if oa_ok and yh_ok:
-        use_oa = bool(oa_date and (not yh_date or oa_date >= yh_date))
-    elif oa_ok:
-        use_oa = True
-    else:
-        use_oa = False
-    if use_oa:
-        inst, top, date_pick = oa_inst, oa_top, oa_date
-        sources.append("openapi")
-    else:
-        inst, top, date_pick = yh_inst, yh_top, yh_date
-        if yh_inst or yh_top:
-            sources.append("yahoo")
-        elif oa_ok:
-            inst, top, date_pick = oa_inst, oa_top, oa_date
+    if oa_ok and (not yh_ok or (oa_date and (not yh_date or oa_date >= yh_date))):
+        top, date_pick = oa_top, oa_date
+        if oa_top:
             sources.append("openapi")
+    else:
+        top, date_pick = yh_top, yh_date
+        if yh_top:
+            sources.append("yahoo")
     yahoo_date = date_pick
-
-    wearn = []
-    try:
-        wearn = fetch_wearn_hist(HIST_N)
-    except Exception as e:
-        print("WARN wearn", e)
-    if wearn:
-        sources.append("wearn")
-    wearn_by = {w["date"]: w for w in wearn}
-
-    cm_map, pc_map = {}, {}
-    try:
-        cm_map, pc_map = cmoney_series()
-        if cm_map:
-            sources.append("cmoney")
-    except Exception as e:
-        print("WARN cmoney", e)
-    extra = {}
-    try:
-        extra = fetch_cmoney_today_extra()
-    except Exception as e:
-        print("WARN cmoney today", e)
+    inst = []
 
     # history 主路：期交所官網 TX+MTX/4+TMF/20；散戶嚴格 −(F+T+D)
     history = []
     if taifex_rows:
         for d, slot in taifex_rows:
             w = wearn_by.get(d) or {}
-            c = cm_map.get(d) or {}
+            lg = large_map.get(d) or {}
             history.append(
                 {
                     "date": d,
@@ -843,23 +1047,31 @@ def main():
                     "trust": slot.get("trust"),
                     "dealer": slot.get("dealer"),
                     "retail": slot.get("retail"),
-                    "top5": w.get("top5"),
-                    "top10": w.get("top10"),
-                    "top5Spec": w.get("top5Spec"),
-                    "top10Spec": w.get("top10Spec"),
+                    "top5": lg.get("top5", w.get("top5")),
+                    "top10": lg.get("top10", w.get("top10")),
+                    "top5Spec": lg.get("top5Spec", w.get("top5Spec")),
+                    "top10Spec": lg.get("top10Spec", w.get("top10Spec")),
                     "close": w.get("close"),
-                    "pc": c.get("pc", pc_map.get(d)),
+                    "pc": pc_map.get(d),
                 }
             )
     else:
         # 備援：玩股大台 + CMoney 小台 + tmf 微台（散戶仍強制等號）
         tmf_map = load_tmf_by_date()
+        cm_map, cm_pc = {}, {}
+        try:
+            cm_map, cm_pc = cmoney_series()
+            if cm_map:
+                sources.append("cmoney")
+        except Exception as e:
+            print("WARN cmoney", e)
         if tmf_map:
             sources.append("tmf")
         for w in wearn:
             d = w["date"]
             c = cm_map.get(d) or {}
             t = tmf_map.get(d) or {}
+            lg = large_map.get(d) or {}
             foreign = tx_eq(w["foreign"], c.get("foreignMtx"), t.get("foreign"))
             trust = tx_eq(w["trust"], c.get("trustMtx"), t.get("trust"))
             dealer = tx_eq(w["dealer"], c.get("dealerMtx"), t.get("dealer"))
@@ -870,35 +1082,14 @@ def main():
                     "trust": trust,
                     "dealer": dealer,
                     "retail": retail_from_inst(foreign, trust, dealer),
-                    "top5": w["top5"],
-                    "top10": w["top10"],
-                    "top5Spec": w["top5Spec"],
-                    "top10Spec": w["top10Spec"],
+                    "top5": lg.get("top5", w["top5"]),
+                    "top10": lg.get("top10", w["top10"]),
+                    "top5Spec": lg.get("top5Spec", w["top5Spec"]),
+                    "top10Spec": lg.get("top10Spec", w["top10Spec"]),
                     "close": w["close"],
-                    "pc": c.get("pc", pc_map.get(d)),
+                    "pc": pc_map.get(d, c.get("pc", cm_pc.get(d))),
                 }
             )
-        if not history:
-            for d, c in list(cm_map.items())[:HIST_N]:
-                t = tmf_map.get(d) or {}
-                foreign = tx_eq(c.get("foreign"), c.get("foreignMtx"), t.get("foreign"))
-                trust = tx_eq(None, c.get("trustMtx"), t.get("trust"))
-                dealer = tx_eq(None, c.get("dealerMtx"), t.get("dealer"))
-                history.append(
-                    {
-                        "date": d,
-                        "foreign": foreign,
-                        "trust": trust,
-                        "dealer": dealer,
-                        "retail": retail_from_inst(foreign, trust, dealer),
-                        "top5": None,
-                        "top10": None,
-                        "top5Spec": None,
-                        "top10Spec": None,
-                        "close": None,
-                        "pc": c.get("pc"),
-                    }
-                )
 
     # 保險：任何來源組完後都再強制一次等號
     for rec in history:
@@ -947,11 +1138,13 @@ def main():
                 ),
             },
         ]
-        # 大額若日期較舊，先清空改吃 wearn/history
-        if top and old_top_date and old_top_date < h0d:
+        # 大額表：優先官網當日；否則保留較新備援
+        if large_map.get(h0d, {}).get("top"):
+            top = large_map[h0d]["top"]
+        elif top and old_top_date and old_top_date < h0d:
             top = []
     else:
-        date = _ymd8(yahoo_date or extra.get("date") or "")
+        date = _ymd8(yahoo_date or "")
 
     # Yahoo／OpenAPI 偶發只有人名沒多空：用 history 淨額補
     if history and (not inst or all(r.get("net") is None for r in inst)):
@@ -989,28 +1182,33 @@ def main():
         top10_net = history[0].get("top10") if history[0].get("top10") is not None else top10_net
         top10_spec = history[0].get("top10Spec") if history[0].get("top10Spec") is not None else top10_spec
 
-    vix_map = load_vix_map()
-    if vix_map:
+    vix_map = dict(vix_official or {})
+    # 本機／舊檔僅補洞，不覆蓋官網
+    try:
+        local_vix = load_vix_map()
+        for d, v in (local_vix or {}).items():
+            vix_map.setdefault(d, v)
+    except Exception as e:
+        print("WARN vix local", e)
+    if vix_map and "taifex_vix" not in sources and not vix_official:
         sources.append("vix")
     for rec in history:
         d = ymd8(rec.get("date"))
         if d and d in vix_map:
             rec["vix"] = vix_map[d]
-    today_vix = extra.get("vix")
-    if today_vix is None:
-        today_vix = vix_map.get(ymd8(date))
+    today_vix = vix_map.get(ymd8(date))
     if today_vix is None and history:
         today_vix = history[0].get("vix")
     today = {
         "date": date,
         "inst": inst,
         "top": top,
-        "top10Net": extra.get("top10", top10_net),
-        "top10SpecNet": extra.get("top10Spec", top10_spec),
-        "retailNet": (history[0].get("retail") if history and history[0].get("retail") is not None else extra.get("retail")),
+        "top10Net": top10_net,
+        "top10SpecNet": top10_spec,
+        "retailNet": (history[0].get("retail") if history else None),
         "foreignDelta": history[0].get("foreignDelta") if history else None,
         "retailDelta": history[0].get("retailDelta") if history else None,
-        "pc": extra.get("pc", history[0].get("pc") if history else None),
+        "pc": (history[0].get("pc") if history else None) or pc_map.get(ymd8(date)),
         "vix": today_vix,
     }
     if history and today.get("vix") is not None:
@@ -1029,7 +1227,7 @@ def main():
         "date": ymd_slash(date) if len(date) == 8 else date,
         "source": "+".join(sources),
         "unit": "tx_eq",
-        "unitNote": "大台等值口=TX+MTX/4+TMF/20（期交所官網）；散戶=−(外資+投信+自營)",
+        "unitNote": "大台等值=TX+MTX/4+TMF/20；散戶=−(F+T+D)；PC/VIX/大額=期交所官網",
         "inst": inst,
         "top": top,
         "today": today,
