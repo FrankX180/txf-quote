@@ -1,9 +1,14 @@
 # 法人／大額未平倉 → data/uncovered.json
-# 今日部位主路：期交所 OpenAPI；備援 Yahoo；近20日：聚財／wearn／CMoney
+# 主路：期交所官網下載 futContractsDateDown（TX+MTX+TMF 大台等值）
+# 備援：OpenAPI／Yahoo／玩股大額；PC／VIX 仍可吃 CMoney
+# 散戶一律：retail = -(外資+投信+自營)（大台等值）
 # 口數一律大台等值：TX + MTX/4 + TMF/20（點值 200/50/10）
+import csv
+import io
 import json
 import re
 import ssl
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
@@ -41,6 +46,19 @@ OA_CODES = (
     ("小型臺指期貨", MTX_DIV),
     ("微型臺指期貨", TMF_DIV),
 )
+TAIFEX_INST_DOWN = "https://www.taifex.com.tw/cht/3/futContractsDateDown"
+TAIFEX_INST_VIEW = "https://www.taifex.com.tw/cht/3/futContractsDateView"
+TAIFEX_PRODS = {
+    "臺股期貨": 1.0,
+    "小型臺指期貨": MTX_DIV,
+    "微型臺指期貨": TMF_DIV,
+}
+TAIFEX_WHO = {
+    "外資及陸資": "foreign",
+    "外資": "foreign",
+    "投信": "trust",
+    "自營商": "dealer",
+}
 
 
 def get_text(url: str, timeout: int = 30) -> str:
@@ -72,7 +90,99 @@ def mtx_retail_approx(foreign_mtx, trust_mtx, dealer_mtx):
         return None
     return -(
         float(foreign_mtx or 0) + float(trust_mtx or 0) + float(dealer_mtx or 0)
-)
+    )
+
+
+def retail_from_inst(foreign, trust, dealer):
+    """散戶 = −(外資+投信+自營)；三者皆缺則 None。"""
+    if foreign is None and trust is None and dealer is None:
+        return None
+    return round(-(float(foreign or 0) + float(trust or 0) + float(dealer or 0)), 2)
+
+
+def taifex_post_text(url: str, data: dict, referer: str, timeout: int = 90) -> str:
+    body = urllib.parse.urlencode(data).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={
+            **HDR,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Origin": "https://www.taifex.com.tw",
+            "Referer": referer,
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout, context=SSL_CTX) as r:
+        raw = r.read()
+    for enc in ("cp950", "big5", "utf-8"):
+        try:
+            return raw.decode(enc)
+        except Exception:
+            continue
+    return raw.decode("utf-8", "replace")
+
+
+def parse_taifex_inst_csv(text: str):
+    """官網下載 CSV → date8 -> {foreign,trust,dealer,retail} 大台等值淨未平倉。"""
+    if not text or not text.lstrip().startswith("日期"):
+        return {}
+    bags = {}
+    for row in csv.reader(io.StringIO(text.strip())):
+        if len(row) < 14:
+            continue
+        if row[0].strip() == "日期":
+            continue
+        prod = (row[1] or "").strip()
+        who = (row[2] or "").strip()
+        if prod not in TAIFEX_PRODS or who == "合計":
+            continue
+        key = TAIFEX_WHO.get(who)
+        if not key:
+            continue
+        d = str(row[0]).replace("/", "").replace("-", "")
+        if len(d) != 8 or not d.isdigit():
+            continue
+        try:
+            net = float(str(row[13]).replace(",", "") or 0)
+        except ValueError:
+            continue
+        div = float(TAIFEX_PRODS[prod])
+        slot = bags.setdefault(
+            d, {"foreign": 0.0, "trust": 0.0, "dealer": 0.0, "_hit": False}
+        )
+        slot[key] = float(slot.get(key) or 0) + net / div
+        slot["_hit"] = True
+    out = {}
+    for d, slot in bags.items():
+        if not slot.get("_hit"):
+            continue
+        f = round(float(slot["foreign"]), 2)
+        t = round(float(slot["trust"]), 2)
+        de = round(float(slot["dealer"]), 2)
+        out[d] = {
+            "foreign": f,
+            "trust": t,
+            "dealer": de,
+            "retail": retail_from_inst(f, t, de),
+        }
+    return out
+
+
+def fetch_taifex_inst_hist(n: int = HIST_N):
+    """抓近 n 個日曆窗（約 2n 天）期交所三大法人未平倉，含今日若已上架。"""
+    end = datetime.now(TZ).date()
+    start = end - timedelta(days=max(n * 2 + 7, 21))
+    text = taifex_post_text(
+        TAIFEX_INST_DOWN,
+        {
+            "queryStartDate": start.strftime("%Y/%m/%d"),
+            "queryEndDate": end.strftime("%Y/%m/%d"),
+        },
+        TAIFEX_INST_VIEW,
+    )
+    m = parse_taifex_inst_csv(text)
+    dates = sorted(m.keys(), reverse=True)[:n]
+    return [(d, m[d]) for d in dates]
 
 
 def ymd8(s):
@@ -658,6 +768,14 @@ def main():
         return
 
     sources = []
+    taifex_rows = []
+    try:
+        taifex_rows = fetch_taifex_inst_hist(HIST_N)
+    except Exception as e:
+        print("WARN taifex down", e)
+    if taifex_rows:
+        sources.append("taifex")
+
     oa_inst, oa_top, oa_date = [], [], ""
     try:
         oa_inst, oa_top, oa_date = fetch_openapi_tx()
@@ -669,9 +787,9 @@ def main():
     except Exception as e:
         print("WARN yahoo", e)
 
+    # 大額前十：OpenAPI／奇摩仍可用；今日法人淨額以官網 history 為準
     oa_ok = inst_has_ls(oa_inst)
     yh_ok = inst_has_ls(yh_inst)
-    # 兩邊都有多空才比日期；奇摩只有淨額／空殼時改用 OpenAPI（避免較新日期蓋掉完整多空）
     if oa_ok and yh_ok:
         use_oa = bool(oa_date and (not yh_date or oa_date >= yh_date))
     elif oa_ok:
@@ -689,68 +807,102 @@ def main():
             inst, top, date_pick = oa_inst, oa_top, oa_date
             sources.append("openapi")
     yahoo_date = date_pick
-    wearn = fetch_wearn_hist(HIST_N)
+
+    wearn = []
+    try:
+        wearn = fetch_wearn_hist(HIST_N)
+    except Exception as e:
+        print("WARN wearn", e)
     if wearn:
         sources.append("wearn")
-    cm_map, pc_map = cmoney_series()
-    tmf_map = load_tmf_by_date()
-    if tmf_map:
-        sources.append("tmf")
-    sources.append("cmoney")
+    wearn_by = {w["date"]: w for w in wearn}
+
+    cm_map, pc_map = {}, {}
+    try:
+        cm_map, pc_map = cmoney_series()
+        if cm_map:
+            sources.append("cmoney")
+    except Exception as e:
+        print("WARN cmoney", e)
     extra = {}
     try:
         extra = fetch_cmoney_today_extra()
     except Exception as e:
         print("WARN cmoney today", e)
 
-    # merge history：大台等值 = wearn大台 + CMoney小台/4 + tmf_retail微台/20
+    # history 主路：期交所官網 TX+MTX/4+TMF/20；散戶嚴格 −(F+T+D)
     history = []
-    for w in wearn:
-        d = w["date"]
-        c = cm_map.get(d) or {}
-        t = tmf_map.get(d) or {}
-        rec = {
-            "date": d,
-            "foreign": tx_eq(w["foreign"], c.get("foreignMtx"), t.get("foreign")),
-            "trust": tx_eq(w["trust"], c.get("trustMtx"), t.get("trust")),
-            "dealer": tx_eq(w["dealer"], c.get("dealerMtx"), t.get("dealer")),
-            "retail": tx_eq(
-                c.get("retail"),
-                mtx_retail_approx(c.get("foreignMtx"), c.get("trustMtx"), c.get("dealerMtx")),
-                t.get("retail"),
-            ),
-            "top5": w["top5"],
-            "top10": w["top10"],
-            "top5Spec": w["top5Spec"],
-            "top10Spec": w["top10Spec"],
-            "close": w["close"],
-            "pc": c.get("pc", pc_map.get(d)),
-        }
-        history.append(rec)
-
-    # if wearn empty, fall back cmoney foreign/retail only（仍做小台／微台換算）
-    if not history:
-        for d, c in list(cm_map.items())[:HIST_N]:
-            t = tmf_map.get(d) or {}
+    if taifex_rows:
+        for d, slot in taifex_rows:
+            w = wearn_by.get(d) or {}
+            c = cm_map.get(d) or {}
             history.append(
                 {
                     "date": d,
-                    "foreign": tx_eq(c.get("foreign"), c.get("foreignMtx"), t.get("foreign")),
-                    "trust": tx_eq(None, c.get("trustMtx"), t.get("trust")),
-                    "dealer": tx_eq(None, c.get("dealerMtx"), t.get("dealer")),
-                    "retail": tx_eq(
-                        c.get("retail"),
-                        mtx_retail_approx(c.get("foreignMtx"), c.get("trustMtx"), c.get("dealerMtx")),
-                        t.get("retail"),
-                    ),
-                    "top5": None,
-                    "top10": None,
-                    "top5Spec": None,
-                    "top10Spec": None,
-                    "close": None,
-                    "pc": c.get("pc"),
+                    "foreign": slot.get("foreign"),
+                    "trust": slot.get("trust"),
+                    "dealer": slot.get("dealer"),
+                    "retail": slot.get("retail"),
+                    "top5": w.get("top5"),
+                    "top10": w.get("top10"),
+                    "top5Spec": w.get("top5Spec"),
+                    "top10Spec": w.get("top10Spec"),
+                    "close": w.get("close"),
+                    "pc": c.get("pc", pc_map.get(d)),
                 }
             )
+    else:
+        # 備援：玩股大台 + CMoney 小台 + tmf 微台（散戶仍強制等號）
+        tmf_map = load_tmf_by_date()
+        if tmf_map:
+            sources.append("tmf")
+        for w in wearn:
+            d = w["date"]
+            c = cm_map.get(d) or {}
+            t = tmf_map.get(d) or {}
+            foreign = tx_eq(w["foreign"], c.get("foreignMtx"), t.get("foreign"))
+            trust = tx_eq(w["trust"], c.get("trustMtx"), t.get("trust"))
+            dealer = tx_eq(w["dealer"], c.get("dealerMtx"), t.get("dealer"))
+            history.append(
+                {
+                    "date": d,
+                    "foreign": foreign,
+                    "trust": trust,
+                    "dealer": dealer,
+                    "retail": retail_from_inst(foreign, trust, dealer),
+                    "top5": w["top5"],
+                    "top10": w["top10"],
+                    "top5Spec": w["top5Spec"],
+                    "top10Spec": w["top10Spec"],
+                    "close": w["close"],
+                    "pc": c.get("pc", pc_map.get(d)),
+                }
+            )
+        if not history:
+            for d, c in list(cm_map.items())[:HIST_N]:
+                t = tmf_map.get(d) or {}
+                foreign = tx_eq(c.get("foreign"), c.get("foreignMtx"), t.get("foreign"))
+                trust = tx_eq(None, c.get("trustMtx"), t.get("trust"))
+                dealer = tx_eq(None, c.get("dealerMtx"), t.get("dealer"))
+                history.append(
+                    {
+                        "date": d,
+                        "foreign": foreign,
+                        "trust": trust,
+                        "dealer": dealer,
+                        "retail": retail_from_inst(foreign, trust, dealer),
+                        "top5": None,
+                        "top10": None,
+                        "top5Spec": None,
+                        "top10Spec": None,
+                        "close": None,
+                        "pc": c.get("pc"),
+                    }
+                )
+
+    # 保險：任何來源組完後都再強制一次等號
+    for rec in history:
+        rec["retail"] = retail_from_inst(rec.get("foreign"), rec.get("trust"), rec.get("dealer"))
 
     # Δ 用換算後水位重算（口）
     for i, rec in enumerate(history):
@@ -770,60 +922,38 @@ def main():
             else float(rec["retail"]) - float(nxt["retail"])
         )
 
-    # 奇摩今日多空是大台原值：把小台/微台淨額增量併入多空，使 L-S=等值淨
-    if (not use_oa) and inst and date_pick:
-        c = cm_map.get(date_pick) or {}
-        t = tmf_map.get(date_pick) or {}
-        add = {
-            "外資及陸資": tx_eq(0, c.get("foreignMtx"), t.get("foreign")),
-            "投信": tx_eq(0, c.get("trustMtx"), t.get("trust")),
-            "自營商": tx_eq(0, c.get("dealerMtx"), t.get("dealer")),
-        }
-        for r in inst:
-            nm = r.get("name") or ""
-            if nm in add:
-                apply_txeq_add_to_ls(r, add[nm])
-        tot = next((r for r in inst if "合計" in (r.get("name") or "")), None)
-        if tot is not None:
-            parts = [r for r in inst if r is not tot]
-            ls = [r for r in parts if r.get("long") is not None]
-            ss = [r for r in parts if r.get("short") is not None]
-            ns = [r for r in parts if r.get("net") is not None]
-            tot["long"] = sum(float(r["long"]) for r in ls) if ls else None
-            tot["short"] = sum(float(r["short"]) for r in ss) if ss else None
-            tot["net"] = sum(float(r["net"]) for r in ns) if ns else None
-
-    date = yahoo_date or (history[0]["date"] if history else "") or extra.get("date") or ""
-    date = _ymd8(date)
-    # OpenAPI／奇摩「完整多空」常晚於玩股／CMoney：history 頭較新時改以 history 當今日
+    # 今日卡片／表頭：優先官網最新日
     if history:
         h0 = history[0]
         h0d = _ymd8(h0.get("date"))
-        if h0d and (not date or h0d > date):
-            date = h0d
-            yahoo_date = h0d
-            date_pick = h0d
-            sources.append("hist_promote")
-            inst = [
-                {"name": "外資及陸資", "long": None, "short": None, "net": h0.get("foreign")},
-                {"name": "投信", "long": None, "short": None, "net": h0.get("trust")},
-                {"name": "自營商", "long": None, "short": None, "net": h0.get("dealer")},
-                {
-                    "name": "三大法人合計",
-                    "long": None,
-                    "short": None,
-                    "net": (
-                        None
-                        if h0.get("foreign") is None and h0.get("trust") is None and h0.get("dealer") is None
-                        else float(h0.get("foreign") or 0)
-                        + float(h0.get("trust") or 0)
-                        + float(h0.get("dealer") or 0)
-                    ),
-                },
-            ]
-            # 大額表若仍是舊日，先清空改吃 history 的 top10／特定
+        old_top_date = _ymd8(date_pick)
+        date = h0d
+        date_pick = h0d
+        yahoo_date = h0d
+        inst = [
+            {"name": "外資及陸資", "long": None, "short": None, "net": h0.get("foreign")},
+            {"name": "投信", "long": None, "short": None, "net": h0.get("trust")},
+            {"name": "自營商", "long": None, "short": None, "net": h0.get("dealer")},
+            {
+                "name": "三大法人合計",
+                "long": None,
+                "short": None,
+                "net": (
+                    None
+                    if h0.get("foreign") is None and h0.get("trust") is None and h0.get("dealer") is None
+                    else float(h0.get("foreign") or 0)
+                    + float(h0.get("trust") or 0)
+                    + float(h0.get("dealer") or 0)
+                ),
+            },
+        ]
+        # 大額若日期較舊，先清空改吃 wearn/history
+        if top and old_top_date and old_top_date < h0d:
             top = []
-    # Yahoo 偶發只有人名沒多空：用 history 淨額補今日部位
+    else:
+        date = _ymd8(yahoo_date or extra.get("date") or "")
+
+    # Yahoo／OpenAPI 偶發只有人名沒多空：用 history 淨額補
     if history and (not inst or all(r.get("net") is None for r in inst)):
         h0 = history[0]
         inst = [
@@ -899,7 +1029,7 @@ def main():
         "date": ymd_slash(date) if len(date) == 8 else date,
         "source": "+".join(sources),
         "unit": "tx_eq",
-        "unitNote": "大台等值口=大台+小台/4+微台/20；大額前十/特定=官方TX+小台/4（無微台大額）",
+        "unitNote": "大台等值口=TX+MTX/4+TMF/20（期交所官網）；散戶=−(外資+投信+自營)",
         "inst": inst,
         "top": top,
         "today": today,
