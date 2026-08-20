@@ -794,6 +794,35 @@ def main():
             tot["net"] = sum(float(r["net"]) for r in ns) if ns else None
 
     date = yahoo_date or (history[0]["date"] if history else "") or extra.get("date") or ""
+    date = _ymd8(date)
+    # OpenAPI／奇摩「完整多空」常晚於玩股／CMoney：history 頭較新時改以 history 當今日
+    if history:
+        h0 = history[0]
+        h0d = _ymd8(h0.get("date"))
+        if h0d and (not date or h0d > date):
+            date = h0d
+            yahoo_date = h0d
+            date_pick = h0d
+            sources.append("hist_promote")
+            inst = [
+                {"name": "外資及陸資", "long": None, "short": None, "net": h0.get("foreign")},
+                {"name": "投信", "long": None, "short": None, "net": h0.get("trust")},
+                {"name": "自營商", "long": None, "short": None, "net": h0.get("dealer")},
+                {
+                    "name": "三大法人合計",
+                    "long": None,
+                    "short": None,
+                    "net": (
+                        None
+                        if h0.get("foreign") is None and h0.get("trust") is None and h0.get("dealer") is None
+                        else float(h0.get("foreign") or 0)
+                        + float(h0.get("trust") or 0)
+                        + float(h0.get("dealer") or 0)
+                    ),
+                },
+            ]
+            # 大額表若仍是舊日，先清空改吃 history 的 top10／特定
+            top = []
     # Yahoo 偶發只有人名沒多空：用 history 淨額補今日部位
     if history and (not inst or all(r.get("net") is None for r in inst)):
         h0 = history[0]
