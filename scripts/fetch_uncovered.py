@@ -3,13 +3,22 @@
 # 口數一律大台等值：TX + MTX/4 + TMF/20（點值 200/50/10）
 import json
 import re
+import ssl
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data" / "uncovered.json"
 TZ = timezone(timedelta(hours=8))
+SSL_CTX = ssl.create_default_context()
+SSL_CTX.check_hostname = False
+SSL_CTX.verify_mode = ssl.CERT_NONE
+AH_URL = "https://www.taifex.com.tw/cht/3/futContractsDateAh?queryDate={}"
+AH_PRODUCT = {"臺股期貨": "TX", "小型臺指期貨": "MTX", "微型臺指期貨": "TMF"}
+AH_INST = {"自營商": "dealer", "投信": "trust", "外資及陸資": "foreign", "外資": "foreign"}
+SNAP = ROOT / "data" / "snapshot.json"
 HDR = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
     "Accept": "text/html,application/json,*/*",
@@ -464,6 +473,156 @@ def fetch_cmoney_today_extra():
     }
 
 
+class _AhTableParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.tables = []
+        self.current_table = None
+        self.current_row = None
+        self.current_cell = ""
+        self.in_cell = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "table":
+            self.current_table = []
+        elif tag in ("td", "th") and self.current_table is not None:
+            self.in_cell = True
+            self.current_cell = ""
+        elif tag == "tr" and self.current_table is not None:
+            self.current_row = []
+
+    def handle_endtag(self, tag):
+        if tag in ("td", "th") and self.in_cell:
+            self.in_cell = False
+            if self.current_row is not None:
+                self.current_row.append(self.current_cell.strip())
+        elif tag == "tr" and self.current_row is not None and self.current_table is not None:
+            if self.current_row:
+                self.current_table.append(self.current_row)
+            self.current_row = None
+        elif tag == "table" and self.current_table is not None:
+            if self.current_table:
+                self.tables.append(self.current_table)
+            self.current_table = None
+
+    def handle_data(self, data):
+        if self.in_cell:
+            self.current_cell += data
+
+
+def _ah_int(s):
+    return int(str(s).replace(",", "")) if str(s or "").strip() else 0
+
+
+def scrape_night_ah(date_slash: str):
+    """期交所夜盤三大法人成交。回傳 {foreign,trust,dealer,retail} 大台等值淨口，或 None。"""
+    url = AH_URL.format(date_slash)
+    req = urllib.request.Request(url, headers=HDR)
+    with urllib.request.urlopen(req, timeout=30, context=SSL_CTX) as r:
+        html = r.read().decode("utf-8", "replace")
+    if "查無資料" in html:
+        return None
+    p = _AhTableParser()
+    p.feed(html)
+    big = [t for t in p.tables if len(t) > 10]
+    if not big:
+        return None
+    bags = {
+        "foreign": {"l": 0.0, "s": 0.0},
+        "trust": {"l": 0.0, "s": 0.0},
+        "dealer": {"l": 0.0, "s": 0.0},
+    }
+    hit = False
+    cur = None
+    for row in big[0]:
+        if not row:
+            continue
+        if row[0].isdigit() and len(row) >= 9:
+            cur = AH_PRODUCT.get(row[1])
+            key = AH_INST.get(row[2])
+            if cur and key:
+                div = 1.0 if cur == "TX" else (MTX_DIV if cur == "MTX" else TMF_DIV)
+                bags[key]["l"] += _ah_int(row[3]) / div
+                bags[key]["s"] += _ah_int(row[5]) / div
+                hit = True
+        elif cur and len(row) >= 7 and row[0] in AH_INST:
+            key = AH_INST[row[0]]
+            div = 1.0 if cur == "TX" else (MTX_DIV if cur == "MTX" else TMF_DIV)
+            bags[key]["l"] += _ah_int(row[1]) / div
+            bags[key]["s"] += _ah_int(row[3]) / div
+            hit = True
+    if not hit:
+        return None
+    foreign = bags["foreign"]["l"] - bags["foreign"]["s"]
+    trust = bags["trust"]["l"] - bags["trust"]["s"]
+    dealer = bags["dealer"]["l"] - bags["dealer"]["s"]
+    return {
+        "foreign": round(foreign, 2),
+        "trust": round(trust, 2),
+        "dealer": round(dealer, 2),
+        "retail": round(-(foreign + trust + dealer), 2),
+    }
+
+
+def night_close_from_snap():
+    if not SNAP.exists():
+        return None
+    try:
+        snap = json.loads(SNAP.read_text(encoding="utf-8"))
+        n = snap.get("night") or {}
+        v = n.get("CLastPrice")
+        return float(v) if v not in (None, "") else None
+    except Exception:
+        return None
+
+
+def fetch_latest_night(day_hist_date: str):
+    """抓比日盤 history 更新的最新夜盤列；沒有則 None。"""
+    day8 = ymd8(day_hist_date)
+    now = datetime.now(TZ)
+    old = {}
+    if OUT.exists():
+        try:
+            old = json.loads(OUT.read_text(encoding="utf-8")).get("night") or {}
+        except Exception:
+            old = {}
+    close = night_close_from_snap()
+    for delta in range(0, 4):
+        d = now - timedelta(days=delta)
+        if d.weekday() == 6:
+            continue
+        d8 = d.strftime("%Y%m%d")
+        if day8 and d8 <= day8:
+            continue
+        slash = d.strftime("%Y/%m/%d")
+        try:
+            nets = scrape_night_ah(slash)
+        except Exception as e:
+            print("WARN night ah", slash, e)
+            nets = None
+        if not nets:
+            continue
+        if abs(nets["foreign"]) + abs(nets["trust"]) + abs(nets["dealer"]) < 1e-9:
+            continue
+        return {
+            "date": d8,
+            "session": "night",
+            "foreign": nets["foreign"],
+            "trust": nets["trust"],
+            "dealer": nets["dealer"],
+            "retail": nets["retail"],
+            "close": close,
+            "unitNote": "夜盤三大法人成交淨口（大台等值）；非未平倉水位",
+        }
+    od = ymd8(old.get("date"))
+    if od and (not day8 or od > day8) and old.get("foreign") is not None:
+        if close is not None:
+            old = dict(old)
+            old["close"] = close
+        return old
+    return None
+
+
 def main():
     from when import want_uncovered
 
@@ -671,6 +830,14 @@ def main():
     if history and today.get("vix") is not None:
         history[0]["vix"] = today["vix"]
     n_vix = sum(1 for r in history[:HIST_N] if r.get("vix") is not None)
+    day0 = history[0]["date"] if history else date
+    night = None
+    try:
+        night = fetch_latest_night(day0)
+    except Exception as e:
+        print("WARN night", e)
+    if night:
+        sources.append("night_ah")
     payload = {
         "fetchedAt": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
         "date": ymd_slash(date) if len(date) == 8 else date,
@@ -681,6 +848,7 @@ def main():
         "top": top,
         "today": today,
         "history": history[:HIST_N],
+        "night": night,
     }
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -695,6 +863,8 @@ def main():
         n_vix,
         "date",
         payload["date"],
+        "night",
+        (night or {}).get("date"),
         "src",
         payload["source"],
     )

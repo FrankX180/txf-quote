@@ -86,13 +86,20 @@ def want_daily_k(dt=None):
 
 
 def want_uncovered(dt=None):
+    """日盤法人 15:00–20:00；夜盤成交 平日/週六 08:00–10:00（夜盤收後上架）。"""
     if forced():
         return True
     d = dt or now_tw()
     h = hm(d)
-    if d.weekday() >= 5:
+    wd = d.weekday()
+    if wd == 6:
         return False
-    return 1500 <= h <= 2000
+    # 週六早上：補周五夜盤
+    if wd == 5:
+        return 800 <= h <= 1000
+    if 1500 <= h <= 2000:
+        return True
+    return 800 <= h <= 1000
 
 
 def want_tmf_retail(dt=None):

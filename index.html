@@ -581,7 +581,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.83</div>
+      <div class="ver foot-right">1.84</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1067,10 +1067,11 @@
       return `<span class="${c}">${fmt(x)}</span>`;
     }
 
-    function oiShortDate(ymd) {
+    function oiShortDate(ymd, session) {
       const s = String(ymd || "").replace(/-/g, "");
-      if (s.length >= 8) return s.slice(4, 6) + "/" + s.slice(6, 8);
-      return s || "—";
+      if (s.length < 8) return s || "—";
+      const base = s.slice(4, 6) + "/" + s.slice(6, 8);
+      return session === "night" ? base + "(夜)" : base;
     }
     function oiName(name) {
       return String(name || "")
@@ -1428,7 +1429,7 @@
           pickCell = oiSignedBarCell(r[pick], meta, mode, cumInfo, pick);
         }
         const prevClose = (i + 1 < list.length && list[i + 1]) ? list[i + 1].close : null;
-        html += `<tr><td>${oiShortDate(r.date)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng, prevClose)}</td><td class="oi-pick${pick ? " on" : ""}">${pickCell}</td>`;
+        html += `<tr><td>${oiShortDate(r.date, r.session)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng, prevClose)}</td><td class="oi-pick${pick ? " on" : ""}">${pickCell}</td>`;
         keys.forEach((k) => {
           if (k === "pc" || k === "vix") {
             const nv = r[k] == null ? null : Number(r[k]);
@@ -1518,6 +1519,19 @@
         oiRows = hist;
         oiNote = "單位：大台等值口（大台＋小台/4＋微台/20）；數字為淨未平倉（多−空）；點表頭可在收盤右欄畫正負柱";
       }
+      const night = uncover.night;
+      if (night && night.date) {
+        oiRows = [{
+          date: night.date,
+          session: "night",
+          close: night.close,
+          foreign: night.foreign,
+          trust: night.trust,
+          dealer: night.dealer,
+          retail: night.retail,
+        }].concat(oiRows);
+        oiNote += "；最上列日期帶(夜)＝夜盤三大法人成交淨口（非未平倉水位）";
+      }
       oiEl.innerHTML = oiBuildHistTable("oi", oiRows, oiKeys, oiLabs, oiNote);
 
       if (oiPick.big && ["foreignDelta", "retailDelta"].indexOf(oiPick.big) >= 0) {
@@ -1525,7 +1539,7 @@
         saveOiPick();
       }
       const bigLabs = { top10: "前十淨", top10Spec: "特定法人", retail: "散戶", pc: "P/C%", vix: "VIX" };
-      const bigRows = hist.map((r, i) => {
+      let bigRows = hist.map((r, i) => {
         const d = String(r.date || "").replace(/\D/g, "");
         let vix = r.vix;
         if (vix == null && todayVix != null && todayDate && d === todayDate) vix = todayVix;
@@ -1539,6 +1553,18 @@
           vix: vix,
         };
       });
+      if (night && night.date) {
+        bigRows = [{
+          date: night.date,
+          session: "night",
+          close: night.close,
+          top10: null,
+          top10Spec: null,
+          retail: night.retail,
+          pc: null,
+          vix: null,
+        }].concat(bigRows);
+      }
       bigEl.innerHTML = oiBuildHistTable(
         "big",
         bigRows,
@@ -4553,7 +4579,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "1.83";
+        const VER = "1.84";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
