@@ -94,15 +94,6 @@ def _sum_div(parts):
         return None
     return sum(float(v or 0) / float(div) for v, div in parts)
 
-def mtx_retail_approx(foreign_mtx, trust_mtx, dealer_mtx):
-    """小台散戶淨 ≈ −(外資+投信+自營)小台淨（與微台散戶定義同）。"""
-    if foreign_mtx is None and trust_mtx is None and dealer_mtx is None:
-        return None
-    return -(
-        float(foreign_mtx or 0) + float(trust_mtx or 0) + float(dealer_mtx or 0)
-    )
-
-
 def retail_from_inst(foreign, trust, dealer):
     """散戶 = −(外資+投信+自營)；三者皆缺則 None。"""
     if foreign is None and trust is None and dealer is None:
@@ -402,8 +393,9 @@ def _taifex_num_cell(s):
 def fetch_taifex_tx_close_map(n: int = HIST_N):
     """官網 futDataDown：一次抓區間 TX 一般盤收盤／結算價。
 
-    策略：取當日「一般」時段、非週選月份中，成交量最大的近月契約；
-    收盤價優先，結算價為 0／空則退回收盤價。約 1 個月區間一次即可覆蓋 20 交易日。
+    策略：取當日「一般」時段、非週選中，**最近到期月份**（月份代碼最小）。
+    結算換月日若用成交量／OI 最大會跳到次近月；玩股／看盤慣用近月。
+    結算價有效用結算，否則用收盤。區間固定 ≤30 日（官網更長常空頁）。
     """
     end = datetime.now(TZ).date()
     # 官網區間上限約 31 天；超過常回 HTML 空頁。30 日曆天足夠覆蓋 20 交易日。
@@ -421,7 +413,7 @@ def fetch_taifex_tx_close_map(n: int = HIST_N):
     head = (text or "")[:80]
     if not text or "交易日期" not in head:
         return {}
-    best = {}  # date -> (volume, close, settle)
+    best = {}  # date -> (month, px)
     for row in csv.reader(io.StringIO(text.strip())):
         if len(row) < 12:
             continue
@@ -441,16 +433,13 @@ def fetch_taifex_tx_close_map(n: int = HIST_N):
             continue
         close = _taifex_num_cell(row[6])
         settle = _taifex_num_cell(row[10])
-        vol = _taifex_num_cell(row[9]) or 0.0
         # 結算價 0 在轉倉／特殊日常見，改用收盤；否則優先結算價（官方日結）
-        px = settle if settle not in (None, 0.0) else close
-        if px is None:
-            continue
-        # 若結算有效用結算；否則收盤
         use = settle if settle not in (None, 0.0) else close
+        if use is None:
+            continue
         prev = best.get(d)
-        if prev is None or vol >= prev[0]:
-            best[d] = (vol, use)
+        if prev is None or int(mon) < int(prev[0]):
+            best[d] = (mon, use)
     return {d: v[1] for d, v in best.items()}
 
 
@@ -520,28 +509,6 @@ def load_vix_map():
         except Exception as e:
             print("WARN vix csv", e)
     return m
-
-
-def apply_txeq_add_to_ls(row, add):
-    """把小台/微台淨額增量併入多空，使 long-short == 大台等值淨。"""
-    if row is None or add is None:
-        return
-    add = float(add)
-    if abs(add) < 1e-12:
-        return
-    lg, sh = row.get("long"), row.get("short")
-    if lg is None or sh is None:
-        if row.get("net") is not None:
-            row["net"] = float(row["net"]) + add
-        return
-    lg, sh = float(lg), float(sh)
-    if add >= 0:
-        lg += add
-    else:
-        sh += -add
-    row["long"] = lg
-    row["short"] = sh
-    row["net"] = lg - sh
 
 
 def extract(html: str, marker: str):
@@ -1075,36 +1042,52 @@ def main():
     except Exception as e:
         print("WARN taifex close", e)
 
-    # 備援：玩股只補收盤缺洞／舊大額；OpenAPI／奇摩大額僅在官網缺日時補
+    # 備援：玩股只補收盤／大額缺洞；官網齊就不打，省一次外網
+    need_wearn = False
+    if taifex_rows:
+        for d, _ in taifex_rows:
+            if d not in close_map or d not in large_map:
+                need_wearn = True
+                break
+    else:
+        need_wearn = True
     wearn = []
-    try:
-        wearn = fetch_wearn_hist(HIST_N)
-    except Exception as e:
-        print("WARN wearn", e)
+    if need_wearn:
+        try:
+            wearn = fetch_wearn_hist(HIST_N)
+        except Exception as e:
+            print("WARN wearn", e)
+        if wearn:
+            sources.append("wearn")
     wearn_by = {w["date"]: w for w in wearn}
-    if wearn and any(d not in close_map for d in wearn_by):
-        sources.append("wearn")
 
     oa_inst, oa_top, oa_date = [], [], ""
-    try:
-        oa_inst, oa_top, oa_date = fetch_openapi_tx()
-    except Exception as e:
-        print("WARN openapi", e)
     yh_inst, yh_top, yh_date = [], [], ""
-    try:
-        yh_inst, yh_top, yh_date = fetch_yahoo()
-    except Exception as e:
-        print("WARN yahoo", e)
-    oa_ok = inst_has_ls(oa_inst)
-    yh_ok = inst_has_ls(yh_inst)
-    if oa_ok and (not yh_ok or (oa_date and (not yh_date or oa_date >= yh_date))):
-        top, date_pick = oa_top, oa_date
-        if oa_top:
-            sources.append("openapi")
+    top, date_pick = [], ""
+    # 官網大額已有今日表就不打 OpenAPI／奇摩（省流量／時間）
+    latest_inst = taifex_rows[0][0] if taifex_rows else ""
+    if latest_inst and large_map.get(latest_inst, {}).get("top"):
+        top = large_map[latest_inst]["top"]
+        date_pick = latest_inst
     else:
-        top, date_pick = yh_top, yh_date
-        if yh_top:
-            sources.append("yahoo")
+        try:
+            oa_inst, oa_top, oa_date = fetch_openapi_tx()
+        except Exception as e:
+            print("WARN openapi", e)
+        try:
+            yh_inst, yh_top, yh_date = fetch_yahoo()
+        except Exception as e:
+            print("WARN yahoo", e)
+        oa_ok = inst_has_ls(oa_inst)
+        yh_ok = inst_has_ls(yh_inst)
+        if oa_ok and (not yh_ok or (oa_date and (not yh_date or oa_date >= yh_date))):
+            top, date_pick = oa_top, oa_date
+            if oa_top:
+                sources.append("openapi")
+        else:
+            top, date_pick = yh_top, yh_date
+            if yh_top:
+                sources.append("yahoo")
     yahoo_date = date_pick
     inst = []
 
