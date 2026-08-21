@@ -152,7 +152,13 @@
       cursor: pointer; user-select: none; white-space: nowrap;
       color: #6b7280;
     }
-    .oi th.oi-th-pick.on { color: #6b7280; text-decoration: underline; }
+    .oi th.oi-th-pick.on {
+      color: #fff;
+      background: #f59e0b;
+      text-decoration: none;
+      border-radius: 4px;
+      padding: 2px 6px;
+    }
     .oi th.oi-th-close {
       cursor: pointer; user-select: none; white-space: nowrap;
       color: #6b7280; text-decoration: none;
@@ -596,7 +602,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.03</div>
+      <div class="ver foot-right">2.04</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -3739,7 +3745,7 @@
       const useCum = !!cumField;
       const figures = [{
         key: "v",
-        title: "",
+        title: shortName + " ",
         type: "bar",
         styles: oiIndBarStyles(field, key),
       }];
@@ -5096,7 +5102,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.03";
+        const VER = "2.04";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
