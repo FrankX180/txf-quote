@@ -602,7 +602,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.05</div>
+      <div class="ver foot-right">2.06</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -3475,17 +3475,16 @@
             showRule: "follow_cross",
             showType: "standard",
             text: tipText,
-            custom: function (data) {
-              const c = data && data.current;
-              if (!c) return [];
-              const z = function (v) { return String(Math.round(Number(v) || 0)); };
-              return [
-                { title: "開" + z(c.open), value: "" },
-                { title: "高" + z(c.high), value: "" },
-                { title: "低" + z(c.low), value: "" },
-                { title: "收" + z(c.close), value: "" },
-              ];
-            },
+            // 用佔位符，繪製時帶入十字線那根 K；禁在 custom 函式裡寫死 open/high（會鎖死某一根）
+            custom: [
+              { title: "", value: "{time}" },
+              { title: "開 ", value: "{open}" },
+              { title: "高 ", value: "{high}" },
+              { title: "低 ", value: "{low}" },
+              { title: "收 ", value: "{close}" },
+              { title: "漲跌幅 ", value: "{change}" },
+              { title: "成交量 ", value: "{volume}" },
+            ],
           },
         },
         indicator: {
@@ -5108,7 +5107,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.05";
+        const VER = "2.06";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
