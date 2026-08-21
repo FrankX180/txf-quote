@@ -763,6 +763,51 @@ def refuse_history_shrink(history, n=HIST_N):
     return out
 
 
+def enrich_history_cum(history):
+    """newest-first history → *Cum = 自最舊日起對日Δ的 running sum（雲端一次算好，前端只載入）。"""
+    if not history:
+        return history
+    specs = [
+        ("foreign", "foreignDelta", "foreignCum"),
+        ("trust", "trustDelta", "trustCum"),
+        ("dealer", "dealerDelta", "dealerCum"),
+        ("retail", "retailDelta", "retailCum"),
+        ("top10", "top10Delta", "top10Cum"),
+        ("top10Spec", "top10SpecDelta", "top10SpecCum"),
+    ]
+    rows = list(reversed(history))  # oldest → newest
+    prev_lvl = {}
+    sums = {c: 0.0 for _, _, c in specs}
+    started = {c: False for _, _, c in specs}
+    for rec in rows:
+        for lvl_k, dlt_k, cum_k in specs:
+            dlt = rec.get(dlt_k)
+            if dlt is None:
+                cur = rec.get(lvl_k)
+                prv = prev_lvl.get(lvl_k)
+                if cur is not None and prv is not None:
+                    try:
+                        dlt = float(cur) - float(prv)
+                        rec[dlt_k] = dlt
+                    except (TypeError, ValueError):
+                        dlt = None
+            else:
+                try:
+                    dlt = float(dlt)
+                except (TypeError, ValueError):
+                    dlt = None
+            if dlt is not None:
+                sums[cum_k] += dlt
+                started[cum_k] = True
+            rec[cum_k] = sums[cum_k] if started[cum_k] else None
+            if rec.get(lvl_k) is not None:
+                try:
+                    prev_lvl[lvl_k] = float(rec[lvl_k])
+                except (TypeError, ValueError):
+                    pass
+    return history
+
+
 def extract(html: str, marker: str):
     i = html.find(marker)
     if i < 0:
@@ -1570,6 +1615,7 @@ def main():
         sources.append("night_ah")
     # 寫檔前再併＋拒縮短：雲端日常 SSOT＝repo 長歷史，不靠本機 PG
     history = refuse_history_shrink(history, HIST_N)
+    history = enrich_history_cum(history)
     payload = {
         "fetchedAt": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
         "date": ymd_slash(date) if len(date) == 8 else date,
