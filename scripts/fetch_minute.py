@@ -89,6 +89,28 @@ def merge_bars(*groups):
     return sorted(by_ts.values(), key=lambda x: x["timestamp"])
 
 
+def fix_future_ts(rows):
+    """Yahoo 時間戳偶發整體偏移（2026-08-21 夜盤實測 +2 天）：
+    比現在還晚的棒逐日回移，重算 date/session；無法歸位的丟棄。"""
+    if not rows:
+        return rows
+    limit = int(datetime.now(TZ).timestamp()) + 120
+    out = []
+    for b in rows:
+        ts = int(b["timestamp"]) // 1000
+        while ts > limit:
+            ts -= 86400
+        sess, sdate, _ = classify(ts)
+        if not sess:
+            continue
+        b = dict(b)
+        b["timestamp"] = ts * 1000
+        b["date"] = sdate
+        b["session"] = sess
+        out.append(b)
+    return out
+
+
 def trim_days(rows, n=KEEP_DAYS):
     dates = []
     for b in reversed(rows):
@@ -202,14 +224,15 @@ def main():
     if do_f:
         fn, fd = fetch_fubon_1m()
         src.append("fubon 1m")
-    n1 = trim_days(merge_bars(on, yn, fn))
-    d1 = trim_days(merge_bars(od, yd, fd))
+    n1 = fix_future_ts(trim_days(merge_bars(on, yn, fn)))
+    d1 = fix_future_ts(trim_days(merge_bars(od, yd, fd)))
     n5, d5, n15, d15 = [], [], [], []
     old = json.loads(OUT.read_text(encoding="utf-8")) if OUT.exists() else {}
     if do_y:
         n5, d5 = fetch_apac("5m")
         n15, d15 = fetch_apac("15m")
         src.append("yahoo 5m 15m")
+        n5, d5, n15, d15 = (fix_future_ts(x) for x in (n5, d5, n15, d15))
     else:
         n5, d5 = old.get("night_5m") or [], old.get("day_5m") or []
         n15, d15 = old.get("night_15m") or [], old.get("day_15m") or []
