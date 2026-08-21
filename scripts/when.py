@@ -103,7 +103,7 @@ def want_uncovered(dt=None):
         if not (730 <= h <= 1000):
             return False
         return not night_chips_ready(d)
-    if 1430 <= h <= 1500:
+    if 1430 <= h <= 1530:
         return not day_chips_ready(d)
     if 730 <= h <= 1000:
         return not night_chips_ready(d)
@@ -171,7 +171,7 @@ def want_tmf_retail(dt=None):
     h = hm(d)
     if d.weekday() >= 5:
         return False
-    if 1430 <= h <= 1500:
+    if 1430 <= h <= 1530:
         return not day_chips_ready(d)
     if 730 <= h <= 1000:
         return not night_chips_ready(d)
