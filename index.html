@@ -596,7 +596,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.94</div>
+      <div class="ver foot-right">1.95</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -639,6 +639,8 @@
     let oiChartActive = false;
     let kOiPanes = [];
     let oiIndReady = false;
+    let kOiVisFrom = 0;
+    let kOiVisHooked = false;
     let oiSimple = false;
     let oiNetFlow = false;
     let oiCloseDelta = "pts"; // pts=漲跌點數｜pct=漲跌幅%
@@ -3665,26 +3667,67 @@
         const n = Number(v);
         if (key === "pc" || key === "vix") return { color: oiColFill(key === "vix" ? "top10" : "dealer") };
         if (n < 0) return { color: "#1b8a3e" };
-        return { color: oiColFill(key) };
+        if (n > 0) return { color: "#d32f2f" };
+        return { color: "#888888" };
       };
     }
-    function registerOiBarInd(name, shortName, field, key, prec) {
+    function oiCumLineStyle() {
+      return {
+        style: "solid",
+        smooth: false,
+        size: 2,
+        color: "#ff9600",
+        dashedValue: [2, 2],
+      };
+    }
+    function registerOiBarInd(name, shortName, field, key, prec, withCum) {
+      const useCum = !!withCum;
+      const figures = [{
+        key: "v",
+        title: "",
+        type: "bar",
+        baseValue: 0,
+        styles: oiIndBarStyles(field, key),
+      }];
+      if (useCum) figures.push({ key: "cum", title: "", type: "line" });
       klinecharts.registerIndicator({
         name: name,
         shortName: shortName,
         series: "normal",
         precision: prec == null ? 0 : prec,
-        figures: [{
-          key: "v",
-          title: shortName + " ",
-          type: "bar",
-          baseValue: 0,
-          styles: oiIndBarStyles(field, key),
-        }],
+        styles: useCum ? { lines: [oiCumLineStyle()] } : {},
+        figures: figures,
         calc: function (list) {
-          return (list || []).map(function (k) {
+          const rows = list || [];
+          const from = Math.max(0, kOiVisFrom | 0);
+          const raw = rows.map(function (k) {
             const v = k && k[field];
-            return { v: v == null || !isFinite(Number(v)) ? null : Number(v) };
+            return v == null || !isFinite(Number(v)) ? null : Number(v);
+          });
+          if (!useCum) {
+            return raw.map(function (v) { return { v: v }; });
+          }
+          let sum = 0;
+          let maxBar = 0;
+          let maxCum = 0;
+          const cumArr = raw.map(function (v, i) {
+            if (i < from || v == null) return null;
+            sum += v;
+            const a = Math.abs(v);
+            if (a > maxBar) maxBar = a;
+            const ca = Math.abs(sum);
+            if (ca > maxCum) maxCum = ca;
+            return sum;
+          });
+          // Y 跟累計線；柱另縮到累計振幅約 40%，避免把柱壓扁／把軸拉開
+          const target = maxCum > 0 ? maxCum * 0.4 : maxBar;
+          const scale = (maxBar > 0 && target > 0) ? (target / maxBar) : 1;
+          return raw.map(function (v, i) {
+            return {
+              v: v == null ? null : v * scale,
+              raw: v,
+              cum: cumArr[i],
+            };
           });
         },
         createTooltipDataSource: function (params) {
@@ -3693,33 +3736,66 @@
           const dataIdx = ch && ch.dataIndex != null ? ch.dataIndex : -1;
           const row = ind && ind.result && dataIdx >= 0 ? ind.result[dataIdx] : null;
           const k = ch && ch.kLineData;
-          let v = row && row.v != null ? row.v : (k ? k[field] : null);
+          let v = row && row.raw != null ? row.raw : (row && row.v != null ? row.v : (k ? k[field] : null));
           if (v == null || !isFinite(Number(v))) return { name: shortName, values: [] };
           const n = Number(v);
           const color = (key === "pc" || key === "vix")
             ? oiColFill(key === "vix" ? "top10" : "dealer")
-            : (n < 0 ? "#1b8a3e" : oiColFill(key));
+            : (n < 0 ? "#1b8a3e" : (n > 0 ? "#d32f2f" : "#888888"));
           const text = (key === "pc" || key === "vix")
             ? (Math.round(n * 10) / 10).toFixed(1)
             : ((n > 0 ? "+" : "") + Math.round(n));
-          return {
-            name: shortName,
-            values: [{ title: shortName + " ", value: { text: text, color: color } }],
-          };
+          const values = [{
+            title: "",
+            value: { text: shortName + text, color: color },
+          }];
+          if (useCum && row && row.cum != null && isFinite(Number(row.cum))) {
+            const c = Number(row.cum);
+            values.push({
+              title: "",
+              value: {
+                text: "累計" + ((c > 0 ? "+" : "") + Math.round(c)),
+                color: "#ff9600",
+              },
+            });
+          }
+          return { name: "", values: values };
         },
       });
     }
     function ensureOiIndicators() {
       if (oiIndReady || typeof klinecharts === "undefined" || !klinecharts.registerIndicator) return;
       oiIndReady = true;
-      registerOiBarInd("OI_FOREIGN", "外資", "oiForeign", "foreign", 0);
-      registerOiBarInd("OI_TRUST", "投信", "oiTrust", "trust", 0);
-      registerOiBarInd("OI_DEALER", "自營", "oiDealer", "dealer", 0);
-      registerOiBarInd("OI_RETAIL", "散戶", "oiRetail", "retail", 0);
-      registerOiBarInd("OI_TOP10", "前十淨", "oiTop10", "top10", 0);
-      registerOiBarInd("OI_TOP10SPEC", "特法", "oiTop10Spec", "top10Spec", 0);
-      registerOiBarInd("OI_PC", "P/C%", "oiPc", "pc", 1);
-      registerOiBarInd("OI_VIX", "VIX", "oiVix", "vix", 1);
+      registerOiBarInd("OI_FOREIGN", "外資", "oiForeign", "foreign", 0, true);
+      registerOiBarInd("OI_TRUST", "投信", "oiTrust", "trust", 0, true);
+      registerOiBarInd("OI_DEALER", "自營", "oiDealer", "dealer", 0, true);
+      registerOiBarInd("OI_RETAIL", "散戶", "oiRetail", "retail", 0, true);
+      registerOiBarInd("OI_TOP10", "前十淨", "oiTop10", "top10", 0, true);
+      registerOiBarInd("OI_TOP10SPEC", "特法", "oiTop10Spec", "top10Spec", 0, true);
+      registerOiBarInd("OI_PC", "P/C%", "oiPc", "pc", 1, false);
+      registerOiBarInd("OI_VIX", "VIX", "oiVix", "vix", 1, false);
+    }
+    function hookOiVisibleRange() {
+      if (!kchart || kOiVisHooked || !kchart.subscribeAction) return;
+      kOiVisHooked = true;
+      kchart.subscribeAction("onVisibleRangeChange", function () {
+        refreshOiCumByView();
+      });
+    }
+    function refreshOiCumByView() {
+      if (!kchart || !kOiPanes.length) return;
+      let from = 0;
+      try {
+        const vr = kchart.getVisibleRange && kchart.getVisibleRange();
+        if (vr && vr.from >= 0) from = vr.from | 0;
+      } catch (e) {}
+      if (from === kOiVisFrom) return;
+      kOiVisFrom = from;
+      kOiPanes.forEach(function (p) {
+        try {
+          if (kchart.overrideIndicator) kchart.overrideIndicator({ name: p.name }, p.id);
+        } catch (e) {}
+      });
     }
     function clearKOiPanes() {
       if (!kchart || !kOiPanes.length) {
@@ -3756,7 +3832,18 @@
       ensureOiIndicators();
       const cur = kOiPanes.map(function (p) { return p.name; }).join(",");
       const next = names.map(function (x) { return x.name; }).join(",");
-      if (cur === next && kOiPanes.length === names.length) return;
+      if (cur === next && kOiPanes.length === names.length) {
+        hookOiVisibleRange();
+        try {
+          const vr0 = kchart.getVisibleRange && kchart.getVisibleRange();
+          if (vr0 && vr0.from >= 0) kOiVisFrom = vr0.from | 0;
+        } catch (e) {}
+        const forced0 = kOiVisFrom;
+        kOiVisFrom = -1;
+        refreshOiCumByView();
+        if (kOiVisFrom < 0) kOiVisFrom = forced0;
+        return;
+      }
       clearKOiPanes();
       names.forEach(function (x) {
         try {
@@ -3764,6 +3851,15 @@
           if (id) kOiPanes.push({ id: id, name: x.name });
         } catch (e) {}
       });
+      hookOiVisibleRange();
+      try {
+        const vr = kchart.getVisibleRange && kchart.getVisibleRange();
+        if (vr && vr.from >= 0) kOiVisFrom = vr.from | 0;
+      } catch (e) {}
+      const forced = kOiVisFrom;
+      kOiVisFrom = -1;
+      refreshOiCumByView();
+      if (kOiVisFrom < 0) kOiVisFrom = forced;
     }
     function goOiDailyChart() {
       oiChartActive = true;
@@ -4855,7 +4951,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "1.94";
+        const VER = "1.95";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
