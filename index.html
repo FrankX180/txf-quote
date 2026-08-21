@@ -596,7 +596,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.01</div>
+      <div class="ver foot-right">2.02</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -645,6 +645,7 @@
     let kOiCumTimer = null;
     let kOiEqualizeTimer = null;
     let kOiEqualizing = false;
+    const kOiAxisLock = {}; // name -> {min,max,mid} 法人累計 Y 鎖
     const OI_CUM_NAMES = {
       OI_FOREIGN: 1,
       OI_TRUST: 1,
@@ -3730,9 +3731,10 @@
         key: "v",
         title: "",
         type: "bar",
-        baseValue: 0,
         styles: oiIndBarStyles(field, key),
       }];
+      // 無累計：柱基線 0。有累計：calc 把 baseValue 改成可見折線 mid，並鎖 minValue/maxValue。
+      figures[0].baseValue = 0;
       if (useCum) figures.push({ key: "cum", title: "", type: "line" });
       klinecharts.registerIndicator({
         name: name,
@@ -3741,7 +3743,7 @@
         precision: prec == null ? 0 : prec,
         styles: useCum ? { lines: [oiCumLineStyle()] } : {},
         figures: figures,
-        calc: function (list) {
+        calc: function (list, indicator) {
           const rows = list || [];
           const nAll = rows.length;
           if (!useCum) {
@@ -3789,6 +3791,13 @@
           const mid = (minC + maxC) / 2;
           const half = (maxC - minC) / 2;
           const barAmp = half * 0.9;
+          // 鎖 Y＝可見橘線絕對區間；柱基線改 mid，避免 baseValue:0 把全負水位軸拉扁
+          kOiAxisLock[name] = { min: minC, max: maxC, mid: mid };
+          if (indicator) {
+            indicator.minValue = minC;
+            indicator.maxValue = maxC;
+            if (indicator.figures && indicator.figures[0]) indicator.figures[0].baseValue = mid;
+          }
           return rows.map(function (_k, i) {
             const n = rawBar[i];
             const c = absCum[i];
@@ -3899,7 +3908,7 @@
         kOiEqualizeTimer = setTimeout(function () {
           kOiEqualizeTimer = null;
           equalizeOiPaneHeights();
-        }, 40);
+        }, 220);
       });
     }
     function scheduleOiVisScale() {
@@ -3925,7 +3934,16 @@
       kOiPanes.forEach(function (p) {
         if (!OI_CUM_NAMES[p.name]) return;
         try {
+          // 先重算（calc 會寫 kOiAxisLock + 改 baseValue/min/max）
           if (kchart.overrideIndicator) kchart.overrideIndicator({ name: p.name }, p.id);
+          const lock = kOiAxisLock[p.name];
+          if (lock && isFinite(lock.min) && isFinite(lock.max) && kchart.overrideIndicator) {
+            kchart.overrideIndicator({
+              name: p.name,
+              minValue: lock.min,
+              maxValue: lock.max,
+            }, p.id);
+          }
         } catch (e) {}
       });
     }
@@ -5075,7 +5093,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.01";
+        const VER = "2.02";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
