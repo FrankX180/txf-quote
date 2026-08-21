@@ -155,7 +155,7 @@
     .oi th.oi-th-pick.on { color: #6b7280; text-decoration: underline; }
     .oi th.oi-th-close {
       cursor: pointer; user-select: none; white-space: nowrap;
-      color: #6b7280; text-decoration: underline;
+      color: #6b7280; text-decoration: none;
     }
     .oi th.oi-pick-h {
       color: #6b7280; font-weight: 700;
@@ -596,7 +596,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.93</div>
+      <div class="ver foot-right">1.94</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -641,7 +641,7 @@
     let oiIndReady = false;
     let oiSimple = false;
     let oiNetFlow = false;
-    let oiCloseDelta = "pct"; // pct=漲跌幅%｜pts=漲跌點數
+    let oiCloseDelta = "pts"; // pts=漲跌點數｜pct=漲跌幅%
     let oiPick = { oi: null, big: null };
     let oiHistOpen = { oi: false, big: false };
     try { oiSimple = localStorage.getItem("txfOiSimple") === "1"; } catch (e) {}
@@ -1403,8 +1403,8 @@
       let html = `<div class="oi-table-wrap${pick ? " has-pick" : ""}${cumOn ? " has-cum" : ""}">`;
       if (cumOn) html += `<svg class="oi-cum-svg" aria-hidden="true"></svg>`;
       if (pick) html += `<button type="button" class="oi-restore" data-oi-restore="${panel}">恢復</button>`;
-      const closeH = oiCloseDelta === "pts" ? "收盤·點" : "收盤·%";
-      const closeTitle = oiCloseDelta === "pts" ? "點一下改回漲跌幅%" : "點一下改為漲跌點數";
+      const closeH = oiCloseDelta === "pts" ? "收盤(點)" : "收盤 (%)";
+      const closeTitle = oiCloseDelta === "pts" ? "點一下改為漲跌幅%" : "點一下改為漲跌點數";
       html += `<table><tr><th>日</th><th class="oi-th-close" data-oi-close-toggle="1" title="${closeTitle}">${closeH}</th>${oiPickHead(panel, labs)}`;
       keys.forEach((k) => { html += oiPickTh(panel, k, labs[k] || k); });
       html += `</tr>`;
@@ -4855,7 +4855,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "1.93";
+        const VER = "1.94";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
