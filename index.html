@@ -596,7 +596,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.95</div>
+      <div class="ver foot-right">1.96</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -641,6 +641,15 @@
     let oiIndReady = false;
     let kOiVisFrom = 0;
     let kOiVisHooked = false;
+    let kOiCumTimer = null;
+    const OI_CUM_NAMES = {
+      OI_FOREIGN: 1,
+      OI_TRUST: 1,
+      OI_DEALER: 1,
+      OI_RETAIL: 1,
+      OI_TOP10: 1,
+      OI_TOP10SPEC: 1,
+    };
     let oiSimple = false;
     let oiNetFlow = false;
     let oiCloseDelta = "pts"; // pts=漲跌點數｜pct=漲跌幅%
@@ -3778,9 +3787,17 @@
     function hookOiVisibleRange() {
       if (!kchart || kOiVisHooked || !kchart.subscribeAction) return;
       kOiVisHooked = true;
+      // 捲動中不重算；停住後再算，避免每幀 override + 重算 Y 造成延遲感
       kchart.subscribeAction("onVisibleRangeChange", function () {
-        refreshOiCumByView();
+        scheduleOiCumByView();
       });
+    }
+    function scheduleOiCumByView() {
+      if (kOiCumTimer) clearTimeout(kOiCumTimer);
+      kOiCumTimer = setTimeout(function () {
+        kOiCumTimer = null;
+        refreshOiCumByView();
+      }, 180);
     }
     function refreshOiCumByView() {
       if (!kchart || !kOiPanes.length) return;
@@ -3792,12 +3809,17 @@
       if (from === kOiVisFrom) return;
       kOiVisFrom = from;
       kOiPanes.forEach(function (p) {
+        if (!OI_CUM_NAMES[p.name]) return;
         try {
           if (kchart.overrideIndicator) kchart.overrideIndicator({ name: p.name }, p.id);
         } catch (e) {}
       });
     }
     function clearKOiPanes() {
+      if (kOiCumTimer) {
+        clearTimeout(kOiCumTimer);
+        kOiCumTimer = null;
+      }
       if (!kchart || !kOiPanes.length) {
         kOiPanes = [];
         return;
@@ -4951,7 +4973,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "1.95";
+        const VER = "1.96";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
