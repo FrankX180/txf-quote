@@ -1709,15 +1709,15 @@
         if (age > 35*1000) {
           const pk = "txfPollAt";
           const plast = Number(localStorage.getItem(pk) || 0);
-          if (Date.now() - plast > 25000) {
+          if (Date.now() - plast > 10000) {
             localStorage.setItem(pk, String(Date.now()));
             fetch(LIVE + "?kind=poll&chart=1", { cache: "no-store" }).catch(function(){});
           }
         }
-        if (!(age > 75*1000)) return;
+        if (!(age > 35*1000)) return;
         const key = "txfHealAt";
         const last = Number(localStorage.getItem(key) || 0);
-        if (Date.now() - last < 60*1000) return;
+        if (Date.now() - last < 30*1000) return;
         localStorage.setItem(key, String(Date.now()));
         const reason = "frontend-stale age=" + Math.round(age/1000) + "s src=" + (src||"");
         fetch(LIVE + "?kind=heal&reason=" + encodeURIComponent(reason), { cache: "no-store" }).then(function(r){ return r.json().catch(function(){return {};}); }).then(function(j){
@@ -4514,7 +4514,7 @@
         if (Array.isArray(rows) && rows.length) applyLive(rows);
         // 約每 30 秒從雲端補齊完整當日分鐘柱（多人共用同一 R2）
         const mark = window.__txfImbCloudAt || 0;
-        if (Date.now() - mark > 30000) {
+        if (Date.now() - mark > 10000) {
           window.__txfImbCloudAt = Date.now();
           loadImbCloud().then(() => {
             if (chartMode === "line") draw();
@@ -4954,9 +4954,9 @@
       setTimeout(() => ensureLive1m(true), 8000);
       setTimeout(() => ensureLive1m(true), 20000);
       live1mTimer = setInterval(() => {
-        // 每分打 Yahoo chart（經 Worker）+ 合併 D1 px1m；單價只補當根 close
+        // 每15秒打 Yahoo chart（經 Worker）+ 合併 D1 px1m；單價只補當根 close
         ensureLive1m(true);
-      }, 60000);
+      }, 15000);
     }
 
     async function loadKline() {
@@ -5121,7 +5121,7 @@
       liveTimer = setInterval(pollLive, 5000);
       if (!ghHealTimer) {
         checkGhSnapshotStale();
-        ghHealTimer = setInterval(checkGhSnapshotStale, 30000);
+        ghHealTimer = setInterval(checkGhSnapshotStale, 15000);
       }
     }
     function stopPoll() {
