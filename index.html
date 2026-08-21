@@ -111,7 +111,12 @@
     .oi-panel.on { display: block; }
     .oi .muted { color: #9ca3af; font-weight: 500; font-size: 14px; }
     .oi .note { margin: 6px 0 0; color: #6b7280; font-size: 14px; line-height: 1.4; }
-    .oi td.oi-close { padding: 2px 3px; vertical-align: middle; min-width: 40px; }
+    .oi td.oi-close {
+      padding: 2px 4px; vertical-align: middle; min-width: 11.5ch;
+      font-family: ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
     .oi-cbar-wrap {
       display: flex; flex-direction: column; align-items: stretch; gap: 1px;
       min-width: 36px;
@@ -127,9 +132,15 @@
       background: #f97316; border-radius: 0;
     }
     .oi-cnum {
-      flex-shrink: 0; min-width: 0; width: 100%; text-align: right;
+      display: inline-flex; align-items: baseline; justify-content: flex-end;
+      gap: 0; width: 100%; box-sizing: border-box;
+      font-family: ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace;
+      font-variant-numeric: tabular-nums;
       font-size: 13px; font-weight: 800; line-height: 1.15;
+      white-space: nowrap;
     }
+    .oi-cpx { display: inline-block; min-width: 5.5ch; text-align: right; }
+    .oi-cpct { display: inline-block; min-width: 7.5ch; text-align: right; }
     .oi td.oi-pick {
       padding: 2px 2px; vertical-align: middle;
       min-width: 6px; width: 8px; max-width: 10px;
@@ -581,7 +592,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.90</div>
+      <div class="ver foot-right">1.91</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1090,12 +1101,14 @@
       const p = prev == null || prev === "" ? NaN : Number(prev);
       const cls = isFinite(p) ? (n > p ? "up" : n < p ? "dn" : "flat") : "flat";
       const disp = oiSimple ? round50(n) : n;
-      let lab = fmt(disp);
+      const px = `<span class="oi-cpx">${fmt(disp)}</span>`;
+      let pctHtml = `<span class="oi-cpct"></span>`;
       if (isFinite(p) && p !== 0) {
         const pct = ((n - p) / p) * 100;
-        lab += "(" + (pct > 0 ? "+" : "") + pct.toFixed(1) + "%)";
+        const sign = pct > 0 ? "+" : "";
+        pctHtml = `<span class="oi-cpct">(${sign}${pct.toFixed(1)}%)</span>`;
       }
-      return `<span class="oi-cnum ${cls}">${lab}</span>`;
+      return `<span class="oi-cnum ${cls}">${px}${pctHtml}</span>`;
     }
     function oiAbsMax(vals) {
       let m = 0;
@@ -1392,7 +1405,8 @@
           }
           pickCell = oiSignedBarCell(r[pick], meta, mode, cumInfo, pick);
         }
-        const prevClose = (i + 1 < list.length && list[i + 1]) ? list[i + 1].close : null;
+        // 用完整 rows 算前日（收合只顯示 10 天時，最底列仍要有漲跌幅）
+        const prevClose = (i + 1 < rows.length && rows[i + 1]) ? rows[i + 1].close : null;
         html += `<tr><td>${oiShortDate(r.date, r.session)}</td><td class="oi-close">${oiCloseCell(r.close, prevClose)}</td><td class="oi-pick${pick ? " on" : ""}">${pickCell}</td>`;
         keys.forEach((k) => {
           if (k === "pc" || k === "vix") {
@@ -4816,7 +4830,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "1.90";
+        const VER = "1.91";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
