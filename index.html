@@ -1687,6 +1687,34 @@
       if (hm >= 1458 || hm < 510) return true;
       return false;
     }
+    // ---- 空窗偵測自動補觸發（前端守望） ----
+    function parseGhFetchedAt(s) {
+      if (!s) return 0;
+      const m = String(s).match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
+      if (m) {
+        const y = +m[1], mo = +m[2]-1, d = +m[3], h = +m[4], mi = +m[5], sec = +m[6];
+        // Taipei UTC+8
+        return Date.UTC(y, mo, d, h, mi, sec) - 8*3600*1000;
+      }
+      const d = new Date(s);
+      return isNaN(d) ? 0 : d.getTime();
+    }
+    function healIfStale(fetchedAtStr, src) {
+      try {
+        if (!marketOpen()) return;
+        if (document.visibilityState !== "visible") return;
+        const age = Date.now() - parseGhFetchedAt(fetchedAtStr);
+        if (!(age > 11*60*1000)) return;
+        const key = "txfHealAt";
+        const last = Number(localStorage.getItem(key) || 0);
+        if (Date.now() - last < 10*60*1000) return;
+        localStorage.setItem(key, String(Date.now()));
+        const reason = "frontend-stale age=" + Math.round(age/60000) + "m src=" + (src||"");
+        fetch(LIVE + "?kind=heal&reason=" + encodeURIComponent(reason), { cache: "no-store" }).then(function(r){ return r.json().catch(function(){return {};}); }).then(function(j){
+          console.log("[heal] triggered", reason, j && j.heal ? j.heal : j);
+        }).catch(function(){});
+      } catch (_) {}
+    }
     // 可覆寫五檔的盤：日 08:30–13:45、夜 14:58–05:09（周末除外）
     function bookSessNow() {
       if (!marketOpen()) return null;
@@ -4527,6 +4555,7 @@
           snap = applyStoredBooks(s);
           hist.night = Array.isArray(hn) ? hn : [];
           hist.day = Array.isArray(hd) ? hd : [];
+          if (s && s.fetchedAt) healIfStale(s.fetchedAt, "load-snapshot");
           render();
         } else if ($("stamp") && $("stamp").textContent.indexOf("載入") >= 0) {
           $("stamp").textContent = "讀取快照中…";
@@ -4936,6 +4965,7 @@
         });
         loadLocal1m();
         save1m();
+        if (m && m.fetchedAt) healIfStale(m.fetchedAt, "loadKline-minute");
         if (!minutePack.night_1m.length && (m.night || []).length) {
           minutePack.night_1m = m.night;
           minutePack.day_1m = m.day || [];
@@ -5058,6 +5088,16 @@
         if (document.visibilityState === "visible") trafficPing(false);
       });
     }
+    let ghHealTimer = null;
+    async function checkGhSnapshotStale() {
+      try {
+        if (!marketOpen() || document.visibilityState !== "visible") return;
+        const r = await gh("data/snapshot.json");
+        if (!r || !r.ok) return;
+        const j = await r.json();
+        if (j && j.fetchedAt) healIfStale(j.fetchedAt, "poll-snapshot");
+      } catch (_) {}
+    }
     function startPoll() {
       if (liveTimer) return;
       try {
@@ -5069,6 +5109,10 @@
       } catch (e) {}
       pollLive();
       liveTimer = setInterval(pollLive, 5000);
+      if (!ghHealTimer) {
+        checkGhSnapshotStale();
+        ghHealTimer = setInterval(checkGhSnapshotStale, 120000);
+      }
     }
     function stopPoll() {
       if (liveTimer) {

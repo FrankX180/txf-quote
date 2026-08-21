@@ -167,6 +167,158 @@ async function ensureSchema(db) {
         ")"
     )
     .run();
+  await db
+    .prepare(
+      "CREATE TABLE IF NOT EXISTS heal_state (" +
+        "k TEXT PRIMARY KEY," +
+        "ts INTEGER NOT NULL," +
+        "v TEXT" +
+        ")"
+    )
+    .run();
+  await db
+    .prepare(
+      "CREATE TABLE IF NOT EXISTS heal_log (" +
+        "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+        "ts INTEGER NOT NULL," +
+        "reason TEXT," +
+        "ok INTEGER," +
+        "detail TEXT" +
+        ")"
+    )
+    .run();
+}
+
+
+
+
+// ---- 空窗偵測自動補觸發（GH Actions 延遲跳班備援） ----
+const HEAL_GITHUB_OWNER = "FrankX180";
+const HEAL_GITHUB_REPO = "txf-quote";
+const HEAL_WORKFLOW = "update-quote.yml";
+const HEAL_MIN_INTERVAL_MS = 8 * 60 * 1000;
+const HEAL_STALE_MS = 11 * 60 * 1000;
+const HEAL_GH_SNAPSHOT = "https://frankx180.github.io/txf-quote/data/snapshot.json";
+const HEAL_GH_KLINE = "https://frankx180.github.io/txf-quote/data/kline-minute.json";
+
+async function getHealState(env, k) {
+  if (!env.IMB_DB) return null;
+  try {
+    await ensureSchema(env.IMB_DB);
+    const row = await env.IMB_DB.prepare("SELECT ts, v FROM heal_state WHERE k = ?").bind(k).first();
+    return row || null;
+  } catch (_) { return null; }
+}
+async function setHealState(env, k, ts, v) {
+  if (!env.IMB_DB) return;
+  try {
+    await ensureSchema(env.IMB_DB);
+    await env.IMB_DB.prepare("INSERT INTO heal_state (k, ts, v) VALUES (?, ?, ?) ON CONFLICT(k) DO UPDATE SET ts=excluded.ts, v=excluded.v").bind(k, ts, v || "").run();
+  } catch (_) {}
+}
+async function logHeal(env, reason, ok, detail) {
+  if (!env.IMB_DB) return;
+  try {
+    await ensureSchema(env.IMB_DB);
+    await env.IMB_DB.prepare("INSERT INTO heal_log (ts, reason, ok, detail) VALUES (?, ?, ?, ?)").bind(Date.now(), reason || "", ok ? 1 : 0, (detail || "").slice(0, 800)).run();
+  } catch (_) {}
+}
+function parseGhFetchedAt(s) {
+  if (!s) return null;
+  // format "2026-08-21 19:03:55" (Taipei) -> epoch
+  const m = String(s).match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
+  if (!m) {
+    const d = new Date(s);
+    return isNaN(d) ? null : d.getTime();
+  }
+  const y = Number(m[1]), mo = Number(m[2])-1, d = Number(m[3]), h = Number(m[4]), mi = Number(m[5]), sec = Number(m[6]);
+  // Taipei is UTC+8, no DST
+  return Date.UTC(y, mo, d, h, mi, sec) - 8 * 3600 * 1000;
+}
+async function fetchGhAgeMs() {
+  try {
+    const r = await fetch(HEAL_GH_SNAPSHOT, { headers: { "Cache-Control": "no-cache" }, cf: { cacheTtl: 0, cacheEverything: false } });
+    if (!r.ok) return { ok: false, reason: "gh-fetch-" + r.status };
+    const j = await r.json();
+    const ts = parseGhFetchedAt(j.fetchedAt);
+    if (!ts) return { ok: false, reason: "no-fetchedAt" };
+    const age = Date.now() - ts;
+    return { ok: true, ageMs: age, fetchedAt: j.fetchedAt, ts };
+  } catch (e) {
+    return { ok: false, reason: String((e && e.message) || e).slice(0, 120) };
+  }
+}
+async function triggerGithubWorkflow(env, reason) {
+  const token = (env.GH_TOKEN || env.GITHUB_TOKEN || env.GITHUB_FINE_PAT || "").trim();
+  if (!token) return { ok: false, reason: "no-token", skipped: true };
+  const now = Date.now();
+  const last = await getHealState(env, "last_dispatch");
+  if (last && now - Number(last.ts) < HEAL_MIN_INTERVAL_MS) {
+    return { ok: false, reason: "rate-limited", lastTs: last.ts, skipped: true };
+  }
+  const api = `https://api.github.com/repos/${HEAL_GITHUB_OWNER}/${HEAL_GITHUB_REPO}/actions/workflows/${HEAL_WORKFLOW}/dispatches`;
+  try {
+    const r = await fetch(api, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Accept": "application/vnd.github+json",
+        "Content-Type": "application/json",
+        "User-Agent": "txf-heal-worker/1.0",
+      },
+      body: JSON.stringify({ ref: "master" }),
+    });
+    // GH returns 204 on success; 401/404/422 etc are errors
+    const detail = `status ${r.status} ${await r.text().catch(()=>"")}`.slice(0, 400);
+    const ok = r.status === 204 || r.status === 201 || r.status === 200;
+    await setHealState(env, "last_dispatch", now, reason || "");
+    await logHeal(env, reason || "manual", ok, detail);
+    if (!ok) {
+      // Fallback: try main branch
+      if (r.status === 422 || r.status === 404) {
+        const r2 = await fetch(api, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "User-Agent": "txf-heal-worker/1.0",
+          },
+          body: JSON.stringify({ ref: "main" }),
+        });
+        const detail2 = `status ${r2.status} ${await r2.text().catch(()=>"")}`.slice(0, 400);
+        const ok2 = r2.status === 204 || r2.status === 201 || r2.status === 200;
+        await logHeal(env, (reason || "") + ":retry-main", ok2, detail2);
+        return { ok: ok2, status: r2.status, detail: detail2, via: "main" };
+      }
+    }
+    return { ok, status: r.status, detail, via: "master" };
+  } catch (e) {
+    const msg = String((e && e.message) || e).slice(0, 300);
+    await logHeal(env, reason || "", false, msg);
+    return { ok: false, reason: msg };
+  }
+}
+async function maybeHealGithub(env, reason) {
+  const now = Date.now();
+  if (!sessionOf(now)) return { ok: false, reason: "closed", skipped: true };
+  // 節流：每 5 分才檢查一次 GH snapshot（避免 cron 每 2 分都打 GH）
+  const lastCheck = await getHealState(env, "last_gh_check");
+  if (lastCheck && now - Number(lastCheck.ts) < 4 * 60 * 1000 && reason !== "frontend-stale" && reason !== "force") {
+    return { ok: false, reason: "check-throttled", skipped: true };
+  }
+  await setHealState(env, "last_gh_check", now, reason || "");
+  const ageRes = await fetchGhAgeMs();
+  if (!ageRes.ok) {
+    // 取不到 GH 資料時不誤觸發，但記錄
+    return { ok: false, reason: ageRes.reason, skipped: true };
+  }
+  if (ageRes.ageMs < HEAL_STALE_MS) {
+    return { ok: false, reason: "fresh", ageMs: ageRes.ageMs, fetchedAt: ageRes.fetchedAt, skipped: true };
+  }
+  // 確認 stale -> 觸發 dispatch（內有 8 分 rate limit）
+  const trig = await triggerGithubWorkflow(env, `${reason || "stale"} age=${Math.round(ageRes.ageMs/60000)}m fetchedAt=${ageRes.fetchedAt}`);
+  return { ok: trig.ok, ageMs: ageRes.ageMs, fetchedAt: ageRes.fetchedAt, trigger: trig, stale: true };
 }
 
 
@@ -442,10 +594,12 @@ function barsFromChartJson(chart) {
   for (let i = 0; i < tsList.length; i++) {
     const c = closes[i];
     if (c == null) continue;
-    const tsSec = +tsList[i];
-    const ts = tsSec < 1e12 ? tsSec * 1000 : tsSec;
+    let tsSec = +tsList[i];
+    let ts = tsSec < 1e12 ? tsSec * 1000 : tsSec;
+    // Yahoo 夜盤標次交易日（平日 +1 天、週五 +2 天）：逐日回移到不晚於現在
+    const nowLim = Date.now() + 120000;
+    while (ts > nowLim) ts -= 86400000;
     const sess = sessionOf(ts);
-    if (!sess) continue;
     const dayKey = tradingDayKey(ts);
     const slot = minuteSlot(ts);
     const o = opens[i] != null ? +opens[i] : +c;
@@ -1256,6 +1410,46 @@ export default {
       );
     }
 
+
+    if (kind === "heal") {
+      try {
+        const force = url.searchParams.get("force") === "1";
+        const reason = url.searchParams.get("reason") || "frontend-stale";
+        let res;
+        if (force) {
+          res = await triggerGithubWorkflow(env, "force:" + reason);
+          res = { ok: res.ok, trigger: res, forced: true };
+        } else {
+          res = await maybeHealGithub(env, reason);
+        }
+        return jsonResp({ ok: true, heal: res, at: new Date().toISOString() }, 200, {
+          "Cache-Control": "no-store",
+          "CDN-Cache-Control": "no-store",
+          "Cloudflare-CDN-Cache-Control": "no-store",
+        });
+      } catch (e) {
+        return jsonResp({ ok: false, error: String((e && e.message) || e) }, 500, { "Cache-Control": "no-store" });
+      }
+    }
+    if (kind === "heal-status") {
+      try {
+        const ageRes = await fetchGhAgeMs();
+        const lastDispatch = await getHealState(env, "last_dispatch");
+        const lastCheck = await getHealState(env, "last_gh_check");
+        let logs = [];
+        try {
+          await ensureSchema(env.IMB_DB);
+          const { results } = await env.IMB_DB.prepare("SELECT ts, reason, ok, detail FROM heal_log ORDER BY id DESC LIMIT 10").all();
+          logs = results || [];
+        } catch (_) {}
+        return jsonResp({ ok: true, ghAge: ageRes, lastDispatch, lastCheck, logs, at: new Date().toISOString() }, 200, {
+          "Cache-Control": "no-store",
+        });
+      } catch (e) {
+        return jsonResp({ ok: false, error: String((e && e.message) || e) }, 500, { "Cache-Control": "no-store" });
+      }
+    }
+
     // 手動／外部守護：強制打奇摩並寫 D1（不走 5 秒 CDN 快取語意）
     if (kind === "poll") {
       const wantChart = url.searchParams.get("chart") === "1";
@@ -1335,6 +1529,10 @@ export default {
     ctx.waitUntil(
       (async () => {
         await pollAndStore(env, { chart: true });
+        try {
+          const healRes = await maybeHealGithub(env, "cron-stale");
+          if (healRes && healRes.stale) console.log("heal cron triggered", JSON.stringify(healRes).slice(0, 300));
+        } catch (e) { console.error("heal cron failed", String((e && e.message) || e)); }
         try {
           await maybeRefreshTmf(env);
         } catch (e) {

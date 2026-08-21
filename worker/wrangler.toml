@@ -2,6 +2,9 @@ name = "txf-yahoo"
 main = "yahoo-quote.js"
 compatibility_date = "2024-11-01"
 
+[triggers]
+crons = ["*/2 * * * *"]
+
 [[d1_databases]]
 binding = "IMB_DB"
 database_name = "txf-imb"
