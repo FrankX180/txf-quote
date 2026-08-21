@@ -596,7 +596,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.96</div>
+      <div class="ver foot-right">1.97</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -3436,6 +3436,9 @@
     }
 
     function twStyles() {
+      const fam = "Microsoft JhengHei";
+      const tipText = { size: 12, family: fam, weight: "normal", color: "#76808F" };
+      const axisText = { size: 11, family: fam, weight: "normal", color: "#6b7280" };
       return {
         candle: {
           bar: {
@@ -3443,9 +3446,15 @@
             upBorderColor: "#d32f2f", downBorderColor: "#1b8a3e", noChangeBorderColor: "#888888",
             upWickColor: "#d32f2f", downWickColor: "#1b8a3e", noChangeWickColor: "#888888",
           },
+          priceMark: {
+            high: { textFamily: fam },
+            low: { textFamily: fam },
+            lastValueMark: { text: { family: fam } },
+          },
           tooltip: {
             showRule: "follow_cross",
             showType: "standard",
+            text: tipText,
             custom: function (data) {
               const c = data && data.current;
               if (!c) return [];
@@ -3461,20 +3470,32 @@
         },
         indicator: {
           bars: [{ upColor: "#d32f2f", downColor: "#1b8a3e", noChangeColor: "#888" }],
-          tooltip: { showRule: "follow_cross" },
+          tooltip: { showRule: "follow_cross", text: tipText },
+          lastValueMark: { text: { family: fam } },
+        },
+        xAxis: {
+          tickText: Object.assign({}, axisText),
+        },
+        yAxis: {
+          tickText: Object.assign({ marginStart: 4 }, axisText),
+        },
+        crosshair: {
+          horizontal: { text: { family: fam, size: 12 } },
+          vertical: { text: { family: fam, size: 12 } },
         },
       };
     }
 
     function miniStyles() {
       const s = twStyles();
-      s.candle.tooltip = { showRule: "none" };
+      s.candle.tooltip = { showRule: "none", text: { size: 12, family: "Microsoft JhengHei", weight: "normal", color: "#76808F" } };
+      s.indicator.tooltip = { showRule: "none", text: { size: 12, family: "Microsoft JhengHei", weight: "normal", color: "#76808F" } };
       s.indicator.tooltip = { showRule: "none" };
-      s.xAxis = { size: 18, tickText: { size: 10, color: "#6b7280" }, axisLine: { show: false } };
+      s.xAxis = { size: 18, tickText: { size: 10, family: "Microsoft JhengHei", weight: "normal", color: "#6b7280" }, axisLine: { show: false } };
       s.yAxis = {
         size: 52,
         inside: false,
-        tickText: { size: 10, color: "#6b7280", marginStart: 4 },
+        tickText: { size: 10, family: "Microsoft JhengHei", weight: "normal", color: "#6b7280", marginStart: 4 },
         axisLine: { show: false },
       };
       s.grid = { show: true, horizontal: { color: "#eee" }, vertical: { color: "#f3f4f6" } };
@@ -3756,19 +3777,20 @@
             : ((n > 0 ? "+" : "") + Math.round(n));
           const values = [{
             title: "",
-            value: { text: shortName + text, color: color },
+            value: { text: text, color: color },
           }];
           if (useCum && row && row.cum != null && isFinite(Number(row.cum))) {
             const c = Number(row.cum);
             values.push({
-              title: "",
+              title: "累計",
               value: {
-                text: "累計" + ((c > 0 ? "+" : "") + Math.round(c)),
+                text: ((c > 0 ? "+" : "") + Math.round(c)),
                 color: "#ff9600",
               },
             });
           }
-          return { name: "", values: values };
+          // name 常駐顯示「外資」；數值不再重複名稱，避免「外資 外資-1100」
+          return { name: shortName, values: values };
         },
       });
     }
@@ -4973,7 +4995,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "1.96";
+        const VER = "1.97";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
