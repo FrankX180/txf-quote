@@ -581,7 +581,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.88</div>
+      <div class="ver foot-right">1.89</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1083,34 +1083,14 @@
         .replace("自營商", "自")
         .replace("三大法人合計", "總");
     }
-    function oiCloseRange(hist) {
-      let mn = Infinity, mx = -Infinity;
-      (hist || []).forEach((r) => {
-        if (r && r.close != null && isFinite(Number(r.close))) {
-          const v = Number(r.close);
-          if (v < mn) mn = v;
-          if (v > mx) mx = v;
-        }
-      });
-      if (!isFinite(mn) || !isFinite(mx)) return null;
-      return { mn: mn, mx: mx };
-    }
-    function oiCloseCell(v, rng, prev) {
-      if (v == null || v === "" || !rng) return "—";
+    function oiCloseCell(v, prev) {
+      if (v == null || v === "") return "—";
       const n = Number(v);
       if (!isFinite(n)) return "—";
-      const span = rng.mx - rng.mn;
-      // 表內最低～最高 → 18%～100%；數字在上、柱在下
-      let pct = 100;
-      if (span > 0) {
-        const raw = (n - rng.mn) / span;
-        pct = 18 + raw * 82;
-      }
       const p = prev == null || prev === "" ? NaN : Number(prev);
       const cls = isFinite(p) ? (n > p ? "up" : n < p ? "dn" : "flat") : "flat";
-      // 大盤／收盤柱固定橘色；數字仍跟漲跌紅綠
-      const fill = "rgba(249,115,22,1)";
-      return `<div class="oi-cbar-wrap" title="${fmt(n)}"><span class="oi-cnum ${cls}">${fmt(n)}</span><div class="oi-cbar-track"><div class="oi-cbar" style="width:${pct.toFixed(1)}%;background:${fill}"></div></div></div>`;
+      const disp = oiSimple ? round50(n) : n;
+      return `<span class="oi-cnum ${cls}">${fmt(disp)}</span>`;
     }
     function oiAbsMax(vals) {
       let m = 0;
@@ -1363,7 +1343,6 @@
       const list = view.rows;
       const pick = oiPick[panel];
       const keys = oiKeysThrough(allKeys, pick);
-      const closeRng = oiCloseRange(list);
       const isLvl = (pick === "pc" || pick === "vix");
       const meta = !pick ? null : (isLvl ? oiPcMeta(list.map((r) => r[pick])) : oiSignedMeta(list.map((r) => r[pick])));
       const mode = isLvl ? "pc" : "oi";
@@ -1409,7 +1388,7 @@
           pickCell = oiSignedBarCell(r[pick], meta, mode, cumInfo, pick);
         }
         const prevClose = (i + 1 < list.length && list[i + 1]) ? list[i + 1].close : null;
-        html += `<tr><td>${oiShortDate(r.date, r.session)}</td><td class="oi-close">${oiCloseCell(r.close, closeRng, prevClose)}</td><td class="oi-pick${pick ? " on" : ""}">${pickCell}</td>`;
+        html += `<tr><td>${oiShortDate(r.date, r.session)}</td><td class="oi-close">${oiCloseCell(r.close, prevClose)}</td><td class="oi-pick${pick ? " on" : ""}">${pickCell}</td>`;
         keys.forEach((k) => {
           if (k === "pc" || k === "vix") {
             const nv = r[k] == null ? null : Number(r[k]);
@@ -4832,7 +4811,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "1.85";
+        const VER = "1.89";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");

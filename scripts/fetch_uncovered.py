@@ -711,6 +711,38 @@ def extend_history_with_pg(history, pg_inst, pg_large, pg_pc, pg_close, n=HIST_N
     return out
 
 
+def merge_history_with_repo(history, n=HIST_N):
+    """Actions 無 PG 時官網窗只有約 TAIFEX_WIN 日；合併 repo 既有 history 較舊列，避免每次覆寫洗短。
+    同日：新抓非空欄優先；缺欄保留舊值。"""
+    by = {}
+    try:
+        if OUT.exists():
+            old = json.loads(OUT.read_text(encoding="utf-8"))
+            for rec in old.get("history") or []:
+                d = ymd8(rec.get("date"))
+                if d:
+                    by[d] = dict(rec)
+                    by[d]["date"] = d
+    except Exception as e:
+        print("WARN merge old history read", e)
+    for rec in history or []:
+        d = ymd8(rec.get("date"))
+        if not d:
+            continue
+        if d not in by:
+            by[d] = dict(rec)
+            by[d]["date"] = d
+            continue
+        merged = dict(by[d])
+        for k, v in dict(rec).items():
+            if v is not None:
+                merged[k] = v
+        merged["date"] = d
+        by[d] = merged
+    out = [by[d] for d in sorted(by, reverse=True)]
+    return out[:n]
+
+
 def extract(html: str, marker: str):
     i = html.find(marker)
     if i < 0:
@@ -1335,6 +1367,9 @@ def main():
     # 保險：任何來源組完後都再強制一次等號
     for rec in history:
         rec["retail"] = retail_from_inst(rec.get("foreign"), rec.get("trust"), rec.get("dealer"))
+
+    # 保留 repo 較長 history（雲端無 PG 時不被 20 日窗洗短）
+    history = merge_history_with_repo(history, HIST_N)
 
     # PG 回填：加長歷史／補缺欄（官網值優先）
     pg_inst, pg_large, pg_pc, pg_close = {}, {}, {}, {}
