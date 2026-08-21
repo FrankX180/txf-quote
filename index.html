@@ -596,7 +596,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.97</div>
+      <div class="ver foot-right">1.98</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -3490,7 +3490,6 @@
       const s = twStyles();
       s.candle.tooltip = { showRule: "none", text: { size: 12, family: "Microsoft JhengHei", weight: "normal", color: "#76808F" } };
       s.indicator.tooltip = { showRule: "none", text: { size: 12, family: "Microsoft JhengHei", weight: "normal", color: "#76808F" } };
-      s.indicator.tooltip = { showRule: "none" };
       s.xAxis = { size: 18, tickText: { size: 10, family: "Microsoft JhengHei", weight: "normal", color: "#6b7280" }, axisLine: { show: false } };
       s.yAxis = {
         size: 52,
@@ -4995,7 +4994,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "1.97";
+        const VER = "1.98";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
