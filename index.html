@@ -4849,7 +4849,7 @@
     async function pullCloudPx1m() {
       try {
         const day = imbDayKey();
-        const y = await fetch(LIVE + "?kind=px1m&day=" + day + "&t=" + Date.now(), { cache: "no-cache" }).then((r) =>
+        const y = await fetch(LIVE + "?kind=px1m&day=" + day, { cache: "default" }).then((r) =>
           r.ok ? r.json() : null
         );
         if (!y) return false;
@@ -4867,7 +4867,7 @@
 
     async function pullYahoo1m() {
       try {
-        const y = await fetch(LIVE + "?kind=1m&t=" + Date.now(), { cache: "no-cache" }).then((r) =>
+        const y = await fetch(LIVE + "?kind=1m", { cache: "default" }).then((r) =>
           r.ok ? r.json() : null
         );
         if (!y || !y.timestamp || !y.timestamp.length) return false;
@@ -4882,9 +4882,11 @@
     }
 
     async function pullLive1m() {
-      // 權威順序與 Worker 一致：先奇摩 chart OHLC，再合併雲端 px1m
-      const b = await pullYahoo1m();
+      // 權威順序與 Worker 一致：先雲端 px1m（共用 CDN 5s），Yahoo 缺棒才補
+      const isGap = live1mGap();
       const a = await pullCloudPx1m();
+      let b = false;
+      if (isGap) b = await pullYahoo1m();
       return a || b;
     }
 
@@ -5093,7 +5095,7 @@
       trafficPing(true);
       setInterval(() => {
         if (document.visibilityState === "visible") trafficPing(false);
-      }, 30000);
+      }, 120000);
       document.addEventListener("visibilitychange", () => {
         if (document.visibilityState === "visible") trafficPing(false);
       });
