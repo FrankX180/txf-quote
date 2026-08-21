@@ -1821,12 +1821,30 @@
       while (d0.getDay() === 0 || d0.getDay() === 6) d0.setDate(d0.getDate() - 1);
       return ymdOf(d0);
     }
-    // 奇摩夜盤：Mon–Thu ts 已是牆鐘、date=開盤曆日；僅「周五夜」date 標到週末（如 8/16）
+    // Yahoo 夜盤標「下一交易日」牆鐘：平日 +1 天、週五夜 +2 天（下週一）。
+    // SSOT：01_Docs/Yahoo-台指期K線日期慣例.md — 必須回移 timestamp，不能只改 date。
+    function fixYahooFutureTs(ts) {
+      let t = +ts;
+      if (!Number.isFinite(t)) return ts;
+      const lim = Date.now() + 120000;
+      while (t > lim) t -= 86400000;
+      return t;
+    }
+    function normalizeYahooBar(b) {
+      if (!b || b.timestamp == null) return b;
+      const ts = fixYahooFutureTs(+b.timestamp);
+      if (ts === +b.timestamp) return b;
+      const nb = Object.assign({}, b, { timestamp: ts });
+      const dstr = barDateAt(ts);
+      if (dstr) nb.date = dstr;
+      return nb;
+    }
+    // 奇摩夜盤：Mon–Thu 矯正後 ts 已是牆鐘、date=開盤曆日；僅「周五夜」Yahoo 常標到下週一
     // 判斷：date 落在週六/週日 → 週五夜盤 → 還原為實際開盤曆日 15:00～次日 05:00
     // 禁：用 prevTradingYmd 的 gapDays 判斷（週一會跳回上週五，誤判跨周末而平移 3 天）
     function barWallTs(b) {
       if (!b || b.timestamp == null) return b && b.timestamp;
-      const ts = +b.timestamp;
+      let ts = fixYahooFutureTs(+b.timestamp);
       const ymd = dateKey(b.date);
       if (!ymd) return ts;
       const d = new Date(ts);
@@ -2242,6 +2260,7 @@
     function mergeBarLists(a, b) {
       const by = {};
       (a || []).concat(b || []).forEach((row) => {
+        row = normalizeYahooBar(row);
         if (!row || row.timestamp == null) return;
         const ts = row.timestamp;
         const prev = by[ts];
@@ -2384,7 +2403,7 @@
     }
 
     function barDateAt(ts) {
-      const d = new Date(ts);
+      const d = new Date(fixYahooFutureTs(ts));
       const hm = d.getHours() * 100 + d.getMinutes();
       const ymd = (x) =>
         x.getFullYear() +
@@ -2839,9 +2858,13 @@
         }
         if (raw.length < 2) raw = src;
         // K 棒禁填洞：filled／單價扁棒不是 OHLC
-        return raw.filter(function (b) { return b && !b.filled; });
+        // 再強制 Yahoo 未來戳回移（防舊快取；見 01_Docs/Yahoo-台指期K線日期慣例.md）
+        return raw.filter(function (b) { return b && !b.filled; }).map(normalizeYahooBar);
       }
-      if (kInt === "5") return m5.length ? m5 : resample(m1.filter(function (b) { return b && !b.filled; }), 5 * 60 * 1000);
+      if (kInt === "5") {
+        const src5 = m5.length ? m5 : resample(m1.filter(function (b) { return b && !b.filled; }), 5 * 60 * 1000);
+        return src5.filter(function (b) { return b && !b.filled; }).map(normalizeYahooBar);
+      }
       if (kInt === "m") {
         // MoneyDJ 量幾乎全 0；月 K 不畫假量（volume 清 0）
         return monthBarsLive().map(function (b) {
@@ -4795,6 +4818,7 @@
     })();
 
     // Worker/Yahoo chart 1m → night_1m / day_1m（與 fetch_minute 相同盤別規則）
+    // 必先 fixYahooFutureTs：Yahoo 週五夜標下週一（+2 天），見 01_Docs/Yahoo-台指期K線日期慣例.md
     function barsFromYahooChart(chart) {
       const tsList = (chart && chart.timestamp) || [];
       const q0 = (((chart && chart.indicators) || {}).quote || [{}])[0] || {};
@@ -4809,7 +4833,8 @@
         const c = closes[i];
         if (c == null) continue;
         const tsSec = +tsList[i];
-        const ts = tsSec < 1e12 ? tsSec * 1000 : tsSec;
+        let ts = tsSec < 1e12 ? tsSec * 1000 : tsSec;
+        ts = fixYahooFutureTs(ts);
         const d = new Date(ts);
         const hm = d.getHours() * 100 + d.getMinutes();
         let sess = null;
@@ -5163,7 +5188,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.06";
+        const VER = "2.07";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");

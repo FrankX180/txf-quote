@@ -91,7 +91,8 @@ def merge_bars(*groups):
 
 def fix_future_ts(rows):
     """Yahoo 時間戳偶發整體偏移（2026-08-21 夜盤實測 +2 天）：
-    比現在還晚的棒逐日回移，重算 date/session；無法歸位的丟棄。"""
+    比現在還晚的棒逐日回移，重算 date/session；無法歸位的丟棄。
+    SSOT: 01_Docs/Yahoo-台指期K線日期慣例.md（週五夜＝Yahoo 標下週一，須 -2 天）。"""
     if not rows:
         return rows
     limit = int(datetime.now(TZ).timestamp()) + 120
