@@ -596,7 +596,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.99</div>
+      <div class="ver foot-right">2.00</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -639,6 +639,18 @@
     let oiChartActive = false;
     let kOiPanes = [];
     let oiIndReady = false;
+    let kOiVisFrom = 0;
+    let kOiVisTo = -1;
+    let kOiVisHooked = false;
+    let kOiCumTimer = null;
+    const OI_CUM_NAMES = {
+      OI_FOREIGN: 1,
+      OI_TRUST: 1,
+      OI_DEALER: 1,
+      OI_RETAIL: 1,
+      OI_TOP10: 1,
+      OI_TOP10SPEC: 1,
+    };
     let oiSimple = false;
     let oiNetFlow = false;
     let oiCloseDelta = "pts"; // pts=漲跌點數｜pct=漲跌幅%
@@ -3728,14 +3740,64 @@
         styles: useCum ? { lines: [oiCumLineStyle()] } : {},
         figures: figures,
         calc: function (list) {
-          // 累計線讀雲端預算欄位；捲動不重算
-          return (list || []).map(function (k) {
+          const rows = list || [];
+          const nAll = rows.length;
+          if (!useCum) {
+            return rows.map(function (k) {
+              const v = k && k[field];
+              return { v: v == null || !isFinite(Number(v)) ? null : Number(v) };
+            });
+          }
+          // 雲端 *Cum 為正本；顯示時只讓「可見區」進入 Y。
+          // 折線：可見區相對左端歸零 → 軸＝可見折線 min/max。
+          // 柱：另尺度縮進可見折線振幅約 40%，不顯示柱軸、也不把折線壓扁。
+          // 可見區外圖元清空，避免全歷史把 Y 軸撐扁。
+          let from = Math.max(0, kOiVisFrom | 0);
+          let to = kOiVisTo >= 0 ? kOiVisTo : (nAll - 1);
+          if (to >= nAll) to = nAll - 1;
+          if (from > to) { from = 0; to = nAll - 1; }
+          let base = null;
+          let minC = Infinity;
+          let maxC = -Infinity;
+          let maxBar = 0;
+          const absCum = new Array(nAll);
+          const rawBar = new Array(nAll);
+          for (let i = 0; i < nAll; i++) {
+            const k = rows[i];
             const v = k && k[field];
             const n = v == null || !isFinite(Number(v)) ? null : Number(v);
-            if (!useCum) return { v: n };
-            const c = k ? k[cumField] : null;
-            const cum = c == null || !isFinite(Number(c)) ? null : Number(c);
-            return { v: n, raw: n, cum: cum };
+            rawBar[i] = n;
+            const c0 = k ? k[cumField] : null;
+            const c = c0 == null || !isFinite(Number(c0)) ? null : Number(c0);
+            absCum[i] = c;
+            if (i < from || i > to) continue;
+            if (n != null) {
+              const a = Math.abs(n);
+              if (a > maxBar) maxBar = a;
+            }
+            if (c == null) continue;
+            if (base == null) base = c;
+            const rel = c - base;
+            if (rel < minC) minC = rel;
+            if (rel > maxC) maxC = rel;
+          }
+          if (base == null) base = 0;
+          if (!isFinite(minC)) minC = 0;
+          if (!isFinite(maxC)) maxC = 0;
+          const lineSpan = Math.max(Math.abs(minC), Math.abs(maxC), 1);
+          const scale = maxBar > 0 ? (lineSpan * 0.4) / maxBar : 1;
+          return rows.map(function (_k, i) {
+            const n = rawBar[i];
+            const c = absCum[i];
+            if (i < from || i > to) {
+              return { v: null, raw: n, cum: null, cumAbs: c };
+            }
+            return {
+              v: n == null ? null : n * scale,
+              raw: n,
+              cum: c == null ? null : (c - base),
+              cumAbs: c,
+            };
           });
         },
         createTooltipDataSource: function (params) {
@@ -3757,15 +3819,18 @@
             title: "",
             value: { text: text, color: color },
           }];
-          if (useCum && row && row.cum != null && isFinite(Number(row.cum))) {
-            const c = Number(row.cum);
-            values.push({
-              title: "累計",
-              value: {
-                text: ((c > 0 ? "+" : "") + Math.round(c)),
-                color: "#ff9600",
-              },
-            });
+          if (useCum) {
+            const ca = row && row.cumAbs != null ? row.cumAbs : (k ? k[cumField] : null);
+            if (ca != null && isFinite(Number(ca))) {
+              const c = Number(ca);
+              values.push({
+                title: "累計",
+                value: {
+                  text: ((c > 0 ? "+" : "") + Math.round(c)),
+                  color: "#ff9600",
+                },
+              });
+            }
           }
           // name 常駐顯示「外資」；數值不再重複名稱，避免「外資 外資-1100」
           return { name: shortName, values: values };
@@ -3784,7 +3849,45 @@
       registerOiBarInd("OI_PC", "P/C%", "oiPc", "pc", 1, null);
       registerOiBarInd("OI_VIX", "VIX", "oiVix", "vix", 1, null);
     }
+    function hookOiVisibleRange() {
+      if (!kchart || kOiVisHooked || !kchart.subscribeAction) return;
+      kOiVisHooked = true;
+      kchart.subscribeAction("onVisibleRangeChange", function () {
+        scheduleOiVisScale();
+      });
+    }
+    function scheduleOiVisScale() {
+      if (kOiCumTimer) clearTimeout(kOiCumTimer);
+      // 停住再套可見區尺度，避免捲動每幀重算
+      kOiCumTimer = setTimeout(function () {
+        kOiCumTimer = null;
+        refreshOiVisScale(false);
+      }, 120);
+    }
+    function refreshOiVisScale(force) {
+      if (!kchart || !kOiPanes.length) return;
+      let from = 0;
+      let to = -1;
+      try {
+        const vr = kchart.getVisibleRange && kchart.getVisibleRange();
+        if (vr && vr.from >= 0) from = vr.from | 0;
+        if (vr && vr.to != null && vr.to >= 0) to = vr.to | 0;
+      } catch (e) {}
+      if (!force && from === kOiVisFrom && to === kOiVisTo) return;
+      kOiVisFrom = from;
+      kOiVisTo = to;
+      kOiPanes.forEach(function (p) {
+        if (!OI_CUM_NAMES[p.name]) return;
+        try {
+          if (kchart.overrideIndicator) kchart.overrideIndicator({ name: p.name }, p.id);
+        } catch (e) {}
+      });
+    }
     function clearKOiPanes() {
+      if (kOiCumTimer) {
+        clearTimeout(kOiCumTimer);
+        kOiCumTimer = null;
+      }
       if (!kchart || !kOiPanes.length) {
         kOiPanes = [];
         return;
@@ -3819,14 +3922,17 @@
       ensureOiIndicators();
       const cur = kOiPanes.map(function (p) { return p.name; }).join(",");
       const next = names.map(function (x) { return x.name; }).join(",");
-      if (cur === next && kOiPanes.length === names.length) return;
-      clearKOiPanes();
-      names.forEach(function (x) {
-        try {
-          const id = kchart.createIndicator(x.name, false, { height: x.h });
-          if (id) kOiPanes.push({ id: id, name: x.name });
-        } catch (e) {}
-      });
+      if (cur !== next || kOiPanes.length !== names.length) {
+        clearKOiPanes();
+        names.forEach(function (x) {
+          try {
+            const id = kchart.createIndicator(x.name, false, { height: x.h });
+            if (id) kOiPanes.push({ id: id, name: x.name });
+          } catch (e) {}
+        });
+      }
+      hookOiVisibleRange();
+      refreshOiVisScale(true);
     }
     function goOiDailyChart() {
       oiChartActive = true;
@@ -4918,7 +5024,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "1.99";
+        const VER = "2.00";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
