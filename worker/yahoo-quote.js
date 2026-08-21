@@ -196,8 +196,8 @@ async function ensureSchema(db) {
 const HEAL_GITHUB_OWNER = "FrankX180";
 const HEAL_GITHUB_REPO = "txf-quote";
 const HEAL_WORKFLOW = "update-quote.yml";
-const HEAL_MIN_INTERVAL_MS = 8 * 60 * 1000;
-const HEAL_STALE_MS = 11 * 60 * 1000;
+const HEAL_MIN_INTERVAL_MS = 150 * 1000;
+const HEAL_STALE_MS = 75 * 1000;
 const HEAL_GH_SNAPSHOT = "https://frankx180.github.io/txf-quote/data/snapshot.json";
 const HEAL_GH_KLINE = "https://frankx180.github.io/txf-quote/data/kline-minute.json";
 
@@ -304,7 +304,7 @@ async function maybeHealGithub(env, reason) {
   if (!sessionOf(now)) return { ok: false, reason: "closed", skipped: true };
   // 節流：每 5 分才檢查一次 GH snapshot（避免 cron 每 2 分都打 GH）
   const lastCheck = await getHealState(env, "last_gh_check");
-  if (lastCheck && now - Number(lastCheck.ts) < 4 * 60 * 1000 && reason !== "frontend-stale" && reason !== "force") {
+  if (lastCheck && now - Number(lastCheck.ts) < 30 * 1000 && reason !== "frontend-stale" && reason !== "force") {
     return { ok: false, reason: "check-throttled", skipped: true };
   }
   await setHealState(env, "last_gh_check", now, reason || "");

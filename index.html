@@ -1704,14 +1704,24 @@
         if (!marketOpen()) return;
         if (document.visibilityState !== "visible") return;
         const age = Date.now() - parseGhFetchedAt(fetchedAtStr);
-        if (!(age > 11*60*1000)) return;
+        if (!(age > 35*1000)) return;
+        // 35秒就補 Worker 快取（5秒輪詢的 D1），75秒才打 GH dispatch
+        if (age > 35*1000) {
+          const pk = "txfPollAt";
+          const plast = Number(localStorage.getItem(pk) || 0);
+          if (Date.now() - plast > 25000) {
+            localStorage.setItem(pk, String(Date.now()));
+            fetch(LIVE + "?kind=poll&chart=1", { cache: "no-store" }).catch(function(){});
+          }
+        }
+        if (!(age > 75*1000)) return;
         const key = "txfHealAt";
         const last = Number(localStorage.getItem(key) || 0);
-        if (Date.now() - last < 10*60*1000) return;
+        if (Date.now() - last < 60*1000) return;
         localStorage.setItem(key, String(Date.now()));
-        const reason = "frontend-stale age=" + Math.round(age/60000) + "m src=" + (src||"");
+        const reason = "frontend-stale age=" + Math.round(age/1000) + "s src=" + (src||"");
         fetch(LIVE + "?kind=heal&reason=" + encodeURIComponent(reason), { cache: "no-store" }).then(function(r){ return r.json().catch(function(){return {};}); }).then(function(j){
-          console.log("[heal] triggered", reason, j && j.heal ? j.heal : j);
+          console.log("[heal] GH dispatch", reason, j && j.heal ? j.heal : j);
         }).catch(function(){});
       } catch (_) {}
     }
@@ -5111,7 +5121,7 @@
       liveTimer = setInterval(pollLive, 5000);
       if (!ghHealTimer) {
         checkGhSnapshotStale();
-        ghHealTimer = setInterval(checkGhSnapshotStale, 120000);
+        ghHealTimer = setInterval(checkGhSnapshotStale, 30000);
       }
     }
     function stopPoll() {
