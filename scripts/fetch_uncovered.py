@@ -1,4 +1,6 @@
 # 法人／大額未平倉 → data/uncovered.json
+# 長歷史 SSOT＝repo 內 uncovered.history（雲端 Actions 日常靠 merge_history_with_repo 維持）
+# 本機 PG 只用於首次／災害回填；不依賴開機才能更新近端籌碼
 # 主路：期交所官網下載 futContractsDateDown（TX+MTX+TMF 大台等值）
 # PC／VIX／大額／收盤：期交所官網（pcRatioDown／VIX 月檔／largeTraderFutDown／futDataDown）
 # 備援：OpenAPI／Yahoo／玩股收盤補洞；CMoney 僅在官網法人失敗時備援
@@ -712,8 +714,8 @@ def extend_history_with_pg(history, pg_inst, pg_large, pg_pc, pg_close, n=HIST_N
 
 
 def merge_history_with_repo(history, n=HIST_N):
-    """Actions 無 PG 時官網窗只有約 TAIFEX_WIN 日；合併 repo 既有 history 較舊列，避免每次覆寫洗短。
-    同日：新抓非空欄優先；缺欄保留舊值。"""
+    """雲端無 PG 時官網窗只有約 TAIFEX_WIN 日；合併 checkout 既有 history 較舊列。
+    同日：新抓非空欄優先；缺欄保留舊值。日常不需本機開機／PG。"""
     by = {}
     try:
         if OUT.exists():
@@ -741,6 +743,24 @@ def merge_history_with_repo(history, n=HIST_N):
         by[d] = merged
     out = [by[d] for d in sorted(by, reverse=True)]
     return out[:n]
+
+
+def refuse_history_shrink(history, n=HIST_N):
+    """寫檔前最後一閘：合併後若仍短於 repo 一半 → 拒絕覆寫（保留 checkout 舊檔）。"""
+    old_n = 0
+    try:
+        if OUT.exists():
+            old_n = len(json.loads(OUT.read_text(encoding="utf-8")).get("history") or [])
+    except Exception as e:
+        print("WARN hist floor read", e)
+    out = merge_history_with_repo(history, n)
+    if old_n >= 100 and len(out) < max(old_n // 2, TAIFEX_WIN + 5):
+        raise SystemExit(
+            f"REFUSE shrink uncovered history {len(out)} < half of repo {old_n} (cloud keep long hist)"
+        )
+    if old_n:
+        print("OK hist keep", len(out), "(repo_was", old_n, ")")
+    return out
 
 
 def extract(html: str, marker: str):
@@ -1548,6 +1568,8 @@ def main():
         night = None
     if night:
         sources.append("night_ah")
+    # 寫檔前再併＋拒縮短：雲端日常 SSOT＝repo 長歷史，不靠本機 PG
+    history = refuse_history_shrink(history, HIST_N)
     payload = {
         "fetchedAt": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
         "date": ymd_slash(date) if len(date) == 8 else date,

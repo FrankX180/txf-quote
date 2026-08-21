@@ -33,6 +33,7 @@ jobs:
       - name: Fetch Yahoo WTX 1m/5m/15m
         run: python scripts/fetch_minute.py
         continue-on-error: true
+      # uncovered 長歷史靠 scripts 合併 repo 舊檔維持（不需本機 PG／開機）
       - name: Fetch Yahoo FITX uncovered
         run: python scripts/fetch_uncovered.py
         continue-on-error: true
