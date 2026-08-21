@@ -596,7 +596,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.02</div>
+      <div class="ver foot-right">2.03</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -638,6 +638,18 @@
     let oiTab = "oi";
     let oiChartActive = false;
     let kOiPanes = [];
+    // 副圖開關順序（最多 2；FIFO）。預設只開外資。
+    let kOiSelected = ["OI_FOREIGN"];
+    const OI_KEY_IND = {
+      foreign: "OI_FOREIGN",
+      trust: "OI_TRUST",
+      dealer: "OI_DEALER",
+      retail: "OI_RETAIL",
+      top10: "OI_TOP10",
+      top10Spec: "OI_TOP10SPEC",
+      pc: "OI_PC",
+      vix: "OI_VIX",
+    };
     let oiIndReady = false;
     let kOiVisFrom = 0;
     let kOiVisTo = -1;
@@ -657,7 +669,7 @@
     let oiSimple = false;
     let oiNetFlow = false;
     let oiCloseDelta = "pts"; // pts=漲跌點數｜pct=漲跌幅%
-    let oiPick = { oi: null, big: null };
+    let oiPick = { oi: null, big: null }; // 舊橫向柱已廢，固定 null
     let oiHistOpen = { oi: false, big: false };
     try { oiSimple = localStorage.getItem("txfOiSimple") === "1"; } catch (e) {}
     try { oiNetFlow = localStorage.getItem("txfOiNetFlow") === "1"; } catch (e) {}
@@ -666,19 +678,20 @@
       if (cdm === "pts" || cdm === "pct") oiCloseDelta = cdm;
     } catch (e) {}
     try {
-      const raw = localStorage.getItem("txfOiPick");
+      const raw = localStorage.getItem("txfOiPanes");
       if (raw) {
-        const o = JSON.parse(raw);
-        if (o && typeof o === "object") {
-          const nextOi = (o.oi != null ? o.oi : o.trade);
-          oiPick = {
-            oi: (nextOi === "pc" || nextOi === "vix") ? null : (nextOi || null),
-            big: o.big || null,
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) {
+          const allow = {
+            OI_FOREIGN: 1, OI_TRUST: 1, OI_DEALER: 1, OI_RETAIL: 1,
+            OI_TOP10: 1, OI_TOP10SPEC: 1, OI_PC: 1, OI_VIX: 1,
           };
+          kOiSelected = arr.filter(function (n) { return allow[n]; }).slice(0, 2);
+          if (!kOiSelected.length) kOiSelected = ["OI_FOREIGN"];
         }
-        if (oiPick.big === "retail" || ["foreignDelta", "retailDelta"].indexOf(oiPick.big) >= 0) oiPick.big = null;
       }
     } catch (e) {}
+    try { localStorage.removeItem("txfOiPick"); } catch (e) {}
     let minutePack = {
       night_1m: [], day_1m: [],
       night_5m: [], day_5m: [],
@@ -1330,10 +1343,11 @@
       return "";
     }
     function oiPickTh(panel, key, label) {
-      const on = oiPick[panel] === key ? " on" : "";
+      const ind = OI_KEY_IND[key];
+      const on = ind && kOiSelected.indexOf(ind) >= 0 ? " on" : "";
       const thc = oiColTh(key);
       const st = thc ? ` style="color:${thc}"` : "";
-      return `<th class="oi-th-pick${on}" data-oi-panel="${panel}" data-oi-pick="${key}"${st}>${label}</th>`;
+      return `<th class="oi-th-pick${on}" data-oi-panel="${panel}" data-oi-pick="${key}"${st} title="點一下開關 K 線副圖（最多兩個）">${label}</th>`;
     }
     function oiPickHead(panel, labels) {
       const k = oiPick[panel];
@@ -1343,8 +1357,24 @@
       const on = k ? " on" : "";
       return `<th class="oi-pick-h${on}">${lab}</th>`;
     }
+    function saveOiPanes() {
+      try { localStorage.setItem("txfOiPanes", JSON.stringify(kOiSelected)); } catch (e) {}
+    }
+    function toggleOiSubPane(key) {
+      const name = OI_KEY_IND[key];
+      if (!name) return;
+      const i = kOiSelected.indexOf(name);
+      if (i >= 0) kOiSelected.splice(i, 1);
+      else {
+        kOiSelected.push(name);
+        while (kOiSelected.length > 2) kOiSelected.shift();
+      }
+      saveOiPanes();
+      goOiDailyChart();
+      renderOi();
+    }
     function saveOiPick() {
-      try { localStorage.setItem("txfOiPick", JSON.stringify(oiPick)); } catch (e) {}
+      // 舊橫向柱已廢
     }
     function oiKeysThrough(keys, pick) {
       // 有選取時只聚焦該欄正負柱，其餘口數欄全部拿掉（含左側）
@@ -1390,8 +1420,8 @@
     function oiBuildHistTable(panel, rows, allKeys, labs, note) {
       const view = oiHistView(rows, panel);
       const list = view.rows;
-      const pick = oiPick[panel];
-      const keys = oiKeysThrough(allKeys, pick);
+      const pick = null; // 舊橫向柱已廢；表頭改開 K 副圖
+      const keys = allKeys;
       const isLvl = (pick === "pc" || pick === "vix");
       const meta = !pick ? null : (isLvl ? oiPcMeta(list.map((r) => r[pick])) : oiSignedMeta(list.map((r) => r[pick])));
       const mode = isLvl ? "pc" : "oi";
@@ -1416,31 +1446,15 @@
         cumMeta = oiSignedMeta(cumArr);
       }
       let html = `<div class="oi-table-wrap${pick ? " has-pick" : ""}${cumOn ? " has-cum" : ""}">`;
-      if (cumOn) html += `<svg class="oi-cum-svg" aria-hidden="true"></svg>`;
-      if (pick) html += `<button type="button" class="oi-restore" data-oi-restore="${panel}">恢復</button>`;
       const closeH = oiCloseDelta === "pts" ? "收盤(點)" : "收盤 (%)";
       const closeTitle = oiCloseDelta === "pts" ? "點一下改為漲跌幅%" : "點一下改為漲跌點數";
-      html += `<table><tr><th>日</th><th class="oi-th-close" data-oi-close-toggle="1" title="${closeTitle}">${closeH}</th>${oiPickHead(panel, labs)}`;
+      html += `<table><tr><th>日</th><th class="oi-th-close" data-oi-close-toggle="1" title="${closeTitle}">${closeH}</th>`;
       keys.forEach((k) => { html += oiPickTh(panel, k, labs[k] || k); });
       html += `</tr>`;
       list.forEach((r, i) => {
-        let pickCell = "";
-        if (pick === "pc" || pick === "vix") {
-          pickCell = oiPcBarCell(r[pick], meta, pick);
-        } else if (pick) {
-          let cumInfo = null;
-          if (cumOn && cumArr && cumArr[i] != null && isFinite(Number(cumArr[i]))) {
-            cumInfo = {
-              cum: Number(cumArr[i]),
-              leftPct: oiCumLeftPct(cumArr[i], cumMeta, meta && meta.side),
-              level: oiCumIsLevel(panel, pick),
-            };
-          }
-          pickCell = oiSignedBarCell(r[pick], meta, mode, cumInfo, pick);
-        }
         // 用完整 rows 算前日（收合只顯示 10 天時，最底列仍要有漲跌幅）
         const prevClose = (i + 1 < rows.length && rows[i + 1]) ? rows[i + 1].close : null;
-        html += `<tr><td>${oiShortDate(r.date, r.session)}</td><td class="oi-close">${oiCloseCell(r.close, prevClose)}</td><td class="oi-pick${pick ? " on" : ""}">${pickCell}</td>`;
+        html += `<tr><td>${oiShortDate(r.date, r.session)}</td><td class="oi-close">${oiCloseCell(r.close, prevClose)}</td>`;
         keys.forEach((k) => {
           if (k === "pc" || k === "vix") {
             const nv = r[k] == null ? null : Number(r[k]);
@@ -1531,11 +1545,11 @@
           dealer: oiDayDiff(hist, i, "dealer"),
           retail: r.retailDelta != null ? r.retailDelta : oiDayDiff(hist, i, "retail"),
         }));
-        oiNote = "單位：大台等值口（大台＋小台/4＋微台/20）；相對前一交易日未平倉淨額變化；點表頭可在收盤右欄畫正負柱";
+        oiNote = "單位：大台等值口（大台＋小台/4＋微台/20）；相對前一交易日未平倉淨額變化；點表頭開關 K 線副圖（最多兩個）";
       } else {
         oiKeys = ["foreign", "trust", "dealer", "retail"];
         oiRows = hist;
-        oiNote = "單位：大台等值口（大台＋小台/4＋微台/20）；數字為淨未平倉（多−空）；點表頭可在收盤右欄畫正負柱";
+        oiNote = "單位：大台等值口（大台＋小台/4＋微台/20）；數字為淨未平倉（多−空）；點表頭開關 K 線副圖（最多兩個）";
       }
       const night = uncover.night;
       const day0 = String((hist[0] && hist[0].date) || uncover.date || "").replace(/\D/g, "");
@@ -1585,10 +1599,6 @@
       }
       oiEl.innerHTML = oiBuildHistTable("oi", oiRows, oiKeys, oiLabs, oiNote);
 
-      if (oiPick.big === "retail" || ["foreignDelta", "retailDelta"].indexOf(oiPick.big) >= 0) {
-        oiPick.big = null;
-        saveOiPick();
-      }
       const bigLabs = { top10: "前十淨", top10Spec: "特定法人", pc: "P/C%", vix: "VIX" };
       let bigRows = hist.map((r, i) => {
         const d = String(r.date || "").replace(/\D/g, "");
@@ -1619,7 +1629,7 @@
         bigRows,
         ["top10", "top10Spec", "pc", "vix"],
         bigLabs,
-        "前十／特定法人＝大額淨未平倉（官方 TX+小台/4）；P/C%／VIX 不換算；點表頭可在收盤右欄畫正負柱"
+        "前十／特定法人＝大額淨未平倉（官方 TX+小台/4）；P/C%／VIX 不換算；點表頭開關 K 線副圖（最多兩個）"
       );
 
       const sw = $("oiSimpleSw");
@@ -3970,23 +3980,13 @@
     function syncKOiPanes() {
       if (!kchart) return;
       const want = oiChartActive && chartMode === "k" && kInt === "d";
-      const names = oiTab === "big"
-        ? [
-          { name: "OI_TOP10", h: 64 },
-          { name: "OI_TOP10SPEC", h: 64 },
-          { name: "OI_PC", h: 56 },
-          { name: "OI_VIX", h: 56 },
-        ]
-        : [
-          { name: "OI_FOREIGN", h: 64 },
-          { name: "OI_TRUST", h: 64 },
-          { name: "OI_DEALER", h: 64 },
-          { name: "OI_RETAIL", h: 64 },
-        ];
       if (!want) {
         clearKOiPanes();
         return;
       }
+      // 跨頁共用選取；高度隨條數加高，避免一次四條太扁
+      const h = kOiSelected.length <= 1 ? 140 : 110;
+      const names = kOiSelected.map(function (n) { return { name: n, h: h }; });
       ensureOiIndicators();
       const cur = kOiPanes.map(function (p) { return p.name; }).join(",");
       const next = names.map(function (x) { return x.name; }).join(",");
@@ -4005,10 +4005,16 @@
     }
     function goOiDailyChart() {
       oiChartActive = true;
-      chartMode = "k";
-      kInt = "d";
-      markChips();
-      draw(true);
+      const needSwitch = !(chartMode === "k" && kInt === "d");
+      if (needSwitch) {
+        chartMode = "k";
+        kInt = "d";
+        markChips();
+        draw(true);
+      } else {
+        markChips();
+        syncKOiPanes();
+      }
     }
     function rangeBarStyles(data) {
       const k = data && data.current && data.current.kLineData;
@@ -4732,12 +4738,9 @@
         }
         const th = t.closest("th.oi-th-pick");
         if (!th) return;
-        const panel = th.getAttribute("data-oi-panel");
         const key = th.getAttribute("data-oi-pick");
-        if (!panel || !key || !Object.prototype.hasOwnProperty.call(oiPick, panel)) return;
-        oiPick[panel] = oiPick[panel] === key ? null : key;
-        saveOiPick();
-        renderOi();
+        if (!key || !OI_KEY_IND[key]) return;
+        toggleOiSubPane(key);
       });
     })();
 
@@ -5093,7 +5096,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.02";
+        const VER = "2.03";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
