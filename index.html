@@ -596,7 +596,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.00</div>
+      <div class="ver foot-right">2.01</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -643,6 +643,8 @@
     let kOiVisTo = -1;
     let kOiVisHooked = false;
     let kOiCumTimer = null;
+    let kOiEqualizeTimer = null;
+    let kOiEqualizing = false;
     const OI_CUM_NAMES = {
       OI_FOREIGN: 1,
       OI_TRUST: 1,
@@ -3748,15 +3750,12 @@
               return { v: v == null || !isFinite(Number(v)) ? null : Number(v) };
             });
           }
-          // 雲端 *Cum 為正本；顯示時只讓「可見區」進入 Y。
-          // 折線：可見區相對左端歸零 → 軸＝可見折線 min/max。
-          // 柱：另尺度縮進可見折線振幅約 40%，不顯示柱軸、也不把折線壓扁。
-          // 可見區外圖元清空，避免全歷史把 Y 軸撐扁。
+          // 雲端 *Cum 為正本。可見區外清空，Y 只跟可見折線絕對 min/max。
+          // 柱映射進 [minC,maxC] 內（約 90% 半幅），不擴張 Y、也不被壓扁；不另顯示柱軸。
           let from = Math.max(0, kOiVisFrom | 0);
           let to = kOiVisTo >= 0 ? kOiVisTo : (nAll - 1);
           if (to >= nAll) to = nAll - 1;
           if (from > to) { from = 0; to = nAll - 1; }
-          let base = null;
           let minC = Infinity;
           let maxC = -Infinity;
           let maxBar = 0;
@@ -3776,26 +3775,36 @@
               if (a > maxBar) maxBar = a;
             }
             if (c == null) continue;
-            if (base == null) base = c;
-            const rel = c - base;
-            if (rel < minC) minC = rel;
-            if (rel > maxC) maxC = rel;
+            if (c < minC) minC = c;
+            if (c > maxC) maxC = c;
           }
-          if (base == null) base = 0;
-          if (!isFinite(minC)) minC = 0;
-          if (!isFinite(maxC)) maxC = 0;
-          const lineSpan = Math.max(Math.abs(minC), Math.abs(maxC), 1);
-          const scale = maxBar > 0 ? (lineSpan * 0.4) / maxBar : 1;
+          if (!isFinite(minC) || !isFinite(maxC)) {
+            minC = 0;
+            maxC = 0;
+          }
+          if (minC === maxC) {
+            minC -= 1;
+            maxC += 1;
+          }
+          const mid = (minC + maxC) / 2;
+          const half = (maxC - minC) / 2;
+          const barAmp = half * 0.9;
           return rows.map(function (_k, i) {
             const n = rawBar[i];
             const c = absCum[i];
             if (i < from || i > to) {
               return { v: null, raw: n, cum: null, cumAbs: c };
             }
+            let vd = null;
+            if (n != null && maxBar > 0) {
+              vd = mid + (n / maxBar) * barAmp;
+            } else if (n != null) {
+              vd = mid;
+            }
             return {
-              v: n == null ? null : n * scale,
+              v: vd,
               raw: n,
-              cum: c == null ? null : (c - base),
+              cum: c,
               cumAbs: c,
             };
           });
@@ -3849,11 +3858,48 @@
       registerOiBarInd("OI_PC", "P/C%", "oiPc", "pc", 1, null);
       registerOiBarInd("OI_VIX", "VIX", "oiVix", "vix", 1, null);
     }
+    function equalizeOiPaneHeights() {
+      if (!kchart || !kOiPanes.length || kOiEqualizing) return;
+      if (!kchart.getDrawPaneById || !kchart.setPaneOptions) return;
+      const panes = [];
+      let total = 0;
+      kOiPanes.forEach(function (p) {
+        try {
+          const pane = kchart.getDrawPaneById(p.id);
+          if (!pane || !pane.getBounding) return;
+          const h = Number(pane.getBounding().height) || 0;
+          if (h > 0) {
+            panes.push(p);
+            total += h;
+          }
+        } catch (e) {}
+      });
+      if (panes.length < 2 || total <= 0) return;
+      const each = Math.max(36, Math.floor(total / panes.length));
+      let used = 0;
+      kOiEqualizing = true;
+      try {
+        panes.forEach(function (p, i) {
+          const h = i === panes.length - 1 ? Math.max(36, total - used) : each;
+          used += h;
+          try { kchart.setPaneOptions({ id: p.id, height: h, minHeight: 36 }); } catch (e) {}
+        });
+      } finally {
+        setTimeout(function () { kOiEqualizing = false; }, 0);
+      }
+    }
     function hookOiVisibleRange() {
       if (!kchart || kOiVisHooked || !kchart.subscribeAction) return;
       kOiVisHooked = true;
       kchart.subscribeAction("onVisibleRangeChange", function () {
         scheduleOiVisScale();
+      });
+      kchart.subscribeAction("onPaneDrag", function () {
+        if (kOiEqualizeTimer) clearTimeout(kOiEqualizeTimer);
+        kOiEqualizeTimer = setTimeout(function () {
+          kOiEqualizeTimer = null;
+          equalizeOiPaneHeights();
+        }, 40);
       });
     }
     function scheduleOiVisScale() {
@@ -3887,6 +3933,10 @@
       if (kOiCumTimer) {
         clearTimeout(kOiCumTimer);
         kOiCumTimer = null;
+      }
+      if (kOiEqualizeTimer) {
+        clearTimeout(kOiEqualizeTimer);
+        kOiEqualizeTimer = null;
       }
       if (!kchart || !kOiPanes.length) {
         kOiPanes = [];
@@ -3933,6 +3983,7 @@
       }
       hookOiVisibleRange();
       refreshOiVisScale(true);
+      equalizeOiPaneHeights();
     }
     function goOiDailyChart() {
       oiChartActive = true;
@@ -5024,7 +5075,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.00";
+        const VER = "2.01";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
