@@ -602,7 +602,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.04</div>
+      <div class="ver foot-right">2.05</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -3490,8 +3490,14 @@
         },
         indicator: {
           bars: [{ upColor: "#d32f2f", downColor: "#1b8a3e", noChangeColor: "#888" }],
-          tooltip: { showRule: "follow_cross", text: tipText },
-          lastValueMark: { text: { family: fam } },
+          // always：副圖左上常駐顯示 shortName（外資／投信…），不跟十字線才出現
+          tooltip: {
+            showRule: "always",
+            showName: true,
+            showParams: false,
+            text: { size: 12, family: fam, weight: "bold", color: "#f59e0b" },
+          },
+          lastValueMark: { show: false, text: { family: fam } },
         },
         xAxis: {
           tickText: Object.assign({}, axisText),
@@ -3745,7 +3751,7 @@
       const useCum = !!cumField;
       const figures = [{
         key: "v",
-        title: shortName + " ",
+        title: "",
         type: "bar",
         styles: oiIndBarStyles(field, key),
       }];
@@ -3866,7 +3872,7 @@
               });
             }
           }
-          // name 常駐顯示「外資」；數值不再重複名稱，避免「外資 外資-1100」
+          // 左上常駐：名稱在 values.title；name 再給一份給 showName
           return { name: shortName, values: values };
         },
       });
@@ -5102,7 +5108,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.04";
+        const VER = "2.05";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
