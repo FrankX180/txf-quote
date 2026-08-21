@@ -581,7 +581,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">1.89</div>
+      <div class="ver foot-right">1.90</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1090,7 +1090,12 @@
       const p = prev == null || prev === "" ? NaN : Number(prev);
       const cls = isFinite(p) ? (n > p ? "up" : n < p ? "dn" : "flat") : "flat";
       const disp = oiSimple ? round50(n) : n;
-      return `<span class="oi-cnum ${cls}">${fmt(disp)}</span>`;
+      let lab = fmt(disp);
+      if (isFinite(p) && p !== 0) {
+        const pct = ((n - p) / p) * 100;
+        lab += "(" + (pct > 0 ? "+" : "") + pct.toFixed(1) + "%)";
+      }
+      return `<span class="oi-cnum ${cls}">${lab}</span>`;
     }
     function oiAbsMax(vals) {
       let m = 0;
@@ -4811,7 +4816,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "1.89";
+        const VER = "1.90";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
