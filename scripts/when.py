@@ -88,7 +88,7 @@ def want_daily_k(dt=None):
 
 
 def want_uncovered(dt=None):
-    """日盤法人 14:30–20:00；夜盤成交 平日/週六 07:30–10:00。
+    """日盤法人 14:30–15:00；夜盤成交 平日/週六 07:30–10:00。
     當日日盤籌碼已齊 → 下午窗不再重抓；暫行夜盤列已齊 → 早上窗不再重抓。
     報價／五檔不走這扇門。"""
     if forced():
@@ -103,7 +103,7 @@ def want_uncovered(dt=None):
         if not (730 <= h <= 1000):
             return False
         return not night_chips_ready(d)
-    if 1430 <= h <= 2000:
+    if 1430 <= h <= 1500:
         return not day_chips_ready(d)
     if 730 <= h <= 1000:
         return not night_chips_ready(d)
@@ -171,7 +171,7 @@ def want_tmf_retail(dt=None):
     h = hm(d)
     if d.weekday() >= 5:
         return False
-    if 1430 <= h <= 2000:
+    if 1430 <= h <= 1500:
         return not day_chips_ready(d)
     if 730 <= h <= 1000:
         return not night_chips_ready(d)
