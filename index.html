@@ -4432,8 +4432,8 @@
             hist[tradeSk] = h;
           }
         }
-        // 颱風／停市：開盤 3 分鐘後，價+量+時間都不變連續 10 次 → 改探測
-        const sig = [px, vol, q0.CTime || ""].join("|");
+        // 颱風／停市：開盤 3 分鐘後，價+量+時間+內外盤都不變連續 10 次 → 改探測
+        const sig = [px, vol, q0.CTime || "", inn, outv].join("|");
         const grace = Date.now() - sessionOpenAt() >= 3 * 60 * 1000;
         if (grace && lastSig && sig === lastSig) {
           staleHits++;
@@ -4514,7 +4514,7 @@
         if (Date.now() - mark < 30000) return;
         window.__txfClosedPollAt = Date.now();
         try {
-          const rows = await fetch(LIVE).then((r) => r.json());
+          const rows = await fetch(LIVE, { cache: "no-store" }).then((r) => r.json());
           if (Array.isArray(rows) && rows.length) {
             applyLive(rows);
             live = false;
@@ -4533,7 +4533,13 @@
         window.__txfProbeAt = Date.now();
       }
       try {
-        const rows = await fetch(LIVE).then((r) => r.json());
+        // 每 30 秒強制寫 D1（不經 5 秒 CDN）；顯示仍走下方 LIVE
+        const pmark = window.__txfStorePollAt || 0;
+        if (Date.now() - pmark > 30000) {
+          window.__txfStorePollAt = Date.now();
+          fetch(LIVE + "?kind=poll", { cache: "no-store" }).catch(function () {});
+        }
+        const rows = await fetch(LIVE, { cache: "no-store" }).then((r) => r.json());
         if (Array.isArray(rows) && rows.length) applyLive(rows);
         // 約每 30 秒從雲端補齊完整當日分鐘柱（多人共用同一 R2）
         const mark = window.__txfImbCloudAt || 0;

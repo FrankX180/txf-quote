@@ -761,30 +761,52 @@ async function fetchYahooQuote() {
   return { ok: r.ok, status: r.status, body };
 }
 
+async function fetchYahooQuoteRetry(tries) {
+  const n = tries || 3;
+  let last = { ok: false, status: 0, body: "" };
+  for (let i = 0; i < n; i++) {
+    try {
+      last = await fetchYahooQuote();
+      if (last.ok && last.body) return last;
+    } catch (e) {
+      last = { ok: false, status: 0, body: "", error: String((e && e.message) || e) };
+    }
+    if (i + 1 < n) await new Promise((r) => setTimeout(r, 250 * (i + 1)));
+  }
+  return last;
+}
+
 /** 無人看盤也寫：Cron／poll 觸發（CF 最短 1 分；本機守護可 5 秒） */
 async function pollAndStore(env, opts) {
   const nowMs = Date.now();
   if (!sessionOf(nowMs)) return { skipped: true, reason: "closed" };
   const out = {};
-  // 權威順序：先奇摩 chart OHLC 回填，再寫 quote 最新價（只補當根 close／高低）
-  // Cron 每分通常只有 1 筆最新價 → 單獨寫入必成 O=H=L=C 扁棒；chart 必須先落地
+  // 先寫內外盤／報價（2026-08-24：先 chart 再 quote 時奇摩常擋第二槍 → px1m 滿、imb 稀疏）
+  const { ok, body, status } = await fetchYahooQuoteRetry(3);
+  if (!ok) {
+    out.skippedQuote = true;
+    out.reason = "yahoo-fail";
+    out.status = status || 0;
+  } else {
+    try {
+      const rows = JSON.parse(body);
+      out.imb = await appendImb(env, rows, nowMs);
+      const w = extractWtx(rows);
+      out.px = await appendPricePx(env, w && w.px, nowMs, "quote");
+    } catch (e) {
+      out.skippedQuote = true;
+      out.reason = "quote-parse-fail";
+      out.error = String((e && e.message) || e);
+    }
+  }
+  // chart 回填放後面：失敗也不擋內外盤
   if (opts && opts.chart) {
     try {
       out.chart = await backfillChart1m(env);
     } catch (e) {
-      out.chart = { ok: false, reason: String(e && e.message || e) };
+      out.chart = { ok: false, reason: String((e && e.message) || e) };
     }
   }
-  const { ok, body } = await fetchYahooQuote();
-  if (!ok) {
-    out.skippedQuote = true;
-    out.reason = "yahoo-fail";
-    return out;
-  }
-  const rows = JSON.parse(body);
-  out.imb = await appendImb(env, rows, nowMs);
-  const w = extractWtx(rows);
-  out.px = await appendPricePx(env, w && w.px, nowMs, "quote");
   return out;
 }
 
