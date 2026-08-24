@@ -48,12 +48,13 @@ def main():
             continue
         try:
             j = once()
+            imb = j.get("imb") if isinstance(j.get("imb"), dict) else {}
             print(
                 now.strftime("%H:%M:%S"),
                 "ok" if j.get("ok") else "ng",
-                j.get("sess") or j.get("reason") or "",
+                imb.get("sess") or j.get("sess") or j.get("reason") or "",
                 "d",
-                j.get("d"),
+                imb.get("d") if imb.get("d") is not None else j.get("d"),
                 flush=True,
             )
         except Exception as e:
