@@ -57,6 +57,11 @@ TAIFEX_PRODS = {
     "小型臺指期貨": MTX_DIV,
     "微型臺指期貨": TMF_DIV,
 }
+TAIFEX_PROD_CODE = {
+    "臺股期貨": "TX",
+    "小型臺指期貨": "MTX",
+    "微型臺指期貨": "TMF",
+}
 TAIFEX_WHO = {
     "外資及陸資": "foreign",
     "外資": "foreign",
@@ -152,10 +157,13 @@ def parse_taifex_inst_csv(text: str):
             continue
         div = float(TAIFEX_PRODS[prod])
         slot = bags.setdefault(
-            d, {"foreign": 0.0, "trust": 0.0, "dealer": 0.0, "_hit": False}
+            d, {"foreign": 0.0, "trust": 0.0, "dealer": 0.0, "_hit": False, "_prods": set()}
         )
         slot[key] = float(slot.get(key) or 0) + net / div
         slot["_hit"] = True
+        code = TAIFEX_PROD_CODE.get(prod)
+        if code:
+            slot["_prods"].add(code)
     out = {}
     for d, slot in bags.items():
         if not slot.get("_hit"):
@@ -168,6 +176,7 @@ def parse_taifex_inst_csv(text: str):
             "trust": t,
             "dealer": de,
             "retail": retail_from_inst(f, t, de),
+            "instProds": sorted(slot.get("_prods") or []),
         }
     return out
 
@@ -1385,6 +1394,7 @@ def main():
                     "trust": slot.get("trust"),
                     "dealer": slot.get("dealer"),
                     "retail": slot.get("retail"),
+                    "instProds": slot.get("instProds") or [],
                     "top5": lg.get("top5", w.get("top5")),
                     "top10": lg.get("top10", w.get("top10")),
                     "top5Spec": lg.get("top5Spec", w.get("top5Spec")),
@@ -1428,6 +1438,40 @@ def main():
                     "pc": pc_map.get(d, c.get("pc", cm_pc.get(d))),
                 }
             )
+
+    # 官網短暫失敗走備援時：不可覆寫 repo 已有的官網法人水位（會出現 -612→-342 這種假跳動）
+    if "taifex" not in sources and OUT.exists():
+        try:
+            old_hist = json.loads(OUT.read_text(encoding="utf-8")).get("history") or []
+            old_by = {}
+            for rec in old_hist:
+                d = ymd8(rec.get("date"))
+                if d and rec.get("foreign") is not None:
+                    old_by[d] = rec
+            keep_n = 0
+            for rec in history:
+                d = ymd8(rec.get("date"))
+                o = old_by.get(d)
+                if not o:
+                    continue
+                for k in (
+                    "foreign",
+                    "trust",
+                    "dealer",
+                    "retail",
+                    "instProds",
+                    "foreignDelta",
+                    "trustDelta",
+                    "dealerDelta",
+                    "retailDelta",
+                ):
+                    if o.get(k) is not None:
+                        rec[k] = o[k]
+                keep_n += 1
+            if keep_n:
+                print("KEEP repo taifex levels", keep_n, "(fallback not overwrite)")
+        except Exception as e:
+            print("WARN keep repo levels", e)
 
     # 保險：任何來源組完後都再強制一次等號
     for rec in history:
@@ -1628,6 +1672,43 @@ def main():
         "history": history[:HIST_N],
         "night": night,
     }
+
+    def _chip_fingerprint(obj):
+        h0 = (obj.get("history") or [{}])[0]
+        n = obj.get("night") or {}
+        keys = (
+            "date",
+            "foreign",
+            "trust",
+            "dealer",
+            "retail",
+            "foreignDelta",
+            "trustDelta",
+            "dealerDelta",
+            "retailDelta",
+            "instProds",
+            "close",
+            "top10",
+            "top10Spec",
+            "pc",
+            "vix",
+        )
+        return {
+            "date": obj.get("date"),
+            "source": obj.get("source"),
+            "h0": {k: h0.get(k) for k in keys},
+            "night": {k: n.get(k) for k in ("date", "foreign", "trust", "dealer", "retail", "foreignDelta", "trustDelta", "dealerDelta", "retailDelta", "close")},
+        }
+
+    if OUT.exists():
+        try:
+            old_payload = json.loads(OUT.read_text(encoding="utf-8"))
+            if _chip_fingerprint(old_payload) == _chip_fingerprint(payload):
+                print("SKIP uncovered unchanged", payload.get("date"), "night", (night or {}).get("date"))
+                return
+        except Exception as e:
+            print("WARN compare old uncovered", e)
+
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     print(

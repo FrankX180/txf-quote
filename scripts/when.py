@@ -88,24 +88,35 @@ def want_daily_k(dt=None):
 
 
 def want_uncovered(dt=None):
-    """日盤法人 14:30–15:00；夜盤成交 平日/週六 07:30–10:00。
-    當日日盤籌碼已齊 → 下午窗不再重抓；暫行夜盤列已齊 → 早上窗不再重抓。
-    報價／五檔不走這扇門。"""
-    if forced():
+    """日盤法人 14:30–16:00；夜盤成交 平日/週六 07:30–10:00。
+
+    已定案（日盤／暫行夜盤）後不再重抓——含 workflow_dispatch／本機。
+    只有 TXF_FORCE=1 才強制重抓。避免盤後數字一直抖。
+    """
+    if os.environ.get("TXF_FORCE") == "1":
         return True
     d = dt or now_tw()
     h = hm(d)
     wd = d.weekday()
     if wd == 6:
         return False
-    # 週六早上：補周五夜盤（07:30 起，讓早盤開盤前圖表已有）
+    local = not os.environ.get("GITHUB_ACTIONS")
+    dispatch = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+    # 週六早上：補周五夜盤
     if wd == 5:
-        if not (730 <= h <= 1000):
+        if not (730 <= h <= 1000) and not local and not dispatch:
             return False
         return not night_chips_ready(d)
-    if 1430 <= h <= 1530:
+    in_day = 1430 <= h <= 1600
+    in_night = 730 <= h <= 1000
+    if in_day:
         return not day_chips_ready(d)
-    if 730 <= h <= 1000:
+    if in_night:
+        return not night_chips_ready(d)
+    # 窗外：本機／手動只補「還沒定案」的洞，不重刷已齊資料
+    if local or dispatch:
+        if h >= 1430:
+            return not day_chips_ready(d)
         return not night_chips_ready(d)
     return False
 
@@ -125,7 +136,10 @@ def _ymd8(s):
 
 
 def day_chips_ready(dt=None):
-    """今日（台北交易日）日盤法人列已在 uncovered.json。"""
+    """今日日盤法人列已定案：官網 taifex 源 + 外資／投信水位。
+
+    大台+小台+微台齊備 → 立刻定案；16:00 後有官網水位也定案（微台晚到不再一直抖）。
+    """
     d = dt or now_tw()
     if d.weekday() >= 5:
         return False
@@ -139,8 +153,18 @@ def day_chips_ready(dt=None):
     hist0 = (j.get("history") or [{}])[0]
     if _ymd8(hist0.get("date")) != today:
         return False
-    # 有三大法人淨額即視為日盤籌碼已到位（完整交易日）
-    return hist0.get("foreign") is not None and hist0.get("trust") is not None
+    if hist0.get("foreign") is None or hist0.get("trust") is None:
+        return False
+    parts = [p for p in str(j.get("source") or "").replace(" ", "").split("+") if p]
+    if "taifex" not in parts:
+        return False
+    prods = set(hist0.get("instProds") or [])
+    if {"TX", "MTX", "TMF"} <= prods:
+        return True
+    # 逾 16:00：官網水位已在就凍結（不再追微台晚到或盤後微修）
+    if hm(d) >= 1600:
+        return True
+    return False
 
 
 def night_chips_ready(dt=None):
@@ -164,15 +188,21 @@ def night_chips_ready(dt=None):
 
 
 def want_tmf_retail(dt=None):
-    """微台與法人同窗；日盤已齊則下午不再重抓。"""
-    if forced():
+    """微台與法人同窗；已定案則不再重抓（含手動 dispatch）。"""
+    if os.environ.get("TXF_FORCE") == "1":
         return True
     d = dt or now_tw()
     h = hm(d)
     if d.weekday() >= 5:
         return False
-    if 1430 <= h <= 1530:
+    local = not os.environ.get("GITHUB_ACTIONS")
+    dispatch = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+    if 1430 <= h <= 1600:
         return not day_chips_ready(d)
     if 730 <= h <= 1000:
+        return not night_chips_ready(d)
+    if local or dispatch:
+        if h >= 1430:
+            return not day_chips_ready(d)
         return not night_chips_ready(d)
     return False
