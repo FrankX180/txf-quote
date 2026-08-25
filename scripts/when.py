@@ -88,10 +88,10 @@ def want_daily_k(dt=None):
 
 
 def want_uncovered(dt=None):
-    """日盤法人 14:30–16:00；夜盤成交 平日/週六 07:30–10:00。
+    """日盤法人 14:30–15:05；夜盤成交 平日/週六 07:30–10:00。
 
-    已定案（日盤／暫行夜盤）後不再重抓——含 workflow_dispatch／本機。
-    只有 TXF_FORCE=1 才強制重抓。避免盤後數字一直抖。
+    盤後籌碼以 15:00 前定案為準；已定案後不再重抓（含 workflow_dispatch／本機）。
+    只有 TXF_FORCE=1 才強制重抓。
     """
     if os.environ.get("TXF_FORCE") == "1":
         return True
@@ -107,7 +107,8 @@ def want_uncovered(dt=None):
         if not (730 <= h <= 1000) and not local and not dispatch:
             return False
         return not night_chips_ready(d)
-    in_day = 1430 <= h <= 1600
+    # 14:30 起抓；15:05 止（15:00 定案後只留短窗補漏）
+    in_day = 1430 <= h <= 1505
     in_night = 730 <= h <= 1000
     if in_day:
         return not day_chips_ready(d)
@@ -136,9 +137,10 @@ def _ymd8(s):
 
 
 def day_chips_ready(dt=None):
-    """今日日盤法人列已定案：官網 taifex 源 + 外資／投信水位。
+    """今日日盤法人列已定案：官網 taifex + 外資／投信水位。
 
-    大台+小台+微台齊備 → 立刻定案；16:00 後有官網水位也定案（微台晚到不再一直抖）。
+    大台+小台+微台齊 → 立刻定案。
+    滿 15:00 後只要官網水位在檔 → 定案（不再追盤後微修／商品晚到）。
     """
     d = dt or now_tw()
     if d.weekday() >= 5:
@@ -161,8 +163,8 @@ def day_chips_ready(dt=None):
     prods = set(hist0.get("instProds") or [])
     if {"TX", "MTX", "TMF"} <= prods:
         return True
-    # 逾 16:00：官網水位已在就凍結（不再追微台晚到或盤後微修）
-    if hm(d) >= 1600:
+    # 15:00 起凍結：盤後籌碼應已定位，不再讓數字亂跳
+    if hm(d) >= 1500:
         return True
     return False
 
@@ -197,7 +199,7 @@ def want_tmf_retail(dt=None):
         return False
     local = not os.environ.get("GITHUB_ACTIONS")
     dispatch = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
-    if 1430 <= h <= 1600:
+    if 1430 <= h <= 1505:
         return not day_chips_ready(d)
     if 730 <= h <= 1000:
         return not night_chips_ready(d)
