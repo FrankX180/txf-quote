@@ -113,7 +113,7 @@
     .oi .note { margin: 6px 0 0; color: #6b7280; font-size: 14px; line-height: 1.4; }
     .oi td.oi-close-px {
       padding: 2px 0 2px 2px; vertical-align: middle; min-width: 0;
-      text-align: left !important;
+      text-align: right !important;
       font-family: "Microsoft JhengHei", "Microsoft JhengHei UI", "Noto Sans TC", sans-serif;
       font-variant-numeric: tabular-nums;
       font-size: 13px; font-weight: 800; line-height: 1.15;
@@ -121,7 +121,7 @@
     }
     .oi td.oi-close-d {
       padding: 2px 2px 2px 1px; vertical-align: middle; min-width: 0;
-      text-align: left !important;
+      text-align: right !important;
       font-family: "Microsoft JhengHei", "Microsoft JhengHei UI", "Noto Sans TC", sans-serif;
       font-variant-numeric: tabular-nums;
       font-size: 13px; font-weight: 800; line-height: 1.15;
@@ -131,7 +131,7 @@
     .oi th.oi-th-close {
       cursor: pointer; user-select: none; white-space: nowrap;
       color: #6b7280; text-decoration: none;
-      text-align: left !important;
+      text-align: right !important;
     }
     .oi-cbar-wrap {
       display: flex; flex-direction: column; align-items: stretch; gap: 1px;
@@ -5259,7 +5259,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.10";
+        const VER = "2.11";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
