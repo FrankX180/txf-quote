@@ -644,6 +644,40 @@
     })();
     let dailyPack = { night: [], day: [], daily: [], week: [], month: [] };
     let uncover = { inst: [], top: [], date: "", today: null, history: [] };
+    const UNC_CACHE_KEY = "txfUncoverCache";
+    function cacheUncover(u) {
+      try {
+        if (!u || !(u.history || u.today)) return;
+        const slim = {
+          fetchedAt: u.fetchedAt || "",
+          date: u.date || "",
+          source: u.source || "",
+          today: u.today || null,
+          night: u.night || null,
+          history: (u.history || []).slice(0, 80),
+        };
+        localStorage.setItem(UNC_CACHE_KEY, JSON.stringify(slim));
+      } catch (e) {}
+    }
+    function loadCachedUncover() {
+      try {
+        const o = JSON.parse(localStorage.getItem(UNC_CACHE_KEY) || "null");
+        if (o && ((o.history && o.history.length) || o.today)) return o;
+      } catch (e) {}
+      return null;
+    }
+    async function loadUncover() {
+      try {
+        const u = await gh("data/uncovered.json").then((r) => r.json());
+        uncover = u || uncover;
+        cacheUncover(uncover);
+      } catch (e) {
+        if (!(uncover.history && uncover.history.length)) {
+          uncover = { inst: [], top: [], date: "", today: null, history: [] };
+        }
+      }
+      renderOi();
+    }
     let mtxRetailByDate = {};
     let mtxRetailDate = "";
     // 微台散戶多空比資料日期標籤（worker 停更時一眼可見）
@@ -5030,6 +5064,8 @@
     }
 
     async function loadKline() {
+      // 法人表與日Ｋ／分Ｋ脫鉤：先搶 uncovered（可與 K 線並行）
+      const uncoverP = loadUncover();
       try {
         const pack = await gh("data/kline-daily.json").then((r) => r.json());
         dailyPack.night = pack.night || [];
@@ -5050,14 +5086,8 @@
           minutePack.night_1m = m.night;
           minutePack.day_1m = m.day || [];
         }
-        // GitHub 可能落後：併 Worker 即時 1m（開盤另有 startLive1mGuard 缺段重試）
         await pullLive1m();
       } catch (e) {}
-      try {
-        uncover = await gh("data/uncovered.json").then((r) => r.json());
-      } catch (e) {
-        uncover = { inst: [], top: [], date: "", today: null, history: [] };
-      }
       try {
         let mx = null;
         let mxGh = null;
@@ -5073,7 +5103,6 @@
         } catch (e) {
           mxGh = null;
         }
-        // Worker 常只有近段；與 GitHub 全史（微台上市以來）合併，重疊日以 Worker 為準
         const map = {};
         function eat(pack) {
           (pack && pack.series ? pack.series : []).forEach(function (r) {
@@ -5092,12 +5121,11 @@
       } catch (e) {
         mtxRetailByDate = {};
       }
-      // 1 分到齊後寫回當盤開高低（震幅／摘要用）
+      await uncoverP;
       if (snap) {
         patchQuoteOHLC("day", n(snap.day && snap.day.CLastPrice));
         patchQuoteOHLC("night", n(snap.night && snap.night.CLastPrice));
       }
-      renderOi();
       drawMiniK();
       render();
       if (chartMode === "k") draw();
@@ -5231,7 +5259,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.09";
+        const VER = "2.10";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
@@ -5242,6 +5270,12 @@
     loadLocal1m();
     loadImbBars();
     loadNightImbBase();
+    (function paintUncoverCache() {
+      const cached = loadCachedUncover();
+      if (!cached) return;
+      uncover = cached;
+      renderOi();
+    })();
     load();
     loadImbCloud().then(async () => {
       if (sessKey() === "day") await refreshNightImbBase();
