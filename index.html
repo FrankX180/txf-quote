@@ -112,7 +112,7 @@
     .oi .muted { color: #9ca3af; font-weight: 500; font-size: 14px; }
     .oi .note { margin: 6px 0 0; color: #6b7280; font-size: 14px; line-height: 1.4; }
     .oi td.oi-close {
-      padding: 2px 4px; vertical-align: middle; min-width: 11.5ch;
+      padding: 2px 2px; vertical-align: middle; min-width: 0;
       font-family: "Microsoft JhengHei", "Microsoft JhengHei UI", "Noto Sans TC", sans-serif;
       font-variant-numeric: tabular-nums;
       white-space: nowrap;
@@ -133,14 +133,14 @@
     }
     .oi-cnum {
       display: inline-flex; align-items: baseline; justify-content: flex-end;
-      gap: 0; width: 100%; box-sizing: border-box;
+      gap: 2px; width: auto; max-width: 100%; box-sizing: border-box;
       font-family: "Microsoft JhengHei", "Microsoft JhengHei UI", "Noto Sans TC", sans-serif;
       font-variant-numeric: tabular-nums;
       font-size: 13px; font-weight: 800; line-height: 1.15;
       white-space: nowrap;
     }
-    .oi-cpx { display: inline-block; min-width: 5.5ch; text-align: right; }
-    .oi-cpct { display: inline-block; min-width: 7.5ch; text-align: right; }
+    .oi-cpx { display: inline-block; min-width: 0; text-align: right; }
+    .oi-cpct { display: inline-block; min-width: 0; text-align: right; letter-spacing: -0.02em; }
     .oi td.oi-pick {
       padding: 2px 2px; vertical-align: middle;
       min-width: 6px; width: 8px; max-width: 10px;
@@ -269,7 +269,12 @@
       transition: transform 0.2s ease;
     }
     .oi-simple.on .sw::after { transform: translateX(16px); }
-    .oi-table-wrap { position: relative; }
+    .oi-table-wrap {
+      position: relative;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-x: contain;
+    }
     .oi-table-wrap.has-pick { padding-right: 52px; }
     .oi-restore {
       position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
@@ -402,11 +407,19 @@
     table.q td:nth-child(3) { padding-left: 8px; }
     .oi { margin-top: 0; font-size: 15px; }
     .oi h4 { margin: 0 0 6px; font-size: 15px; }
-    .oi table { width: 100%; border-collapse: collapse; }
+    .oi table { width: max-content; min-width: 100%; border-collapse: collapse; }
     .oi td, .oi th { padding: 3px 2px; border-bottom: 1px solid #f3f4f6; text-align: right; font-variant-numeric: tabular-nums; }
     .oi tr.tot td { border-top: 1px solid #6b7280; }
-    .oi td:first-child, .oi th:first-child { text-align: left; color: #6b7280; }
-    .oi th { color: #6b7280; font-weight: 600; }
+    .oi td:first-child, .oi th:first-child { text-align: left; color: #6b7280; white-space: nowrap; }
+    .oi th { color: #6b7280; font-weight: 600; white-space: nowrap; }
+    @media (max-width: 650px) {
+      .oi { font-size: 13px; }
+      .oi td, .oi th { padding: 2px 1px; }
+      .oi-cnum { font-size: 12px; }
+      .oi-snum, .oi-inline-num { font-size: 12px; }
+      .oi-sbar-wrap { min-width: 44px; }
+      .oi-table-wrap.has-pick { padding-right: 40px; }
+    }
     table.q td.lab { color: #6b7280; }
     .ob { width: 100%; border-collapse: collapse; font-size: 15px; margin-top: 0; table-layout: fixed; font-weight: 700; }
     .ob col.c-qty { width: 18px; }
@@ -1452,7 +1465,7 @@
         cumMeta = oiSignedMeta(cumArr);
       }
       let html = `<div class="oi-table-wrap${pick ? " has-pick" : ""}${cumOn ? " has-cum" : ""}">`;
-      const closeH = oiCloseDelta === "pts" ? "收盤(點)" : "收盤 (%)";
+      const closeH = oiCloseDelta === "pts" ? "收(點)" : "收(%)";
       const closeTitle = oiCloseDelta === "pts" ? "點一下改為漲跌幅%" : "點一下改為漲跌點數";
       html += `<table><tr><th>日</th><th class="oi-th-close" data-oi-close-toggle="1" title="${closeTitle}">${closeH}</th>`;
       keys.forEach((k) => { html += oiPickTh(panel, k, labs[k] || k); });
