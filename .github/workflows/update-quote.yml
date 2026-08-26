@@ -35,6 +35,8 @@ jobs:
         continue-on-error: true
       # uncovered 長歷史靠 scripts 合併 repo 舊檔維持（不需本機 PG／開機）
       - name: Fetch Yahoo FITX uncovered
+        env:
+          WEBSHARE_PROXIES: ${{ secrets.WEBSHARE_PROXIES }}
         run: python scripts/fetch_uncovered.py
         continue-on-error: true
       - name: Fetch TAIFEX TMF retail long-short ratio

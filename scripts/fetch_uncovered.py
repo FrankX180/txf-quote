@@ -2,13 +2,15 @@
 # 長歷史 SSOT＝repo 內 uncovered.history（雲端 Actions 日常靠 merge_history_with_repo 維持）
 # 本機 PG 只用於首次／災害回填；不依賴開機才能更新近端籌碼
 # 主路：期交所官網下載 futContractsDateDown（TX+MTX+TMF 大台等值）
-# PC／VIX／大額／收盤：期交所官網（pcRatioDown／VIX 月檔／largeTraderFutDown／futDataDown）
+# PC／VIX／大額／收盤：期交所官網（pcRatioDown／VIX 月檔＋MIS getQuoteListVIX／largeTraderFutDown／futDataDown）
 # 備援：OpenAPI／Yahoo／玩股收盤補洞；CMoney 僅在官網法人失敗時備援
 # 散戶一律：retail = -(外資+投信+自營)（大台等值）
 # 口數一律大台等值：TX + MTX/4 + TMF/20（點值 200/50/10）
 import csv
 import io
 import json
+import os
+import random
 import re
 import ssl
 import urllib.parse
@@ -45,6 +47,8 @@ MTX_DIV = 4.0
 TMF_DIV = 20.0
 TMF_JSON = ROOT / "data" / "tmf_retail.json"
 VIX_CSV = Path(r"E:\CyndiTD\Program\derived\VIX\VIXTWN_daily_master.csv")
+PROXY_FILE = Path(r"E:\_Project\股票資料庫\_Data\webshare_proxies.txt")
+TAIFEX_MIS_VIX = "https://mis.taifex.com.tw/futures/api/getQuoteListVIX"
 OA_CODES = (
     ("臺股期貨", 1.0),
     ("小型臺指期貨", MTX_DIV),
@@ -390,6 +394,82 @@ def fetch_taifex_vix_map(months_back: int = 3):
             # 優先收盤（第一個有效數），沒有才用最後
             out[parts[0]] = nums[0]
     return out
+
+
+def load_proxies():
+    """本機 proxy 檔或雲端 WEBSHARE_PROXIES／TAIFEX_PROXIES。"""
+    out = []
+    env_raw = os.environ.get("WEBSHARE_PROXIES") or os.environ.get("TAIFEX_PROXIES") or ""
+    lines = []
+    if env_raw.strip():
+        lines.extend(env_raw.replace("\r", "\n").split("\n"))
+    if PROXY_FILE.exists():
+        lines.extend(PROXY_FILE.read_text(encoding="utf-8", errors="replace").splitlines())
+    seen = set()
+    for ln in lines:
+        ln = ln.strip()
+        if not ln or ln.startswith("#"):
+            continue
+        parts = ln.split(":")
+        if len(parts) >= 4:
+            host, port, user, pwd = parts[0], parts[1], parts[2], ":".join(parts[3:])
+            url = f"http://{user}:{pwd}@{host}:{port}"
+        elif len(parts) == 2:
+            url = f"http://{parts[0]}:{parts[1]}"
+        else:
+            continue
+        if url in seen:
+            continue
+        seen.add(url)
+        out.append(url)
+    return out
+
+
+def fetch_mis_vix_last():
+    """MIS 即時波動率：POST getQuoteListVIX → {date8: last}。
+
+    盤後即有當日收盤；月檔常晚到。預設走 proxy（mis Cloudflare）。
+    """
+    body = json.dumps({"SortColumn": "", "AscDesc": "A"}).encode("utf-8")
+    hdr = {
+        **HDR,
+        "Content-Type": "application/json;charset=UTF-8",
+        "Origin": "https://mis.taifex.com.tw",
+        "Referer": "https://mis.taifex.com.tw/futures/VolatilityQuotes/",
+    }
+    proxies = load_proxies()
+    random.shuffle(proxies)
+    openers = []
+    for p in proxies[:5]:
+        openers.append(
+            urllib.request.build_opener(
+                urllib.request.ProxyHandler({"http": p, "https": p}),
+                urllib.request.HTTPSHandler(context=SSL_CTX),
+            )
+        )
+    openers.append(urllib.request.build_opener(urllib.request.HTTPSHandler(context=SSL_CTX)))
+    last_err = None
+    for opener in openers:
+        try:
+            req = urllib.request.Request(TAIFEX_MIS_VIX, data=body, headers=hdr, method="POST")
+            with opener.open(req, timeout=20) as r:
+                data = json.loads(r.read().decode("utf-8", "replace"))
+            if str(data.get("RtCode")) != "0":
+                last_err = data.get("RtMsg") or data.get("RtCode")
+                continue
+            q = ((data.get("RtData") or {}).get("QuoteList") or [None])[0] or {}
+            d = ymd8(q.get("CDate"))
+            px = _taifex_num_cell(q.get("CLastPrice"))
+            if not d or px is None or px <= 0:
+                last_err = "empty quote"
+                continue
+            return {d: float(px)}
+        except Exception as e:
+            last_err = e
+            continue
+    if last_err is not None:
+        raise RuntimeError(f"mis vix fail: {last_err}")
+    return {}
 
 
 def _taifex_num_cell(s):
@@ -1324,6 +1404,14 @@ def main():
             sources.append("taifex_vix")
     except Exception as e:
         print("WARN taifex vix", e)
+    try:
+        mis_vix = fetch_mis_vix_last()
+        if mis_vix:
+            vix_official.update(mis_vix)
+            sources.append("taifex_mis_vix")
+            print("OK mis vix", mis_vix)
+    except Exception as e:
+        print("WARN mis vix", e)
     close_map = {}
     try:
         close_map = fetch_taifex_tx_close_map(TAIFEX_WIN)
