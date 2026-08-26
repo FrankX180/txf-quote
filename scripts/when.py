@@ -141,6 +141,7 @@ def day_chips_ready(dt=None):
 
     大台+小台+微台齊 → 立刻定案。
     滿 15:00 後只要官網水位在檔 → 定案（不再追盤後微修／商品晚到）。
+    VIX 官網月檔常晚於籌碼：缺 VIX 時 17:00 前仍視為未定案，允許補抓。
     """
     d = dt or now_tw()
     if d.weekday() >= 5:
@@ -161,12 +162,13 @@ def day_chips_ready(dt=None):
     if "taifex" not in parts:
         return False
     prods = set(hist0.get("instProds") or [])
-    if {"TX", "MTX", "TMF"} <= prods:
-        return True
-    # 15:00 起凍結：盤後籌碼應已定位，不再讓數字亂跳
-    if hm(d) >= 1500:
-        return True
-    return False
+    chips_ok = {"TX", "MTX", "TMF"} <= prods or hm(d) >= 1500
+    if not chips_ok:
+        return False
+    today_vix = (j.get("today") or {}).get("vix")
+    if hist0.get("vix") is None and today_vix is None and hm(d) < 1700:
+        return False
+    return True
 
 
 def night_chips_ready(dt=None):
