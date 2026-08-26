@@ -111,11 +111,27 @@
     .oi-panel.on { display: block; }
     .oi .muted { color: #9ca3af; font-weight: 500; font-size: 14px; }
     .oi .note { margin: 6px 0 0; color: #6b7280; font-size: 14px; line-height: 1.4; }
-    .oi td.oi-close {
-      padding: 2px 2px; vertical-align: middle; min-width: 0;
+    .oi td.oi-close-px {
+      padding: 2px 0 2px 2px; vertical-align: middle; min-width: 0;
+      text-align: left !important;
       font-family: "Microsoft JhengHei", "Microsoft JhengHei UI", "Noto Sans TC", sans-serif;
       font-variant-numeric: tabular-nums;
+      font-size: 13px; font-weight: 800; line-height: 1.15;
       white-space: nowrap;
+    }
+    .oi td.oi-close-d {
+      padding: 2px 2px 2px 1px; vertical-align: middle; min-width: 0;
+      text-align: left !important;
+      font-family: "Microsoft JhengHei", "Microsoft JhengHei UI", "Noto Sans TC", sans-serif;
+      font-variant-numeric: tabular-nums;
+      font-size: 13px; font-weight: 800; line-height: 1.15;
+      white-space: nowrap;
+      letter-spacing: -0.02em;
+    }
+    .oi th.oi-th-close {
+      cursor: pointer; user-select: none; white-space: nowrap;
+      color: #6b7280; text-decoration: none;
+      text-align: left !important;
     }
     .oi-cbar-wrap {
       display: flex; flex-direction: column; align-items: stretch; gap: 1px;
@@ -131,16 +147,6 @@
       height: 100%; min-width: 2px;
       background: #f97316; border-radius: 0;
     }
-    .oi-cnum {
-      display: inline-flex; align-items: baseline; justify-content: flex-end;
-      gap: 2px; width: auto; max-width: 100%; box-sizing: border-box;
-      font-family: "Microsoft JhengHei", "Microsoft JhengHei UI", "Noto Sans TC", sans-serif;
-      font-variant-numeric: tabular-nums;
-      font-size: 13px; font-weight: 800; line-height: 1.15;
-      white-space: nowrap;
-    }
-    .oi-cpx { display: inline-block; min-width: 0; text-align: right; }
-    .oi-cpct { display: inline-block; min-width: 0; text-align: right; letter-spacing: -0.02em; }
     .oi td.oi-pick {
       padding: 2px 2px; vertical-align: middle;
       min-width: 6px; width: 8px; max-width: 10px;
@@ -158,10 +164,6 @@
       text-decoration: none;
       border-radius: 4px;
       padding: 2px 6px;
-    }
-    .oi th.oi-th-close {
-      cursor: pointer; user-select: none; white-space: nowrap;
-      color: #6b7280; text-decoration: none;
     }
     .oi th.oi-pick-h {
       color: #6b7280; font-weight: 700;
@@ -415,7 +417,7 @@
     @media (max-width: 650px) {
       .oi { font-size: 13px; }
       .oi td, .oi th { padding: 2px 1px; }
-      .oi-cnum { font-size: 12px; }
+      .oi td.oi-close-px, .oi td.oi-close-d { font-size: 12px; }
       .oi-snum, .oi-inline-num { font-size: 12px; }
       .oi-sbar-wrap { min-width: 44px; }
       .oi-table-wrap.has-pick { padding-right: 40px; }
@@ -1150,28 +1152,31 @@
         .replace("自營商", "自")
         .replace("三大法人合計", "總");
     }
-    function oiCloseCell(v, prev) {
-      if (v == null || v === "") return "—";
+    function oiCloseCells(v, prev) {
+      if (v == null || v === "") {
+        return `<td class="oi-close-px">—</td><td class="oi-close-d"></td>`;
+      }
       const n = Number(v);
-      if (!isFinite(n)) return "—";
+      if (!isFinite(n)) {
+        return `<td class="oi-close-px">—</td><td class="oi-close-d"></td>`;
+      }
       const p = prev == null || prev === "" ? NaN : Number(prev);
       const cls = isFinite(p) ? (n > p ? "up" : n < p ? "dn" : "flat") : "flat";
       const disp = oiSimple ? round50(n) : n;
-      const px = `<span class="oi-cpx">${fmt(disp)}</span>`;
-      let deltaHtml = `<span class="oi-cpct"></span>`;
+      let delta = "";
       if (isFinite(p)) {
         if (oiCloseDelta === "pts") {
           let d = n - p;
           if (oiSimple) d = round50(d);
           const sign = d > 0 ? "+" : "";
-          deltaHtml = `<span class="oi-cpct">(${sign}${fmt(d)})</span>`;
+          delta = `(${sign}${fmt(d)})`;
         } else if (p !== 0) {
           const pct = ((n - p) / p) * 100;
           const sign = pct > 0 ? "+" : "";
-          deltaHtml = `<span class="oi-cpct">(${sign}${pct.toFixed(1)}%)</span>`;
+          delta = `(${sign}${pct.toFixed(1)}%)`;
         }
       }
-      return `<span class="oi-cnum ${cls}">${px}${deltaHtml}</span>`;
+      return `<td class="oi-close-px ${cls}">${fmt(disp)}</td><td class="oi-close-d ${cls}">${delta}</td>`;
     }
     function oiAbsMax(vals) {
       let m = 0;
@@ -1465,15 +1470,15 @@
         cumMeta = oiSignedMeta(cumArr);
       }
       let html = `<div class="oi-table-wrap${pick ? " has-pick" : ""}${cumOn ? " has-cum" : ""}">`;
-      const closeH = oiCloseDelta === "pts" ? "收(點)" : "收(%)";
+      const closeH = oiCloseDelta === "pts" ? "收盤(點)" : "收盤(%)";
       const closeTitle = oiCloseDelta === "pts" ? "點一下改為漲跌幅%" : "點一下改為漲跌點數";
-      html += `<table><tr><th>日</th><th class="oi-th-close" data-oi-close-toggle="1" title="${closeTitle}">${closeH}</th>`;
+      html += `<table><tr><th>日</th><th class="oi-th-close" colspan="2" data-oi-close-toggle="1" title="${closeTitle}">${closeH}</th>`;
       keys.forEach((k) => { html += oiPickTh(panel, k, labs[k] || k); });
       html += `</tr>`;
       list.forEach((r, i) => {
         // 用完整 rows 算前日（收合只顯示 10 天時，最底列仍要有漲跌幅）
         const prevClose = (i + 1 < rows.length && rows[i + 1]) ? rows[i + 1].close : null;
-        html += `<tr><td>${oiShortDate(r.date, r.session)}</td><td class="oi-close">${oiCloseCell(r.close, prevClose)}</td>`;
+        html += `<tr><td>${oiShortDate(r.date, r.session)}</td>${oiCloseCells(r.close, prevClose)}`;
         keys.forEach((k) => {
           if (k === "pc" || k === "vix") {
             const nv = r[k] == null ? null : Number(r[k]);
@@ -5226,7 +5231,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.08";
+        const VER = "2.09";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
