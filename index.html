@@ -2164,12 +2164,31 @@
           if (dNow) return [dNow];
         }
       }
-      // 日期以 1 分 K 為準（最完整）
-      const bars = m1.concat(m5, m15);
+      // 以時間排序後由新到舊；只算「至少有一根開盤中棒」的 date
+      // （Yahoo 週五夜未矯正時會留下六／日假 date，sessKindAt=closed，不可占 2～5 日名額）
+      const bars = (m1.length ? m1 : m5.concat(m15))
+        .slice()
+        .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
       const dates = [];
       for (let i = bars.length - 1; i >= 0 && dates.length < nDays; i--) {
-        const d = dateKey(bars[i].date);
-        if (d && dates.indexOf(d) < 0) dates.push(d);
+        const b = bars[i];
+        const d = dateKey(b && b.date);
+        if (!d || dates.indexOf(d) >= 0) continue;
+        const t = barWallTs(b);
+        if (t == null || sessKindAt(t) === "closed") continue;
+        dates.push(d);
+      }
+      // 1 分不夠再掃 5／15（仍跳過休市棒）
+      if (dates.length < nDays && m1.length) {
+        const more = m5.concat(m15).slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+        for (let i = more.length - 1; i >= 0 && dates.length < nDays; i--) {
+          const b = more[i];
+          const d = dateKey(b && b.date);
+          if (!d || dates.indexOf(d) >= 0) continue;
+          const t = barWallTs(b);
+          if (t == null || sessKindAt(t) === "closed") continue;
+          dates.push(d);
+        }
       }
       return dates;
     }
@@ -5194,7 +5213,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.07";
+        const VER = "2.08";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
