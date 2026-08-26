@@ -1605,7 +1605,7 @@
       }
       oiEl.innerHTML = oiBuildHistTable("oi", oiRows, oiKeys, oiLabs, oiNote);
 
-      const bigLabs = { top10: "前十淨", top10Spec: "特定法人", pc: "P/C%", vix: "VIX" };
+      const bigLabs = { top10: "十大", top10Spec: "特法", pc: "P/C%", vix: "VIX" };
       let bigRows = hist.map((r, i) => {
         const d = String(r.date || "").replace(/\D/g, "");
         let vix = r.vix;
@@ -1635,7 +1635,7 @@
         bigRows,
         ["top10", "top10Spec", "pc", "vix"],
         bigLabs,
-        "前十／特定法人＝大額淨未平倉（官方 TX+小台/4）；P/C%／VIX 不換算；點表頭開關 K 線副圖（最多兩個）"
+        "十大／特法＝大額淨未平倉（官方 TX+小台/4）；P/C%／VIX 不換算；點表頭開關 K 線副圖（最多兩個）"
       );
 
       const sw = $("oiSimpleSw");
@@ -3963,7 +3963,7 @@
       registerOiBarInd("OI_TRUST", "投信", "oiTrust", "trust", 0, "oiTrustCum");
       registerOiBarInd("OI_DEALER", "自營", "oiDealer", "dealer", 0, "oiDealerCum");
       registerOiBarInd("OI_RETAIL", "散戶", "oiRetail", "retail", 0, "oiRetailCum");
-      registerOiBarInd("OI_TOP10", "前十淨", "oiTop10", "top10", 0, "oiTop10Cum");
+      registerOiBarInd("OI_TOP10", "十大", "oiTop10", "top10", 0, "oiTop10Cum");
       registerOiBarInd("OI_TOP10SPEC", "特法", "oiTop10Spec", "top10Spec", 0, "oiTop10SpecCum");
       registerOiBarInd("OI_PC", "P/C%", "oiPc", "pc", 1, null);
       registerOiBarInd("OI_VIX", "VIX", "oiVix", "vix", 1, null);
