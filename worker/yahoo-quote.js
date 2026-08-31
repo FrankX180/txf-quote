@@ -600,13 +600,19 @@ function barsFromChartJson(chart) {
     // SSOT: 01_Docs/Yahoo-台指期K線日期慣例.md
     const nowLim = Date.now() + 120000;
     while (ts > nowLim) ts -= 86400000;
+    if (ts > nowLim) continue;
+    const cNum = +c;
+    if (!(cNum >= 10000 && cNum <= 80000)) continue;
     const sess = sessionOf(ts);
+    if (!sess) continue;
     const dayKey = tradingDayKey(ts);
     const slot = minuteSlot(ts);
     const o = opens[i] != null ? +opens[i] : +c;
     const h = highs[i] != null ? +highs[i] : +c;
     const l = lows[i] != null ? +lows[i] : +c;
     const v = vols[i] != null ? Math.round(+vols[i] * 1000) : 0;
+    const prev = out.length ? out[out.length - 1] : null;
+    if (prev && prev.session === sess && Math.abs(slot - prev.t) <= 15 * 60000 && Math.abs(cNum - prev.c) >= 400) continue;
     out.push({
       dayKey,
       session: sess,

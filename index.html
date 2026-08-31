@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.11</div>
+      <div class="ver foot-right">2.12</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1882,6 +1882,47 @@
       while (t > lim) t -= 86400000;
       return t;
     }
+    // 夜盤走勢千點垂直尖刺：Yahoo 未矯正完的未來棒、或日盤價被寫進夜盤根
+    const PX_SPIKE_PTS = 400;
+    function pxLooksLikeTxf(px) {
+      const x = +px;
+      return Number.isFinite(x) && x >= 10000 && x <= 80000;
+    }
+    function dropPxSpikes(rows, getPx, getTs) {
+      const a = (rows || []).filter((b) => b && pxLooksLikeTxf(getPx(b)));
+      if (a.length < 3) return a;
+      const keep = [];
+      for (let i = 0; i < a.length; i++) {
+        const p = +getPx(a[i]);
+        const t = +getTs(a[i]);
+        const prev = keep.length ? keep[keep.length - 1] : null;
+        if (prev) {
+          const p0 = +getPx(prev);
+          const t0 = +getTs(prev);
+          if (Number.isFinite(t0) && Number.isFinite(t) && (t - t0) <= 15 * 60000 && Math.abs(p - p0) >= PX_SPIKE_PTS) {
+            const nxt = a[i + 1];
+            if (nxt && Math.abs(+getPx(nxt) - p0) < PX_SPIKE_PTS) continue; // 單點尖刺，丟中間
+            if (keep.length === 1 && nxt && Math.abs(+getPx(nxt) - p) < PX_SPIKE_PTS) {
+              keep.pop(); // 第一根才是錯的
+            } else {
+              continue;
+            }
+          }
+        }
+        keep.push(a[i]);
+      }
+      return keep;
+    }
+    function dropFutureBars(rows) {
+      const lim = Date.now() + 180000;
+      return (rows || []).filter((b) => {
+        if (!b || b.timestamp == null) return false;
+        const ts = fixYahooFutureTs(+b.timestamp);
+        if (ts > lim) return false;
+        if (!pxLooksLikeTxf(b.close != null ? b.close : b.px)) return false;
+        return true;
+      });
+    }
     function normalizeYahooBar(b) {
       if (!b || b.timestamp == null) return b;
       const ts = fixYahooFutureTs(+b.timestamp);
@@ -2502,8 +2543,10 @@
       const rows = minutePack[key] || [];
       if (!rows.length) return; // 無 chart 棒則不建；單價不成立 K
       const last = rows[rows.length - 1];
-      const lastSlot = Math.floor(last.timestamp / 60000) * 60000;
+      const lastSlot = Math.floor(fixYahooFutureTs(last.timestamp) / 60000) * 60000;
       if (lastSlot !== slot) return; // 當分尚無棒 → 等 Yahoo chart；禁用單價新建／填洞
+      const lastClose = n(last.close);
+      if (lastClose != null && Math.abs(px - lastClose) >= PX_SPIKE_PTS) return;
       const dVol = tot != null && lastTot != null && tot >= lastTot ? tot - lastTot : 0;
       last.close = px;
       last.high = Math.max(last.high, px);
@@ -2518,15 +2561,16 @@
       const keep = lastDates(span);
       // 主體＝minuteSeries（當日 1 分／多日 5 或 15 分）
       const mins = fillMinutes(
-        minuteSeries().filter((b) => keep.indexOf(dateKey(b.date)) >= 0)
+        dropFutureBars(minuteSeries().filter((b) => keep.indexOf(dateKey(b.date)) >= 0))
       );
       let pts = mins
         .map((b) => ({
           px: b.close, vol: b.volume, time: barWallTs(b),
           open: b.open, high: b.high, low: b.low, close: b.close,
         }))
-        .filter((p) => p.time != null && sessKindAt(p.time) !== "closed");
+        .filter((p) => p.time != null && sessKindAt(p.time) !== "closed" && p.time <= Date.now() + 180000);
       pts.sort((a, b) => a.time - b.time);
+      pts = dropPxSpikes(pts, (p) => p.px, (p) => p.time);
       // 尾端即時：當日併當盤 5 秒 tick；多日併日+夜 tick（盤後夜盤也要接到現在）
       {
         const ticks =
@@ -2541,7 +2585,8 @@
             if (sessKindAt(ts) === "closed") return;
             if (ts <= lastT) return;
             const px = h.px;
-            if (px == null) return;
+            if (px == null || !pxLooksLikeTxf(px)) return;
+            if (pts.length && Math.abs(px - pts[pts.length - 1].px) >= PX_SPIKE_PTS) return;
             pts.push({
               px, vol: h.vol || 0, time: ts,
               open: px, high: px, low: px, close: px,
@@ -2565,15 +2610,19 @@
       {
         const livePx = n(q() && q().CLastPrice);
         const now = Date.now();
-        if (livePx != null && pts.length && sessKindAt(now) !== "closed") {
+        if (livePx != null && pts.length && sessKindAt(now) !== "closed" && pxLooksLikeTxf(livePx)) {
           const last = pts[pts.length - 1];
           const lastT = last.time || 0;
-          if (Math.abs(now - lastT) < 120000 || lastT > now + 3600000) {
+          if (lastT > now + 180000) {
+            /* 未矯正的未來棒：不用現價覆蓋 */
+          } else if (Math.abs(livePx - last.px) >= PX_SPIKE_PTS) {
+            /* 跨盤混價：不縮尾 */
+          } else if (Math.abs(now - lastT) < 120000) {
             last.px = livePx;
             last.close = livePx;
             last.high = Math.max(last.high != null ? last.high : livePx, livePx);
             last.low = Math.min(last.low != null ? last.low : livePx, livePx);
-            if (lastT <= now + 3600000) last.time = Math.max(lastT, now - 500);
+            last.time = Math.max(lastT, now - 500);
           } else {
             pts.push({
               px: livePx, vol: 0, time: now,
@@ -2930,11 +2979,19 @@
         if (raw.length < 2) raw = src;
         // K 棒禁填洞：filled／單價扁棒不是 OHLC
         // 再強制 Yahoo 未來戳回移（防舊快取；見 01_Docs/Yahoo-台指期K線日期慣例.md）
-        return raw.filter(function (b) { return b && !b.filled; }).map(normalizeYahooBar);
+        return dropPxSpikes(
+          dropFutureBars(raw.filter(function (b) { return b && !b.filled; }).map(normalizeYahooBar)),
+          function (b) { return b.close; },
+          function (b) { return b.timestamp; }
+        );
       }
       if (kInt === "5") {
         const src5 = m5.length ? m5 : resample(m1.filter(function (b) { return b && !b.filled; }), 5 * 60 * 1000);
-        return src5.filter(function (b) { return b && !b.filled; }).map(normalizeYahooBar);
+        return dropPxSpikes(
+          dropFutureBars(src5.filter(function (b) { return b && !b.filled; }).map(normalizeYahooBar)),
+          function (b) { return b.close; },
+          function (b) { return b.timestamp; }
+        );
       }
       if (kInt === "m") {
         // MoneyDJ 量幾乎全 0；月 K 不畫假量（volume 清 0）
@@ -4912,6 +4969,7 @@
         const tsSec = +tsList[i];
         let ts = tsSec < 1e12 ? tsSec * 1000 : tsSec;
         ts = fixYahooFutureTs(ts);
+        if (ts > Date.now() + 180000) continue;
         const d = new Date(ts);
         const hm = d.getHours() * 100 + d.getMinutes();
         let sess = null;
@@ -4935,6 +4993,7 @@
         const h = highs[i] != null ? +highs[i] : +c;
         const l = lows[i] != null ? +lows[i] : +c;
         const v = vols[i] != null ? Math.round(+vols[i] * 1000) : 0;
+        if (!pxLooksLikeTxf(+c)) continue;
         const row = {
           timestamp: ts,
           open: o, high: h, low: l, close: +c,
@@ -4944,7 +5003,8 @@
         if (sess === "night") night.push(row);
         else day.push(row);
       }
-      return { night, day };
+      const scrub = (arr) => dropPxSpikes(dropFutureBars(arr), (b) => b.close, (b) => b.timestamp);
+      return { night: scrub(night), day: scrub(day) };
     }
 
     // 後端權威 1 分價（D1）→ 奇摩 chart 補洞；不依賴何時開頁
@@ -5259,7 +5319,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.11";
+        const VER = "2.12";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
