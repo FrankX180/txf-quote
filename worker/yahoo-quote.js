@@ -599,7 +599,11 @@ function barsFromChartJson(chart) {
     // Yahoo 夜盤標次交易日（平日 +1 天、週五 +2 天）：逐日回移到不晚於現在
     // SSOT: 01_Docs/Yahoo-台指期K線日期慣例.md
     const nowLim = Date.now() + 120000;
-    while (ts > nowLim) ts -= 86400000;
+    let shift = 0;
+    while (ts > nowLim && shift < 2) {
+      ts -= 86400000;
+      shift++;
+    }
     if (ts > nowLim) continue;
     const cNum = +c;
     if (!(cNum >= 10000 && cNum <= 80000)) continue;

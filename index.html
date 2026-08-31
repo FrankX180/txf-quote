@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.12</div>
+      <div class="ver foot-right">2.13</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1879,7 +1879,11 @@
       let t = +ts;
       if (!Number.isFinite(t)) return ts;
       const lim = Date.now() + 120000;
-      while (t > lim) t -= 86400000;
+      let n = 0;
+      while (t > lim && n < 2) {
+        t -= 86400000;
+        n++;
+      }
       return t;
     }
     // 夜盤走勢千點垂直尖刺：Yahoo 未矯正完的未來棒、或日盤價被寫進夜盤根
@@ -1922,6 +1926,39 @@
         if (!pxLooksLikeTxf(b.close != null ? b.close : b.px)) return false;
         return true;
       });
+    }
+    // Yahoo 把多日夜盤標成未來再整段扣回「今晚」時，同一分鐘會疊約 KEEP_DAYS 根（44200～46500 刷針）
+    function pickSessionPath(rows, livePx) {
+      const a = (rows || []).filter((b) => b && b.timestamp != null && pxLooksLikeTxf(b.close != null ? b.close : b.px));
+      if (!a.length) return a;
+      const by = {};
+      a.forEach((b) => {
+        const ts = fixYahooFutureTs(+b.timestamp);
+        const slot = Math.floor(ts / 60000) * 60000;
+        const nb = Object.assign({}, b, { timestamp: ts });
+        const g = by[slot] || (by[slot] = []);
+        g.push(nb);
+      });
+      const slots = Object.keys(by).map(Number).sort((x, y) => x - y);
+      const ref = livePx != null && pxLooksLikeTxf(livePx) ? +livePx : +((by[slots[slots.length - 1]][0].close));
+      const picked = new Array(slots.length);
+      for (let i = slots.length - 1; i >= 0; i--) {
+        const g = by[slots[i]];
+        const target = i === slots.length - 1 || picked[i + 1] == null
+          ? ref
+          : +(picked[i + 1].close);
+        let best = g[0], bestD = Math.abs(+best.close - target);
+        for (let j = 1; j < g.length; j++) {
+          const d = Math.abs(+g[j].close - target);
+          const nv = +g[j].volume || 0, bv = +best.volume || 0;
+          if (d < bestD || (d === bestD && nv >= bv)) {
+            best = g[j];
+            bestD = d;
+          }
+        }
+        picked[i] = best;
+      }
+      return picked;
     }
     function normalizeYahooBar(b) {
       if (!b || b.timestamp == null) return b;
@@ -2560,8 +2597,12 @@
       const span = daySpan < 1 ? 1 : daySpan;
       const keep = lastDates(span);
       // 主體＝minuteSeries（當日 1 分／多日 5 或 15 分）
+      const livePx0 = n(q() && q().CLastPrice);
       const mins = fillMinutes(
-        dropFutureBars(minuteSeries().filter((b) => keep.indexOf(dateKey(b.date)) >= 0))
+        pickSessionPath(
+          dropFutureBars(minuteSeries().filter((b) => keep.indexOf(dateKey(b.date)) >= 0)),
+          livePx0
+        )
       );
       let pts = mins
         .map((b) => ({
@@ -2980,7 +3021,10 @@
         // K 棒禁填洞：filled／單價扁棒不是 OHLC
         // 再強制 Yahoo 未來戳回移（防舊快取；見 01_Docs/Yahoo-台指期K線日期慣例.md）
         return dropPxSpikes(
-          dropFutureBars(raw.filter(function (b) { return b && !b.filled; }).map(normalizeYahooBar)),
+          pickSessionPath(
+            dropFutureBars(raw.filter(function (b) { return b && !b.filled; }).map(normalizeYahooBar)),
+            n(q() && q().CLastPrice)
+          ),
           function (b) { return b.close; },
           function (b) { return b.timestamp; }
         );
@@ -5319,7 +5363,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.12";
+        const VER = "2.13";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");

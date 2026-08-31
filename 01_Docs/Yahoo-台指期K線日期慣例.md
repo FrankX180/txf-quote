@@ -49,9 +49,10 @@ Yahoo `StockServices.chart` 的 `timestamp` 把夜盤歸在 **下一個交易日
 對每一根從 Yahoo chart 進來的棒：
 
 1. 讀 `timestamp`（秒→乘 1000 成毫秒）  
-2. **若 `ts > now + 120 秒`：一次減 86400000 ms，重覆直到不晚於現在**  
-   - 平日夜盤通常減 1 次（−1 天）  
-   - 週五夜盤通常減 2 次（−2 天）  
+2. **若 `ts > now + 120 秒`：一次減 86400000 ms，最多 2 次**  
+   - 平日夜盤減 1 次（−1 天）  
+   - 週五夜盤減 2 次（−2 天）  
+   - **禁止無限 while**：歷史夜盤會被整段扣到「今晚」，同一分鐘疊約 10 根（44200～46500 刷針）  
 3. 用矯正後的牆鐘重算：  
    - `session`：`15:00–05:00`→`night`，`08:45–13:45`→`day`  
    - `date`：夜盤＝開盤曆日（凌晨 `<05:00` 歸前一日）；日盤＝當天曆日  
@@ -65,7 +66,8 @@ Yahoo `StockServices.chart` 的 `timestamp` 把夜盤歸在 **下一個交易日
 | 前端（Pages） | `index.html` | `barsFromYahooChart()`／`fixYahooFutureTs()`（禁止生吃 raw chart） |
 
 **禁**：只改 `date` 字串、不改 `timestamp` → K 線庫（klinecharts）X 軸仍顯示未來日。  
-**禁**：用「date 落在六日才平移」當唯一條件 → Yahoo 週五夜標的是 **下週一**，不是六日，會漏修。
+**禁**：用「date 落在六日才平移」當唯一條件 → Yahoo 週五夜標的是 **下週一**，不是六日，會漏修。  
+**禁**：`while ts > now` 不限次數 → 舊檔 KEEP_DAYS 夜盤會全部變成今晚。
 
 ---
 

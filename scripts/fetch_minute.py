@@ -90,17 +90,21 @@ def merge_bars(*groups):
 
 
 def fix_future_ts(rows):
-    """Yahoo 時間戳偶發整體偏移（2026-08-21 夜盤實測 +2 天）：
-    比現在還晚的棒逐日回移，重算 date/session；無法歸位的丟棄。
-    SSOT: 01_Docs/Yahoo-台指期K線日期慣例.md（週五夜＝Yahoo 標下週一，須 -2 天）。"""
+    """Yahoo 夜盤標次交易日：平日最多 -1 天、週五夜最多 -2 天。
+    禁止無限回移：舊夜盤被扣到今晚會在同一分鐘疊 KEEP_DAYS 根（千點刷針）。
+    SSOT: 01_Docs/Yahoo-台指期K線日期慣例.md"""
     if not rows:
         return rows
     limit = int(datetime.now(TZ).timestamp()) + 120
     out = []
     for b in rows:
         ts = int(b["timestamp"]) // 1000
-        while ts > limit:
+        n = 0
+        while ts > limit and n < 2:
             ts -= 86400
+            n += 1
+        if ts > limit:
+            continue
         sess, sdate, _ = classify(ts)
         if not sess:
             continue
@@ -109,7 +113,22 @@ def fix_future_ts(rows):
         b["date"] = sdate
         b["session"] = sess
         out.append(b)
-    return out
+    return collapse_minute(out)
+
+
+def collapse_minute(rows):
+    """同一分鐘只留一根（回移後舊夜盤會撞槽）。"""
+    by = {}
+    for b in rows or []:
+        slot = (int(b["timestamp"]) // 60000) * 60000
+        prev = by.get(slot)
+        if prev is None:
+            by[slot] = b
+            continue
+        pv, nv = float(prev.get("volume") or 0), float(b.get("volume") or 0)
+        if nv >= pv:
+            by[slot] = b
+    return [by[k] for k in sorted(by)]
 
 
 def trim_days(rows, n=KEEP_DAYS):
