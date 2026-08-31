@@ -1,5 +1,7 @@
 # 台指期 TXF 看盤小頁
 
+說明書：[`01_Docs/台指期看盤頁-說明書.md`](01_Docs/台指期看盤頁-說明書.md)
+
 資料來源：奇摩股市（不依賴本機）
 
 - 台指近月 `WTX&`：報價、五檔、1 分／5 分／15 分
@@ -7,3 +9,5 @@
 
 即時報價：Cloudflare Worker `https://wtx.19850926.xyz/` 代打奇摩，頁面每 5 秒更新。電腦關機不影響。
 K 線仍由 GitHub Actions 每 5 分鐘寫入 `data/kline-minute.json`。
+
+前端改完必升頁腳版本並 `git push origin master`（見 `01_Docs/發佈鐵律.md`）。本機存檔不會更新 Pages。
