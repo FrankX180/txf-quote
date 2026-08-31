@@ -21,4 +21,4 @@
 - 夜盤日期／假未來 K 以 `Yahoo-台指期K線日期慣例.md` 為準
 - 說明書已從根目錄搬入本夾（good-folder）
 
-<!-- MANUAL: -->
+<!-- MANUAL: 三層時間戳必須齊：fetch_minute.fix_future_ts、worker.barsFromChartJson、index.fixYahooFutureTs；回移最多 2 天。 -->
