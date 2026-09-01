@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.14</div>
+      <div class="ver foot-right">2.15</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -4705,9 +4705,9 @@
         window.__txfProbeAt = Date.now();
       }
       try {
-        // 每 30 秒強制寫 D1（不經 5 秒 CDN）；顯示仍走下方 LIVE
+        // 每 90 秒強制寫 D1（不經 5 秒 CDN）；顯示仍走下方 LIVE
         const pmark = window.__txfStorePollAt || 0;
-        if (Date.now() - pmark > 30000) {
+        if (Date.now() - pmark > 90000) {
           window.__txfStorePollAt = Date.now();
           fetch(LIVE + "?kind=poll", { cache: "no-store" }).catch(function () {});
         }
@@ -5363,7 +5363,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.14";
+        const VER = "2.15";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
