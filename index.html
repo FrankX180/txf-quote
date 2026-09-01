@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.16</div>
+      <div class="ver foot-right">2.17</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -5320,7 +5320,7 @@
         }
       } catch (e) {}
       pollLive();
-      liveTimer = setInterval(pollLive, 10000);
+      liveTimer = setInterval(pollLive, 15000);
       if (!ghHealTimer) {
         checkGhSnapshotStale();
         ghHealTimer = setInterval(checkGhSnapshotStale, 15000);
@@ -5363,7 +5363,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.16";
+        const VER = "2.17";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
