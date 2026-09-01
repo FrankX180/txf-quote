@@ -1,4 +1,4 @@
-# 開盤時每 5 秒打 Worker ?kind=poll → 寫 D1 內外盤差（不需有人開網頁）
+# 開盤時每 15 秒打 Worker ?kind=poll → 寫 D1 內外盤差（不需有人開網頁）
 # 用法：& R:\PythonProgram\Python312\python.exe scripts\poll_live_daemon.py
 from datetime import datetime, timedelta, timezone
 import json
@@ -8,7 +8,7 @@ import urllib.error
 
 TZ = timezone(timedelta(hours=8))
 URL = "https://wtx.19850926.xyz/?kind=poll"
-INTERVAL = 5
+INTERVAL = 15
 
 
 def in_session(now=None):
@@ -21,7 +21,7 @@ def in_session(now=None):
         return False
     if 845 <= hm <= 1345:
         return True
-    if hm >= 1455 or hm < 510:
+    if hm >= 1458 or hm < 510:
         return True
     return False
 

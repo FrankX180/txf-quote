@@ -11,9 +11,6 @@ const CORS = {
   "Access-Control-Allow-Headers": "*",
 };
 
-// 全局节流：同一分钟内只写一次 D1（降低 rows_written）
-let lastWriteMinute = 0;
-
 function jsonResp(obj, status, extra) {
   return new Response(JSON.stringify(obj), {
     status: status || 200,
@@ -73,7 +70,7 @@ function sessionOf(ms) {
   if (wd === "Sun") return null;
   if (wd === "Sat" && hm >= 510) return null;
   if (hm >= 845 && hm <= 1345) return "day";
-  if (hm >= 1455 || hm < 510) return "night";
+  if (hm >= 1458 || hm < 510) return "night";
   return null;
 }
 
@@ -199,8 +196,8 @@ async function ensureSchema(db) {
 const HEAL_GITHUB_OWNER = "FrankX180";
 const HEAL_GITHUB_REPO = "txf-quote";
 const HEAL_WORKFLOW = "update-quote.yml";
-const HEAL_MIN_INTERVAL_MS = 60 * 1000;
-const HEAL_STALE_MS = 35 * 1000;
+const HEAL_MIN_INTERVAL_MS = 8 * 60 * 1000;
+const HEAL_STALE_MS = 6 * 60 * 1000;
 const HEAL_GH_SNAPSHOT = "https://frankx180.github.io/txf-quote/data/snapshot.json";
 const HEAL_GH_KLINE = "https://frankx180.github.io/txf-quote/data/kline-minute.json";
 
@@ -305,9 +302,9 @@ async function triggerGithubWorkflow(env, reason) {
 async function maybeHealGithub(env, reason) {
   const now = Date.now();
   if (!sessionOf(now)) return { ok: false, reason: "closed", skipped: true };
-  // 節流：每 5 分才檢查一次 GH snapshot（避免 cron 每 2 分都打 GH）
+  // GitHub Actions 約每 5 分鐘更新；每 5 分鐘最多檢查一次，避免 cron 空轉。
   const lastCheck = await getHealState(env, "last_gh_check");
-  if (lastCheck && now - Number(lastCheck.ts) < 15 * 1000 && reason !== "frontend-stale" && reason !== "force") {
+  if (lastCheck && now - Number(lastCheck.ts) < 5 * 60 * 1000 && reason !== "frontend-stale" && reason !== "force") {
     return { ok: false, reason: "check-throttled", skipped: true };
   }
   await setHealState(env, "last_gh_check", now, reason || "");
@@ -319,7 +316,7 @@ async function maybeHealGithub(env, reason) {
   if (ageRes.ageMs < HEAL_STALE_MS) {
     return { ok: false, reason: "fresh", ageMs: ageRes.ageMs, fetchedAt: ageRes.fetchedAt, skipped: true };
   }
-  // 確認 stale -> 觸發 dispatch（內有 8 分 rate limit）
+  // 確認 stale -> 觸發 dispatch（內有 8 分鐘 rate limit）
   const trig = await triggerGithubWorkflow(env, `${reason || "stale"} age=${Math.round(ageRes.ageMs/60000)}m fetchedAt=${ageRes.fetchedAt}`);
   return { ok: trig.ok, ageMs: ageRes.ageMs, fetchedAt: ageRes.fetchedAt, trigger: trig, stale: true };
 }
@@ -655,9 +652,20 @@ async function backfillChart1m(env) {
       const chart = await r.json();
       const all = barsFromChartJson(chart);
       const dayKey = tradingDayKey(Date.now());
-      // 當日優先；若過濾後太少（夜盤切日／奇摩落後）仍寫入全包，避免只剩 quote 扁棒
       const today = all.filter((b) => b.dayKey === dayKey);
-      const bars = today.length >= Math.min(30, all.length) ? today : all;
+      // D1 只保存當前 session 的尾端；GitHub／前端負責歷史資料。
+      // 首次建立當盤資料時才寫完整當盤，後續每分鐘最多更新最近 3 根。
+      const latest = await env.IMB_DB.prepare(
+        "SELECT session, MAX(t) AS max_t FROM price_1m WHERE day_key = ? GROUP BY session"
+      ).bind(dayKey).all();
+      const maxBySession = {};
+      for (const row of (latest.results || [])) {
+        maxBySession[row.session] = Number(row.max_t) || 0;
+      }
+      const bars = today.filter((b) => {
+        const maxT = maxBySession[b.session] || 0;
+        return !maxT || b.t >= maxT - 2 * 60000;
+      });
       const n = await upsertPriceBars(env, bars);
       return { ok: true, n, dayKey, raw: all.length, today: today.length, attempt: attempt + 1 };
     } catch (e) {
@@ -1507,49 +1515,12 @@ export default {
     });
     const body = await r.text();
 
-    if (kind === "1m" && r.ok && env.IMB_DB) {
-      ctx.waitUntil(
-        (async () => {
-          try {
-            const chart = JSON.parse(body);
-            const all = barsFromChartJson(chart);
-            const dayKey = tradingDayKey(Date.now());
-            const bars = all.filter((b) => b.dayKey === dayKey);
-            await upsertPriceBars(env, bars.length ? bars : all);
-          } catch (e) {
-            /* ignore */
-          }
-        })()
-      );
-    }
-
-    if (kind !== "1m" && r.ok && env.IMB_DB) {
-      const nowMs = Date.now();
-      const currentMinute = Math.floor(nowMs / 60000);
-      // 节流：同一分钟内只写一次 D1
-      if (currentMinute > lastWriteMinute) {
-        lastWriteMinute = currentMinute;
-        ctx.waitUntil(
-          (async () => {
-            try {
-              const rows = JSON.parse(body);
-              await appendImb(env, rows, nowMs);
-              const w = extractWtx(rows);
-              await appendPricePx(env, w && w.px, nowMs, "quote");
-            } catch (e) {
-              /* ignore */
-            }
-          })()
-        );
-      }
-    }
-
     const cacheHdr =
       kind === "1m"
         ? {
-            "Cache-Control": "no-store",
-            "CDN-Cache-Control": "no-store",
-            "Cloudflare-CDN-Cache-Control": "no-store",
+            "Cache-Control": "public, max-age=0",
+            "CDN-Cache-Control": "public, max-age=10",
+            "Cloudflare-CDN-Cache-Control": "public, max-age=10",
           }
         : {
             "Cache-Control": "public, max-age=0",

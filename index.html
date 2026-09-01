@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.17</div>
+      <div class="ver foot-right">2.18</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1756,20 +1756,12 @@
         if (!marketOpen()) return;
         if (document.visibilityState !== "visible") return;
         const age = Date.now() - parseGhFetchedAt(fetchedAtStr);
-        if (!(age > 35*1000)) return;
-        // 35秒就補 Worker 快取（5秒輪詢的 D1），75秒才打 GH dispatch
-        if (age > 35*1000) {
-          const pk = "txfPollAt";
-          const plast = Number(localStorage.getItem(pk) || 0);
-          if (Date.now() - plast > 10000) {
-            localStorage.setItem(pk, String(Date.now()));
-            fetch(LIVE + "?kind=poll&chart=1", { cache: "no-store" }).catch(function(){});
-          }
-        }
-        if (!(age > 35*1000)) return;
+        // GitHub Actions 約每 5 分鐘更新；只有真正落後 6 分鐘才觸發補救。
+        // 前端是讀取者，不直接呼叫 kind=poll 寫入 D1。
+        if (!(age > 6 * 60 * 1000)) return;
         const key = "txfHealAt";
         const last = Number(localStorage.getItem(key) || 0);
-        if (Date.now() - last < 30*1000) return;
+        if (Date.now() - last < 8 * 60 * 1000) return;
         localStorage.setItem(key, String(Date.now()));
         const reason = "frontend-stale age=" + Math.round(age/1000) + "s src=" + (src||"");
         fetch(LIVE + "?kind=heal&reason=" + encodeURIComponent(reason), { cache: "no-store" }).then(function(r){ return r.json().catch(function(){return {};}); }).then(function(j){
@@ -2175,7 +2167,7 @@
       if (nightImbBase && nightImbBase.forDay === forDay && nightImbBase.d != null) return nightImbBase;
       const baseKey = nightImbDayKey();
       try {
-        const pack = await fetch(LIVE + "?kind=imb&day=" + baseKey, { cache: "no-cache" }).then((r) =>
+        const pack = await fetch(LIVE + "?kind=imb&day=" + baseKey, { cache: "default" }).then((r) =>
           r.ok ? r.json() : null
         );
         const nArr = (pack && pack.night) || [];
@@ -2222,7 +2214,7 @@
     async function loadImbCloud() {
       try {
         const dk = imbDayKey();
-        let pack = await fetch(LIVE + "?kind=imb&day=" + dk, { cache: "no-cache" }).then((r) =>
+        let pack = await fetch(LIVE + "?kind=imb&day=" + dk, { cache: "default" }).then((r) =>
           r.ok ? r.json() : null
         );
         const packEmpty =
@@ -4686,7 +4678,7 @@
         if (Date.now() - mark < 30000) return;
         window.__txfClosedPollAt = Date.now();
         try {
-          const rows = await fetch(LIVE, { cache: "no-store" }).then((r) => r.json());
+          const rows = await fetch(LIVE, { cache: "default" }).then((r) => r.json());
           if (Array.isArray(rows) && rows.length) {
             applyLive(rows);
             live = false;
@@ -4705,13 +4697,8 @@
         window.__txfProbeAt = Date.now();
       }
       try {
-        // Worker cron 每分鐘兜底寫入，前端不再強制 poll
-        // const pmark = window.__txfStorePollAt || 0;
-        // if (Date.now() - pmark > 90000) {
-        //   window.__txfStorePollAt = Date.now();
-        //   fetch(LIVE + "?kind=poll", { cache: "no-store" }).catch(function () {});
-        // }
-        const rows = await fetch(LIVE, { cache: "no-store" }).then((r) => r.json());
+        // 前端只讀；D1 由 Worker Cron／本機 daemon 生產，避免每個分頁變成寫入者。
+        const rows = await fetch(LIVE, { cache: "default" }).then((r) => r.json());
         if (Array.isArray(rows) && rows.length) applyLive(rows);
         // 約每 30 秒從雲端補齊完整當日分鐘柱（多人共用同一 R2）
         const mark = window.__txfImbCloudAt || 0;
@@ -4720,10 +4707,7 @@
           loadImbCloud().then(() => {
             if (chartMode === "line") draw();
           });
-          // D1 已有 cron 寫入的 chart 棒：定期合併，尾巴不靠單價建棒
-          pullCloudPx1m().then(function (ok) {
-            if (ok) draw();
-          });
+          // 1 分 K 由獨立的 15 秒 guard 讀取，避免與報價 timer 重複拉 px1m。
         }
       } catch (e) {
         live = false;
@@ -5162,7 +5146,7 @@
       setTimeout(() => ensureLive1m(true), 8000);
       setTimeout(() => ensureLive1m(true), 20000);
       live1mTimer = setInterval(() => {
-        // 每15秒打 Yahoo chart（經 Worker）+ 合併 D1 px1m；單價只補當根 close
+        // 每 15 秒讀 D1 px1m；只有偵測到缺口才經 Worker 補 Yahoo chart。
         ensureLive1m(true);
       }, 15000);
     }
@@ -5320,7 +5304,7 @@
         }
       } catch (e) {}
       pollLive();
-      liveTimer = setInterval(pollLive, 15000);
+      liveTimer = setInterval(pollLive, 5000);
       if (!ghHealTimer) {
         checkGhSnapshotStale();
         ghHealTimer = setInterval(checkGhSnapshotStale, 15000);
@@ -5363,7 +5347,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.17";
+        const VER = "2.18";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");

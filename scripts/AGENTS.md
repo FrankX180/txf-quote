@@ -18,7 +18,7 @@ GitHub Actions／本機抓行情與部署 Worker。台北時段閘門在 `when.p
 | `fetch_uncovered.py` | 法人未平倉 → `uncovered.json` |
 | `fetch_tmf_retail.py` | 微型臺指散戶多空 |
 | `fetch_imb.py` | Worker D1 內外盤差 → `imb-*.json` |
-| `poll_live_daemon.py` | 本機每 5 秒 `?kind=poll` |
+| `poll_live_daemon.py` | 本機每 15 秒 `?kind=poll` |
 | `deploy_worker.py` | 上傳 `yahoo-quote.js`、綁 D1／自訂網域／cron |
 
 ## For AI Agents
