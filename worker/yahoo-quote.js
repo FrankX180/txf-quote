@@ -11,6 +11,9 @@ const CORS = {
   "Access-Control-Allow-Headers": "*",
 };
 
+// 全局节流：同一分钟内只写一次 D1（降低 rows_written）
+let lastWriteMinute = 0;
+
 function jsonResp(obj, status, extra) {
   return new Response(JSON.stringify(obj), {
     status: status || 200,
@@ -1522,18 +1525,23 @@ export default {
 
     if (kind !== "1m" && r.ok && env.IMB_DB) {
       const nowMs = Date.now();
-      ctx.waitUntil(
-        (async () => {
-          try {
-            const rows = JSON.parse(body);
-            await appendImb(env, rows, nowMs);
-            const w = extractWtx(rows);
-            await appendPricePx(env, w && w.px, nowMs, "quote");
-          } catch (e) {
-            /* ignore */
-          }
-        })()
-      );
+      const currentMinute = Math.floor(nowMs / 60000);
+      // 节流：同一分钟内只写一次 D1
+      if (currentMinute > lastWriteMinute) {
+        lastWriteMinute = currentMinute;
+        ctx.waitUntil(
+          (async () => {
+            try {
+              const rows = JSON.parse(body);
+              await appendImb(env, rows, nowMs);
+              const w = extractWtx(rows);
+              await appendPricePx(env, w && w.px, nowMs, "quote");
+            } catch (e) {
+              /* ignore */
+            }
+          })()
+        );
+      }
     }
 
     const cacheHdr =
