@@ -97,7 +97,9 @@ function extractWtx(rows) {
   return { inn, outv, px: rawNum(w.price) };
 }
 
+let _schemaEnsured = false;
 async function ensureSchema(db) {
+  if (_schemaEnsured) return;
   await db
     .prepare(
       "CREATE TABLE IF NOT EXISTS imb (" +
@@ -187,6 +189,14 @@ async function ensureSchema(db) {
         ")"
     )
     .run();
+  // 建立常用複合索引（避免全表掃描消耗 rows_read）
+  try {
+    await db.prepare("CREATE INDEX IF NOT EXISTS idx_traffic_sid_day ON traffic_sid (day_key, sid)").run();
+    await db.prepare("CREATE INDEX IF NOT EXISTS idx_price_1m_query ON price_1m (day_key, session, t ASC)").run();
+    await db.prepare("CREATE INDEX IF NOT EXISTS idx_imb_query ON imb (day_key, session, t ASC)").run();
+    await db.prepare("CREATE INDEX IF NOT EXISTS idx_presence_last ON presence (last_seen, sid)").run();
+  } catch (_) {}
+  _schemaEnsured = true;
 }
 
 
@@ -371,17 +381,13 @@ async function handlePing(env, url) {
     )
       .bind(dayKey)
       .run();
-    const existed = await env.IMB_DB.prepare(
-      "SELECT 1 AS x FROM traffic_sid WHERE day_key = ? AND sid = ?"
+    // 冪等寫入 traffic_sid，避免全表重複 sid
+    const ins = await env.IMB_DB.prepare(
+      "INSERT INTO traffic_sid (day_key, sid) VALUES (?, ?) ON CONFLICT(day_key, sid) DO NOTHING"
     )
       .bind(dayKey, sid)
-      .first();
-    if (!existed) {
-      await env.IMB_DB.prepare(
-        "INSERT INTO traffic_sid (day_key, sid) VALUES (?, ?)"
-      )
-        .bind(dayKey, sid)
-        .run();
+      .run();
+    if (ins && ins.meta && ins.meta.changes > 0) {
       await env.IMB_DB.prepare(
         "UPDATE traffic_day SET uv = uv + 1 WHERE day_key = ?"
       )
@@ -415,6 +421,9 @@ async function handlePing(env, url) {
 
   return loadStats(env, dayKeyRaw, now, site);
 }
+
+// 記憶體快取：月/總計統計每 5 分鐘刷新一次，避免每個請求重複計算
+let _cachedStatsAgg = { ts: 0, data: {} };
 
 async function loadStats(env, dayKey, nowMs, siteName) {
   const now = nowMs || Date.now();
@@ -458,38 +467,39 @@ async function loadStats(env, dayKey, nowMs, siteName) {
   )
     .bind(dk)
     .first();
-  const monthLike = site === "txf" ? monthKey + "%" : site + ":" + monthKey + "%";
-  const monthRow = await env.IMB_DB.prepare(
-    "SELECT COALESCE(SUM(pv), 0) AS pv FROM traffic_day WHERE day_key LIKE ?"
-  )
-    .bind(monthLike)
-    .first();
-  const monthUvRow = await env.IMB_DB.prepare(
-    "SELECT COUNT(DISTINCT sid) AS n FROM traffic_sid WHERE day_key LIKE ?"
-  )
-    .bind(monthLike)
-    .first();
-  let totalRow;
-  let totalUvRow;
-  if (site === "txf") {
-    totalRow = await env.IMB_DB.prepare(
-      "SELECT COALESCE(SUM(pv), 0) AS pv FROM traffic_day WHERE day_key NOT LIKE '%:%'"
-    ).first();
-    totalUvRow = await env.IMB_DB.prepare(
-      "SELECT COUNT(DISTINCT sid) AS n FROM traffic_sid WHERE day_key NOT LIKE '%:%'"
-    ).first();
-  } else {
-    totalRow = await env.IMB_DB.prepare(
-      "SELECT COALESCE(SUM(pv), 0) AS pv FROM traffic_day WHERE day_key LIKE ?"
+
+  // 月/總計匯總：每 5 分鐘內走記憶體快取，直接以 traffic_day 的 pv, uv 加總（不掃描 traffic_sid）
+  const aggKey = site + ":" + monthKey;
+  let agg = _cachedStatsAgg.data[aggKey];
+  if (!agg || now - _cachedStatsAgg.ts > 5 * 60 * 1000) {
+    const monthLike = site === "txf" ? monthKey + "%" : site + ":" + monthKey + "%";
+    const monthRow = await env.IMB_DB.prepare(
+      "SELECT COALESCE(SUM(pv), 0) AS pv, COALESCE(SUM(uv), 0) AS uv FROM traffic_day WHERE day_key LIKE ?"
     )
-      .bind(site + ":%")
+      .bind(monthLike)
       .first();
-    totalUvRow = await env.IMB_DB.prepare(
-      "SELECT COUNT(DISTINCT sid) AS n FROM traffic_sid WHERE day_key LIKE ?"
-    )
-      .bind(site + ":%")
-      .first();
+    let totalRow;
+    if (site === "txf") {
+      totalRow = await env.IMB_DB.prepare(
+        "SELECT COALESCE(SUM(pv), 0) AS pv, COALESCE(SUM(uv), 0) AS uv FROM traffic_day WHERE day_key NOT LIKE '%:%'"
+      ).first();
+    } else {
+      totalRow = await env.IMB_DB.prepare(
+        "SELECT COALESCE(SUM(pv), 0) AS pv, COALESCE(SUM(uv), 0) AS uv FROM traffic_day WHERE day_key LIKE ?"
+      )
+        .bind(site + ":%")
+        .first();
+    }
+    agg = {
+      monthPv: Number(monthRow && monthRow.pv) || 0,
+      monthUv: Number(monthRow && monthRow.uv) || 0,
+      totalPv: Number(totalRow && totalRow.pv) || 0,
+      totalUv: Number(totalRow && totalRow.uv) || 0,
+    };
+    _cachedStatsAgg.data[aggKey] = agg;
+    _cachedStatsAgg.ts = now;
   }
+
   return {
     ok: true,
     dayKey: dkRaw,
@@ -499,10 +509,10 @@ async function loadStats(env, dayKey, nowMs, siteName) {
     pv: Number(dayRow && dayRow.pv) || 0,
     uv: Number(dayRow && dayRow.uv) || 0,
     peak: Number(dayRow && dayRow.peak) || 0,
-    monthPv: Number(monthRow && monthRow.pv) || 0,
-    monthUv: Number(monthUvRow && monthUvRow.n) || 0,
-    totalPv: Number(totalRow && totalRow.pv) || 0,
-    totalUv: Number(totalUvRow && totalUvRow.n) || 0,
+    monthPv: agg.monthPv,
+    monthUv: agg.monthUv,
+    totalPv: agg.totalPv,
+    totalUv: agg.totalUv,
     windowSec: ONLINE_MS / 1000,
   };
 }
@@ -675,9 +685,18 @@ async function backfillChart1m(env) {
   return { ok: false, reason: lastErr || "chart-fail" };
 }
 
+// 記憶體快取：loadPricePack 與 loadPack (TTL 4s，同 isolate 併發防穿透)
+const _pricePackCache = new Map();
+const _imbPackCache = new Map();
+
 async function loadPricePack(env, dayKey) {
   const empty = { dayKey, day: [], night: [], updatedAt: null };
   if (!env.IMB_DB) return empty;
+  const now = Date.now();
+  const cached = _pricePackCache.get(dayKey);
+  if (cached && now - cached.ts < 4000) {
+    return cached.data;
+  }
   try {
     await ensureSchema(env.IMB_DB);
     const { results } = await env.IMB_DB.prepare(
@@ -704,12 +723,14 @@ async function loadPricePack(env, dayKey) {
       else if (row.session === "night") night.push(bar);
       if (row.ts && (!updatedAt || row.ts > updatedAt)) updatedAt = row.ts;
     }
-    return {
+    const pack = {
       dayKey,
       day,
       night,
       updatedAt: updatedAt ? new Date(updatedAt).toISOString() : null,
     };
+    _pricePackCache.set(dayKey, { ts: now, data: pack });
+    return pack;
   } catch (e) {
     return empty;
   }
@@ -737,6 +758,11 @@ async function appendImb(env, rows, nowMs) {
 async function loadPack(env, dayKey) {
   const empty = { dayKey, day: [], night: [], updatedAt: null };
   if (!env.IMB_DB) return empty;
+  const now = Date.now();
+  const cached = _imbPackCache.get(dayKey);
+  if (cached && now - cached.ts < 4000) {
+    return cached.data;
+  }
   try {
     await ensureSchema(env.IMB_DB);
     const { results } = await env.IMB_DB.prepare(
@@ -759,12 +785,14 @@ async function loadPack(env, dayKey) {
       else if (row.session === "night") night.push(bar);
       if (row.ts && (!updatedAt || row.ts > updatedAt)) updatedAt = row.ts;
     }
-    return {
+    const pack = {
       dayKey,
       day,
       night,
       updatedAt: updatedAt ? new Date(updatedAt).toISOString() : null,
     };
+    _imbPackCache.set(dayKey, { ts: now, data: pack });
+    return pack;
   } catch (e) {
     return empty;
   }
@@ -1424,8 +1452,8 @@ export default {
         200,
         {
           "Cache-Control": "public, max-age=0",
-          "CDN-Cache-Control": "public, max-age=3",
-          "Cloudflare-CDN-Cache-Control": "public, max-age=3",
+          "CDN-Cache-Control": "public, max-age=5",
+          "Cloudflare-CDN-Cache-Control": "public, max-age=5",
         }
       );
     }
@@ -1448,8 +1476,8 @@ export default {
         200,
         {
           "Cache-Control": "public, max-age=0",
-          "CDN-Cache-Control": "public, max-age=3",
-          "Cloudflare-CDN-Cache-Control": "public, max-age=3",
+          "CDN-Cache-Control": "public, max-age=5",
+          "Cloudflare-CDN-Cache-Control": "public, max-age=5",
         }
       );
     }
