@@ -1,1 +1,1 @@
-{"dayKey": "20260904", "day": [], "night": [], "updatedAt": null, "fetchedAt": "2026-09-04 07:22:44", "source": "worker r2"}
+{"dayKey": "20260904", "day": [{"t": 1788482700000, "d": 685, "in": 18821, "out": 19506, "ts": 1788482717045}], "night": [], "updatedAt": "2026-09-04T00:45:17.045Z", "fetchedAt": "2026-09-04 08:46:11", "source": "worker r2"}
