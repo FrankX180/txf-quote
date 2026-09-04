@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.19</div>
+      <div class="ver foot-right">2.20</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -4702,7 +4702,7 @@
         if (Array.isArray(rows) && rows.length) applyLive(rows);
         // 約每 30 秒從雲端補齊完整當日分鐘柱（多人共用同一 R2）
         const mark = window.__txfImbCloudAt || 0;
-        if (Date.now() - mark > 10000) {
+        if (Date.now() - mark > 30000) {
           window.__txfImbCloudAt = Date.now();
           loadImbCloud().then(() => {
             if (chartMode === "line") draw();
@@ -5347,7 +5347,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.19";
+        const VER = "2.20";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
