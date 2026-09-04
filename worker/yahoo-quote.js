@@ -1434,14 +1434,21 @@ export default {
         });
       }
     }
-
-    if (kind === "imb") {
+    if (kind === "imb" || kind === "px1m") {
+      const isPrice = kind === "px1m";
       const now = Date.now();
       const day =
         (url.searchParams.get("day") || "").replace(/-/g, "") ||
         tradingDayKey(now);
-      const pack = await loadPack(env, day);
-      return jsonResp(
+
+      // 邊緣快取 (Cloudflare Edge Cache API): 8 秒內全球請求共用同一快取，不重複打 D1
+      const cacheKey = new Request(url.origin + url.pathname + "?kind=" + kind + "&day=" + day, request);
+      const cache = caches.default;
+      let cachedResp = await cache.match(cacheKey);
+      if (cachedResp) return cachedResp;
+
+      const pack = isPrice ? await loadPricePack(env, day) : await loadPack(env, day);
+      const resp = jsonResp(
         {
           dayKey: day,
           day: pack.day,
@@ -1451,35 +1458,14 @@ export default {
         },
         200,
         {
-          "Cache-Control": "public, max-age=0",
-          "CDN-Cache-Control": "public, max-age=5",
-          "Cloudflare-CDN-Cache-Control": "public, max-age=5",
+          "Cache-Control": "public, max-age=0, s-maxage=8",
+          "CDN-Cache-Control": "public, max-age=8",
+          "Cloudflare-CDN-Cache-Control": "public, max-age=8",
         }
       );
-    }
 
-    // 後端權威 1 分價（與 imb 同級；前端優先讀此）
-    if (kind === "px1m") {
-      const now = Date.now();
-      const day =
-        (url.searchParams.get("day") || "").replace(/-/g, "") ||
-        tradingDayKey(now);
-      const pack = await loadPricePack(env, day);
-      return jsonResp(
-        {
-          dayKey: day,
-          day: pack.day,
-          night: pack.night,
-          updatedAt: pack.updatedAt,
-          source: "d1",
-        },
-        200,
-        {
-          "Cache-Control": "public, max-age=0",
-          "CDN-Cache-Control": "public, max-age=5",
-          "Cloudflare-CDN-Cache-Control": "public, max-age=5",
-        }
-      );
+      ctx.waitUntil(cache.put(cacheKey, resp.clone()));
+      return resp;
     }
 
 
