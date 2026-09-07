@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.21</div>
+      <div class="ver foot-right">2.22</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2310,7 +2310,7 @@
       const tdays = [];
       for (let i = bars.length - 1; i >= 0 && tdays.length < nDays; i--) {
         const b = bars[i];
-        const td = barTradingDay(b) || dateKey(b && b.date);
+        const td = barTradingDay(b);
         if (!td || tdays.indexOf(td) >= 0) continue;
         tdays.push(td);
       }
@@ -2344,7 +2344,7 @@
       const { m1, m5, m15 } = packBars();
       const n = daySpan < 1 ? 1 : daySpan;
       const keep = lastDates(n);
-      const take = (rows) => rows.filter((b) => keep.indexOf(barTradingDay(b)) >= 0 || keep.indexOf(dateKey(b && b.date)) >= 0);
+      const take = (rows) => rows.filter((b) => keep.indexOf(barTradingDay(b)) >= 0);
       // 當日 → 1m
       if (n <= 1) {
         const a = take(m1);
@@ -2594,7 +2594,7 @@
       const livePx0 = n(q() && q().CLastPrice);
       const mins = fillMinutes(
         pickSessionPath(
-          dropFutureBars(minuteSeries().filter((b) => keep.indexOf(barTradingDay(b)) >= 0 || keep.indexOf(dateKey(b && b.date)) >= 0)),
+          dropFutureBars(minuteSeries().filter((b) => keep.indexOf(barTradingDay(b)) >= 0)),
           livePx0
         )
       );
@@ -3000,14 +3000,14 @@
         const span = daySpan < 1 ? 1 : daySpan;
         const keep = lastDates(span);
         const src = m1.length ? m1 : m5;
-        let raw = src.filter((b) => b && (keep.indexOf(dateKey(b.date)) >= 0 || keep.indexOf(barTradingDay(b)) >= 0));
+        let raw = src.filter((b) => b && keep.indexOf(barTradingDay(b)) >= 0);
         // 開盤已久卻只剩很少棒：用牆鐘補篩（防殘缺 date／舊快取）
         if (raw.length < 20 && src.length >= 20 && span <= 1) {
           const openMs = sessionOpenAt();
           const sk = liveSess();
           raw = src.filter((b) => {
             if (!b || b.timestamp == null) return false;
-            if (keep.indexOf(dateKey(b.date)) >= 0 || keep.indexOf(barTradingDay(b)) >= 0) return true;
+            if (keep.indexOf(barTradingDay(b)) >= 0) return true;
             return sk && sessKindAt(b.timestamp) === sk && b.timestamp >= openMs - 60000;
           });
         }
@@ -5349,7 +5349,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.21";
+        const VER = "2.22";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
