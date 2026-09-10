@@ -107,8 +107,8 @@ def want_uncovered(dt=None):
         if not (730 <= h <= 1000) and not local and not dispatch:
             return False
         return not night_chips_ready(d)
-    # 14:30 起抓；15:05 止（15:00 定案後只留短窗補漏）
-    in_day = 1430 <= h <= 1505
+    # 14:40 起高頻抓；15:30 止（15:00 前一旦三大商品籌碼齊全立刻定案，定案後不再重抓）
+    in_day = 1440 <= h <= 1530
     in_night = 730 <= h <= 1000
     if in_day:
         return not day_chips_ready(d)
@@ -201,7 +201,7 @@ def want_tmf_retail(dt=None):
         return False
     local = not os.environ.get("GITHUB_ACTIONS")
     dispatch = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
-    if 1430 <= h <= 1505:
+    if 1440 <= h <= 1530:
         return not day_chips_ready(d)
     if 730 <= h <= 1000:
         return not night_chips_ready(d)

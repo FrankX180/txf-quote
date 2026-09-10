@@ -210,6 +210,8 @@ const HEAL_MIN_INTERVAL_MS = 8 * 60 * 1000;
 const HEAL_STALE_MS = 6 * 60 * 1000;
 const HEAL_GH_SNAPSHOT = "https://frankx180.github.io/txf-quote/data/snapshot.json";
 const HEAL_GH_KLINE = "https://frankx180.github.io/txf-quote/data/kline-minute.json";
+const HEAL_GH_UNCOVERED = "https://frankx180.github.io/txf-quote/data/uncovered.json";
+const HEAL_CHIPS_INTERVAL_MS = 2 * 60 * 1000; // 盤後籌碼定案視窗（14:40–15:30）每 2 分鐘刷一次直到齊備
 
 async function getHealState(env, k) {
   if (!env.IMB_DB) return null;
@@ -329,6 +331,42 @@ async function maybeHealGithub(env, reason) {
   // 確認 stale -> 觸發 dispatch（內有 8 分鐘 rate limit）
   const trig = await triggerGithubWorkflow(env, `${reason || "stale"} age=${Math.round(ageRes.ageMs/60000)}m fetchedAt=${ageRes.fetchedAt}`);
   return { ok: trig.ok, ageMs: ageRes.ageMs, fetchedAt: ageRes.fetchedAt, trigger: trig, stale: true };
+}
+
+// 14:40–15:30 盤後法人籌碼定案守護：若 GitHub 上的 uncovered.json 還不是今日，每 2 分鐘自動 trigger 一次 Actions
+async function maybeHealChips(env) {
+  const now = Date.now();
+  const p = twParts(now);
+  const fmt = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Taipei", weekday: "short" });
+  const wd = fmt.format(new Date(now));
+  if (wd === "Sat" || wd === "Sun") return { ok: false, reason: "weekend", skipped: true };
+  if (p.hm < 1440 || p.hm > 1530) return { ok: false, reason: "outside-chips-window", skipped: true };
+
+  const lastDispatch = await getHealState(env, "last_chips_dispatch");
+  if (lastDispatch && now - Number(lastDispatch.ts) < HEAL_CHIPS_INTERVAL_MS) {
+    return { ok: false, reason: "chips-throttled", skipped: true };
+  }
+
+  const todayDash = `${p.y}-${p.mo}-${p.d}`;
+  const todayYmd = `${p.y}${p.mo}${p.d}`;
+  try {
+    const r = await fetch(HEAL_GH_UNCOVERED, { headers: { "Cache-Control": "no-cache" }, cf: { cacheTtl: 0, cacheEverything: false } });
+    if (!r.ok) return { ok: false, reason: "gh-unc-fetch-" + r.status };
+    const j = await r.json();
+    const uncDate = String(j.date || "").replace(/\D/g, "");
+    const hist0 = (j.history || [{}])[0] || {};
+    const hist0Date = String(hist0.date || "").replace(/\D/g, "");
+    const hasTodayChips = (uncDate === todayYmd || hist0Date === todayYmd) && hist0.foreign != null;
+    if (hasTodayChips) {
+      return { ok: true, reason: "chips-ready", date: uncDate, skipped: true };
+    }
+    // 未定案 -> 觸發 GitHub Actions，間隔 2 分鐘
+    await setHealState(env, "last_chips_dispatch", now, "chips-pending");
+    const trig = await triggerGithubWorkflow(env, `chips-pending date=${uncDate} target=${todayYmd}`);
+    return { ok: trig.ok, trigger: trig, pendingDate: uncDate, targetDate: todayYmd };
+  } catch (e) {
+    return { ok: false, reason: String((e && e.message) || e).slice(0, 120) };
+  }
 }
 
 
@@ -1559,6 +1597,10 @@ export default {
           const healRes = await maybeHealGithub(env, "cron-stale");
           if (healRes && healRes.stale) console.log("heal cron triggered", JSON.stringify(healRes).slice(0, 300));
         } catch (e) { console.error("heal cron failed", String((e && e.message) || e)); }
+        try {
+          const chipsRes = await maybeHealChips(env);
+          if (chipsRes && !chipsRes.skipped) console.log("chips cron triggered", JSON.stringify(chipsRes).slice(0, 300));
+        } catch (e) { console.error("chips cron failed", String((e && e.message) || e)); }
         try {
           await maybeRefreshTmf(env);
         } catch (e) {
