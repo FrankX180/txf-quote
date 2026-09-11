@@ -1618,12 +1618,24 @@ def main():
         nxt = history[i + 1] if i + 1 < len(history) else None
         if not nxt:
             rec["foreignDelta"] = None
+            rec["trustDelta"] = None
+            rec["dealerDelta"] = None
             rec["retailDelta"] = None
             continue
         rec["foreignDelta"] = (
             None
             if rec.get("foreign") is None or nxt.get("foreign") is None
             else float(rec["foreign"]) - float(nxt["foreign"])
+        )
+        rec["trustDelta"] = (
+            None
+            if rec.get("trust") is None or nxt.get("trust") is None
+            else float(rec["trust"]) - float(nxt["trust"])
+        )
+        rec["dealerDelta"] = (
+            None
+            if rec.get("dealer") is None or nxt.get("dealer") is None
+            else float(rec["dealer"]) - float(nxt["dealer"])
         )
         rec["retailDelta"] = (
             None

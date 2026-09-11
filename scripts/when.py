@@ -140,7 +140,7 @@ def day_chips_ready(dt=None):
     """今日日盤法人列已定案：官網 taifex + 外資／投信水位。
 
     大台+小台+微台齊 → 立刻定案。
-    滿 15:00 後只要官網水位在檔 → 定案（不再追盤後微修／商品晚到）。
+    滿 15:00 後只要官網水位在檔且非全 0 假資料 → 定案（不再追盤後微修／商品晚到）。
     VIX 官網月檔常晚於籌碼：缺 VIX 時 17:00 前仍視為未定案，允許補抓。
     """
     d = dt or now_tw()
@@ -157,6 +157,13 @@ def day_chips_ready(dt=None):
     if _ymd8(hist0.get("date")) != today:
         return False
     if hist0.get("foreign") is None or hist0.get("trust") is None:
+        return False
+    # 防全 0 假資料
+    if (
+        float(hist0.get("foreign") or 0) == 0.0
+        and float(hist0.get("trust") or 0) == 0.0
+        and float(hist0.get("dealer") or 0) == 0.0
+    ):
         return False
     parts = [p for p in str(j.get("source") or "").replace(" ", "").split("+") if p]
     if "taifex" not in parts:
