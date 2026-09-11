@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.23</div>
+      <div class="ver foot-right">2.24</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -4548,6 +4548,39 @@
       return q;
     }
 
+    // 真五檔判定：Yahoo 日盤收盤後會回「退化書」—bid1＝平盤價、同側檔距數十點、量 0/1，
+    // 但陣列長度仍是 5。只驗 length 會把它當真書，整包覆寫就把收盤五檔清成 0／—。
+    function bookLooksReal(bk) {
+      if (!Array.isArray(bk) || bk.length < 2) return false;
+      const bids = [];
+      const asks = [];
+      bk.forEach((lv) => {
+        const b = raw(lv && lv.bid), a = raw(lv && lv.ask);
+        const bs = raw(lv && lv.bidVol), as = raw(lv && lv.askVol);
+        if (b != null && bs != null && bs > 0) bids.push(b);
+        if (a != null && as != null && as > 0) asks.push(a);
+      });
+      if (bids.length < 2 || asks.length < 2) return false;
+      bids.sort((x, y) => y - x);
+      asks.sort((x, y) => x - y);
+      if (!(bids[0] < asks[0]) || asks[0] - bids[0] > 20) return false;
+      for (let i = 1; i < bids.length; i++) if (bids[i - 1] - bids[i] > 10) return false;
+      for (let i = 1; i < asks.length; i++) if (asks[i] - asks[i - 1] > 10) return false;
+      return true;
+    }
+    function stripBookFields(q) {
+      for (let i = 1; i <= 5; i++) {
+        ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach((k) => { delete q[k + i]; });
+      }
+    }
+    // 日盤收盤（13:45）後、夜盤轉換（14:58，與 liveSess 同一個 SSOT）前：五檔一律凍結保留。
+    function bookFrozenNow() {
+      const d = new Date();
+      const hm = d.getHours() * 100 + d.getMinutes();
+      const dow = d.getDay();
+      if (dow === 0 || dow === 6) return false;
+      return hm > 1345 && hm < 1458;
+    }
     function applyLive(rows) {
       const wtx = rows.find((x) => x.symbol === "WTX&") || rows[0];
       if (!wtx) return;
@@ -4556,7 +4589,8 @@
       let tradeSk = sessKindAt(nowTs); // day / night / closed（含周末）
       // 奇摩仍給 orderbook 時（常標 close），若本地時段已是夜盤顯示，強制走夜盤更新五檔
       const freezeSk = liveSess();
-      const hasBook = Array.isArray(wtx.orderbook) && wtx.orderbook.length > 0;
+      const hasBook = bookLooksReal(wtx.orderbook);
+      const frozen = bookFrozenNow();
       if (tradeSk === "closed" && freezeSk === "night" && hasBook) tradeSk = "night";
       if (tradeSk === "closed" && freezeSk === "day" && hasBook) tradeSk = "day";
       const bookSk = bookSessNow(); // 08:30 起可更新日盤五檔
@@ -4570,9 +4604,10 @@
       const outv = n(q0.outMarket);
       let liveK = freezeSk;
 
-      if (tradeSk === "day" || tradeSk === "night") {
-        // 正式盤中：整包覆寫當盤（含五檔／內外盤）
+      if (!frozen && (tradeSk === "day" || tradeSk === "night")) {
+        // 正式盤中：整包覆寫當盤（含五檔／內外盤）；退化書不寫入，寧可留白
         liveK = tradeSk;
+        if (!hasBook) stripBookFields(q0);
         snap[tradeSk] = q0;
         recordImb(tradeSk, inn, outv, nowTs);
         if (px) {
@@ -4629,29 +4664,43 @@
         ["CLastPrice", "CRefPrice", "CDiff", "CDiffRate", "CTotalVolume", "CDate", "CTime", "inMarket", "outMarket"].forEach((k) => {
           if (q0[k] != null && q0[k] !== "") prev[k] = q0[k];
         });
-        for (let i = 1; i <= 5; i++) {
-          ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach((k) => {
-            const key = k + i;
-            if (q0[key] != null && q0[key] !== "") prev[key] = q0[key];
-          });
+        if (hasBook) {
+          for (let i = 1; i <= 5; i++) {
+            ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach((k) => {
+              const key = k + i;
+              if (q0[key] != null && q0[key] !== "") prev[key] = q0[key];
+            });
+          }
         }
         snap[bookSk] = prev;
         patchQuoteOHLC(bookSk, px);
         saveLastBook(bookSk, snap[bookSk]);
       } else {
-        // 休市／周末：仍更新凍結盤最新價＋五檔（奇摩收盤後 orderbook 還會動；舊邏輯不寫五檔會卡死）
+        // 休市／周末／日收後～夜開前：仍更新凍結盤，但只接受「真成交前進」
+        // （價合理、量不減、內外盤有值、退化書不採用），避免把收盤五檔清成 0
         liveK = freezeSk;
         const prev = Object.assign({}, (snap && snap[freezeSk]) || {});
-        if (q0.CLastPrice != null && q0.CLastPrice !== "") prev.CLastPrice = q0.CLastPrice;
-        if (q0.CTime != null && q0.CTime !== "") prev.CTime = q0.CTime;
-        if (q0.CTotalVolume != null && q0.CTotalVolume !== "") prev.CTotalVolume = q0.CTotalVolume;
-        if (q0.inMarket != null && q0.inMarket !== "") prev.inMarket = q0.inMarket;
-        if (q0.outMarket != null && q0.outMarket !== "") prev.outMarket = q0.outMarket;
-        for (let i = 1; i <= 5; i++) {
-          ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach((k) => {
-            const key = k + i;
-            if (q0[key] != null && q0[key] !== "") prev[key] = q0[key];
-          });
+        const curVol = n(prev.CTotalVolume);
+        const newVol = n(q0.CTotalVolume);
+        const pxOk = px != null && pxLooksLikeTxf(px);
+        const volOk = newVol != null && newVol > 0 && (curVol == null || newVol >= curVol);
+        if (pxOk && volOk) {
+          prev.CLastPrice = q0.CLastPrice;
+          prev.CTotalVolume = q0.CTotalVolume;
+          if (q0.CTime != null && q0.CTime !== "") prev.CTime = q0.CTime;
+          if (q0.CDate != null && q0.CDate !== "") prev.CDate = q0.CDate;
+        }
+        if (n(q0.inMarket) > 0 && n(q0.outMarket) > 0) {
+          prev.inMarket = q0.inMarket;
+          prev.outMarket = q0.outMarket;
+        }
+        if (hasBook) {
+          for (let i = 1; i <= 5; i++) {
+            ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach((k) => {
+              const key = k + i;
+              if (q0[key] != null && q0[key] !== "") prev[key] = q0[key];
+            });
+          }
         }
         healRefPrice(prev);
         snap[freezeSk] = prev;
@@ -5349,7 +5398,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.23";
+        const VER = "2.24";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
