@@ -211,7 +211,7 @@ const HEAL_STALE_MS = 6 * 60 * 1000;
 const HEAL_GH_SNAPSHOT = "https://frankx180.github.io/txf-quote/data/snapshot.json";
 const HEAL_GH_KLINE = "https://frankx180.github.io/txf-quote/data/kline-minute.json";
 const HEAL_GH_UNCOVERED = "https://frankx180.github.io/txf-quote/data/uncovered.json";
-const HEAL_CHIPS_INTERVAL_MS = 2 * 60 * 1000; // 盤後籌碼定案視窗（14:40–15:30）每 2 分鐘刷一次直到齊備
+const HEAL_CHIPS_INTERVAL_MS = 2 * 60 * 1000; // 盤後籌碼定案視窗（14:46–15:30）每 2 分鐘刷一次直到齊備
 
 async function getHealState(env, k) {
   if (!env.IMB_DB) return null;
@@ -333,14 +333,14 @@ async function maybeHealGithub(env, reason) {
   return { ok: trig.ok, ageMs: ageRes.ageMs, fetchedAt: ageRes.fetchedAt, trigger: trig, stale: true };
 }
 
-// 14:40–15:30 盤後法人籌碼定案守護：若 GitHub 上的 uncovered.json 還不是今日，每 2 分鐘自動 trigger 一次 Actions
+// 14:46–15:30 盤後法人籌碼定案守護：若 GitHub 上的 uncovered.json 還不是今日，每 2 分鐘自動 trigger 一次 Actions
 async function maybeHealChips(env) {
   const now = Date.now();
   const p = twParts(now);
   const fmt = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Taipei", weekday: "short" });
   const wd = fmt.format(new Date(now));
   if (wd === "Sat" || wd === "Sun") return { ok: false, reason: "weekend", skipped: true };
-  if (p.hm < 1440 || p.hm > 1530) return { ok: false, reason: "outside-chips-window", skipped: true };
+  if (p.hm < 1446 || p.hm > 1530) return { ok: false, reason: "outside-chips-window", skipped: true };
 
   const lastDispatch = await getHealState(env, "last_chips_dispatch");
   if (lastDispatch && now - Number(lastDispatch.ts) < HEAL_CHIPS_INTERVAL_MS) {
