@@ -356,7 +356,12 @@ async function maybeHealChips(env) {
     const uncDate = String(j.date || "").replace(/\D/g, "");
     const hist0 = (j.history || [{}])[0] || {};
     const hist0Date = String(hist0.date || "").replace(/\D/g, "");
-    const hasTodayChips = (uncDate === todayYmd || hist0Date === todayYmd) && hist0.foreign != null;
+    const isAllZero = (
+      Number(hist0.foreign || 0) === 0 &&
+      Number(hist0.trust || 0) === 0 &&
+      Number(hist0.dealer || 0) === 0
+    );
+    const hasTodayChips = (uncDate === todayYmd || hist0Date === todayYmd) && hist0.foreign != null && !isAllZero;
     if (hasTodayChips) {
       return { ok: true, reason: "chips-ready", date: uncDate, skipped: true };
     }
