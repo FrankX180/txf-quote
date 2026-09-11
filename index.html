@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.24</div>
+      <div class="ver foot-right">2.25</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -4701,6 +4701,11 @@
               if (q0[key] != null && q0[key] !== "") prev[key] = q0[key];
             });
           }
+        } else {
+          // 退化書（收盤後 Yahoo 給的假檔位）：不寫入，改用本機當日最後一筆真書回填
+          const lb = loadLastBooks()[freezeSk];
+          const lbDay = lb && lb._savedAt ? new Date(lb._savedAt).toDateString() : "";
+          if (lb && lbDay === new Date().toDateString()) mergeBookOnto(prev, lb);
         }
         healRefPrice(prev);
         snap[freezeSk] = prev;
@@ -5398,7 +5403,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.24";
+        const VER = "2.25";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");

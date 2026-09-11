@@ -188,6 +188,37 @@ def strip_book(q):
     return o
 
 
+def book_real(q):
+    """True five levels? Yahoo returns a degraded book after the day close:
+    bid1 = flat price, same-side tick gaps > 10, sizes 0/1, some levels "-".
+    """
+    if not q:
+        return False
+    bids = []
+    asks = []
+    for i in range(1, 6):
+        b = raw(q.get("CBidPrice" + str(i)))
+        bs = raw(q.get("CBidSize" + str(i)))
+        a = raw(q.get("CAskPrice" + str(i)))
+        az = raw(q.get("CAskSize" + str(i)))
+        if b is not None and bs and bs > 0:
+            bids.append(b)
+        if a is not None and az and az > 0:
+            asks.append(a)
+    if len(bids) < 2 or len(asks) < 2:
+        return False
+    bids.sort(reverse=True)
+    asks.sort()
+    if not (bids[0] < asks[0]) or asks[0] - bids[0] > 20:
+        return False
+    for i in range(1, len(bids)):
+        if bids[i - 1] - bids[i] > 10:
+            return False
+    for i in range(1, len(asks)):
+        if asks[i] - asks[i - 1] > 10:
+            return False
+    return True
+
 def sess_now(dt=None):
     d = dt or datetime.now(TZ)
     h = d.hour * 100 + d.minute
@@ -340,8 +371,11 @@ def main():
         else:
             # 日收後～夜開前：更新日盤收／量／五檔，但昨收鎖定上一版（奇摩 previousClose 已滾夜盤）
             day_q = day_ohlc_from_kline(dict(q))
-            copy_book(day_q, q)
             prev_day = prev.get("day") or {}
+            if book_real(q):
+                copy_book(day_q, q)
+            elif prev_day:
+                copy_book(day_q, prev_day)
             if prev_day.get("CRefPrice"):
                 day_q["CRefPrice"] = prev_day["CRefPrice"]
                 last = raw(day_q.get("CLastPrice"))
