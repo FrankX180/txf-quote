@@ -1314,7 +1314,7 @@ function wantTmfRefresh(ms) {
   const hm = p.hm;
   // 官方約兩點多公布；14:30 起抓，最慢 15:00 前要更新完
   if (hm >= 1430 && hm <= 2000) return true;
-  if (hm >= 800 && hm <= 1000) return true;
+  if (hm >= 620 && hm <= 1000) return true;
   return false;
 }
 
@@ -1338,12 +1338,12 @@ function lastWorkdayTw(ms) {
 }
 
 // 判斷 OpenAPI 給的「最新交易日」是否落後預期：落後 → 網站 14 天補抓
-// 14:30–20:00 視窗（今天資料應公布）→ 預期今天；08:00–10:00（補昨晚）→ 預期上一個工作日
+// 14:30–20:00 視窗（今天資料應公布）→ 預期今天；06:20–10:00（補昨晚）→ 預期上一個工作日
 function tmfOpenApiStale(ms, openDate, prev) {
   if (!openDate || openDate.length !== 8) return "openapi-bad-date";
   const p = twParts(ms);
   let expected = twDateStr(ms);
-  if (p.hm >= 800 && p.hm <= 1000) {
+  if (p.hm >= 620 && p.hm <= 1000) {
     expected = lastWorkdayTw(ms);
   }
   if (openDate < expected) return "openapi-stale(" + openDate + "<" + expected + ")";

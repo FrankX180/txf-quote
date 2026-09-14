@@ -381,7 +381,7 @@ def main():
                 break
     need_backfill = len(existing) < max(60, HIST_N // 4)
     # 預期最新交易日：官方 OpenAPI 的微台資料會延遲（實例 8/18 整天仍給 8/17）
-    # 16:00–20:00 視窗預期=今天；08:00–10:00（補昨晚）預期=上一個工作日 → openapi 落後即以網站補
+    # 16:00–20:00 視窗預期=今天；06:20–10:00（補昨晚）預期=上一個工作日 → openapi 落後即以網站補
     stale = False
     if openapi_rows:
         oa = str(openapi_rows[0]["date"])
