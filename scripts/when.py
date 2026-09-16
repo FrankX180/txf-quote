@@ -88,7 +88,7 @@ def want_daily_k(dt=None):
 
 
 def want_uncovered(dt=None):
-    """日盤法人 14:30–15:05；夜盤成交 平日/週六 06:20–10:00。
+    """日盤法人 14:30–15:30；夜盤成交 平日/週六 06:20–10:00。
 
     盤後籌碼以 15:00 前定案為準；已定案後不再重抓（含 workflow_dispatch／本機）。
     只有 TXF_FORCE=1 才強制重抓。
@@ -107,8 +107,8 @@ def want_uncovered(dt=None):
         if not (620 <= h <= 1000) and not local and not dispatch:
             return False
         return not night_chips_ready(d)
-    # 14:46 起高頻抓；15:30 止（15:00 前一旦三大商品籌碼齊全立刻定案，定案後不再重抓）
-    in_day = 1446 <= h <= 1530
+    # 14:30 起高頻抓；15:30 止（15:00 前一旦三大商品籌碼齊全立刻定案，定案後不再重抓）
+    in_day = 1430 <= h <= 1530
     in_night = 620 <= h <= 1000
     if in_day:
         return not day_chips_ready(d)
@@ -208,7 +208,7 @@ def want_tmf_retail(dt=None):
         return False
     local = not os.environ.get("GITHUB_ACTIONS")
     dispatch = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
-    if 1446 <= h <= 1530:
+    if 1430 <= h <= 1530:
         return not day_chips_ready(d)
     if 620 <= h <= 1000:
         return not night_chips_ready(d)
