@@ -16,6 +16,7 @@ on:
       - "scripts/fetch_uncovered.py"
       - "scripts/fetch_tmf_retail.py"
       - "scripts/fetch_kline.py"
+      - "scripts/fetch_vix.py"
       - "scripts/when.py"
       - "scripts/fetch_imb.py"
       - ".github/workflows/update-quote.yml"
@@ -52,6 +53,9 @@ jobs:
       - name: Fetch MoneyDJ FITX daily/week/month K
         run: python scripts/fetch_kline.py
         continue-on-error: true
+      - name: Fetch TAIFEX VIXTWN daily (own SSOT → data/vix.json)
+        run: python scripts/fetch_vix.py
+        continue-on-error: true
       - name: Fetch cloud imb (R2 via Worker)
         run: python scripts/fetch_imb.py
         continue-on-error: true
@@ -62,7 +66,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/snapshot.json data/history-night.json data/history-day.json \
                   data/kline-minute.json data/uncovered.json data/tmf_retail.json \
-                  data/kline-daily.json data/imb-*.json data/imb-latest.json
+                  data/kline-daily.json data/vix.json data/imb-*.json data/imb-latest.json
           if git diff --cached --quiet; then
             echo "no change"
             exit 0

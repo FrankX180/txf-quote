@@ -16,6 +16,7 @@ GitHub Actions／本機抓行情與部署 Worker。台北時段閘門在 `when.p
 | `fetch_minute.py` | 1/5/15 分；`fix_future_ts` **最多 −2 天** + `collapse_minute` |
 | `fetch_kline.py` | MoneyDJ 日／週／月 K |
 | `fetch_uncovered.py` | 法人未平倉 → `uncovered.json` |
+| `fetch_vix.py` | 期交所 VIXTWN → `data/vix.json`（自家 SSOT，一日一次累積） |
 | `fetch_tmf_retail.py` | 微型臺指散戶多空 |
 | `fetch_imb.py` | Worker D1 內外盤差 → `imb-*.json` |
 | `poll_live_daemon.py` | 本機每 15 秒 `?kind=poll` |

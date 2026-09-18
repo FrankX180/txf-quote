@@ -46,7 +46,7 @@ TAIFEX_WIN = 20  # 官網下載穩定窗（更長常空頁）
 MTX_DIV = 4.0
 TMF_DIV = 20.0
 TMF_JSON = ROOT / "data" / "tmf_retail.json"
-VIX_CSV = Path(r"E:\CyndiTD\Program\derived\VIX\VIXTWN_daily_master.csv")
+VIX_JSON = ROOT / "data" / "vix.json"
 PROXY_FILE = Path(r"E:\_Project\股票資料庫\_Data\webshare_proxies.txt")
 TAIFEX_MIS_VIX = "https://mis.taifex.com.tw/futures/api/getQuoteListVIX"
 OA_CODES = (
@@ -540,7 +540,7 @@ def ymd8(s):
 
 
 def load_vix_map():
-    """本機 VIXTWN：既有 uncovered → PG index_daily_prices → CyndiTD CSV（後蓋前）。"""
+    """本專案 VIXTWN：既有 vix.json → 舊 uncovered → PG index_daily_prices（後蓋前，不讀外部專案）。"""
     m = {}
     if OUT.exists():
         try:
@@ -584,22 +584,25 @@ def load_vix_map():
             conn.close()
     except Exception as e:
         print("WARN vix pg", e)
-    if VIX_CSV.exists():
+    # 自家 VIX SSOT（data/vix.json，由 fetch_vix.py 寫入；不讀外部專案）
+    if VIX_JSON.exists():
         try:
-            import csv
-
-            with VIX_CSV.open(encoding="utf-8", newline="") as f:
-                for row in csv.DictReader(f):
-                    k = ymd8(row.get("date"))
-                    c = row.get("close")
-                    if not k or len(k) != 8 or c in (None, ""):
-                        continue
-                    try:
-                        m[k] = float(c)
-                    except (TypeError, ValueError):
-                        continue
+            blob = json.loads(VIX_JSON.read_text(encoding="utf-8"))
+            rows = list(blob.get("history") or [])
+            latest = blob.get("latest") or {}
+            if latest.get("date") and latest.get("close") is not None:
+                rows = rows + [latest]
+            for row in rows:
+                k = ymd8(row.get("date"))
+                c = row.get("close")
+                if not k or len(k) != 8 or c in (None, ""):
+                    continue
+                try:
+                    m[k] = float(c)
+                except (TypeError, ValueError):
+                    continue
         except Exception as e:
-            print("WARN vix csv", e)
+            print("WARN vix json", e)
     return m
 
 
