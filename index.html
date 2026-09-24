@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.28</div>
+      <div class="ver foot-right">2.29</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2590,11 +2590,20 @@
     function linePoints() {
       const span = daySpan < 1 ? 1 : daySpan;
       const keep = lastDates(span);
-      // 主體＝minuteSeries（當日 1 分／多日 5 或 15 分）
+      // 主體＝minuteSeries（當日走勢：日盤 1 分鐘／夜盤 3 分鐘；多日 5 或 15 分）
       const livePx0 = n(q() && q().CLastPrice);
+      let rawBars = dropFutureBars(minuteSeries().filter((b) => keep.indexOf(barTradingDay(b)) >= 0));
+      // 當日走勢：夜盤自動降採樣為 3 分鐘節點，日盤維持 1 分鐘
+      if (span <= 1) {
+        const dayBars = rawBars.filter((b) => b.session !== "night");
+        const nightBars = rawBars.filter((b) => b.session === "night");
+        const resampledNight = nightBars.length ? resampleBars(nightBars, 3 * 60 * 1000) : [];
+        rawBars = dayBars.concat(resampledNight);
+        rawBars.sort((a, b) => a.timestamp - b.timestamp);
+      }
       const mins = fillMinutes(
         pickSessionPath(
-          dropFutureBars(minuteSeries().filter((b) => keep.indexOf(barTradingDay(b)) >= 0)),
+          rawBars,
           livePx0
         )
       );
@@ -2641,7 +2650,7 @@
           ];
         }
       }
-      // 每 5 秒報價寫進尾端（僅開盤中；休市不延展，避免 14:xx 水平線）
+      // 每 15 秒報價寫進尾端（僅開盤中；休市不延展，避免 14:xx 水平線）
       {
         const livePx = n(q() && q().CLastPrice);
         const now = Date.now();
@@ -5359,7 +5368,7 @@
         }
       } catch (e) {}
       pollLive();
-      liveTimer = setInterval(pollLive, 5000);
+      liveTimer = setInterval(pollLive, 15000);
       if (!ghHealTimer) {
         checkGhSnapshotStale();
         ghHealTimer = setInterval(checkGhSnapshotStale, 15000);
@@ -5370,10 +5379,15 @@
         clearInterval(liveTimer);
         liveTimer = null;
       }
+      if (live1mTimer) {
+        clearInterval(live1mTimer);
+        live1mTimer = null;
+      }
     }
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") {
         startPoll();
+        startLive1mGuard();
         ensureLive1m(true);
       } else stopPoll();
     });
@@ -5402,7 +5416,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.28";
+        const VER = "2.29";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");

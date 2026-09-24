@@ -97,106 +97,26 @@ function extractWtx(rows) {
   return { inn, outv, px: rawNum(w.price) };
 }
 
-let _schemaEnsured = false;
-async function ensureSchema(db) {
-  if (_schemaEnsured) return;
-  await db
-    .prepare(
-      "CREATE TABLE IF NOT EXISTS imb (" +
-        "day_key TEXT NOT NULL," +
-        "session TEXT NOT NULL," +
-        "t INTEGER NOT NULL," +
-        "d REAL NOT NULL," +
-        "inn REAL," +
-        "outv REAL," +
-        "ts INTEGER," +
-        "PRIMARY KEY (day_key, session, t)" +
-        ")"
-    )
-    .run();
-  await db
-    .prepare(
-      "CREATE TABLE IF NOT EXISTS presence (" +
-        "sid TEXT PRIMARY KEY," +
-        "last_seen INTEGER NOT NULL," +
-        "day_key TEXT" +
-        ")"
-    )
-    .run();
-  await db
-    .prepare(
-      "CREATE TABLE IF NOT EXISTS traffic_day (" +
-        "day_key TEXT PRIMARY KEY," +
-        "pv INTEGER NOT NULL DEFAULT 0," +
-        "uv INTEGER NOT NULL DEFAULT 0," +
-        "peak INTEGER NOT NULL DEFAULT 0" +
-        ")"
-    )
-    .run();
-  await db
-    .prepare(
-      "CREATE TABLE IF NOT EXISTS traffic_sid (" +
-        "day_key TEXT NOT NULL," +
-        "sid TEXT NOT NULL," +
-        "PRIMARY KEY (day_key, sid)" +
-        ")"
-    )
-    .run();
-  await db
-    .prepare(
-      "CREATE TABLE IF NOT EXISTS price_1m (" +
-        "day_key TEXT NOT NULL," +
-        "session TEXT NOT NULL," +
-        "t INTEGER NOT NULL," +
-        "o REAL," +
-        "h REAL," +
-        "l REAL," +
-        "c REAL NOT NULL," +
-        "v INTEGER DEFAULT 0," +
-        "ts INTEGER," +
-        "source TEXT," +
-        "PRIMARY KEY (day_key, session, t)" +
-        ")"
-    )
-    .run();
-  await db
-    .prepare(
-      "CREATE TABLE IF NOT EXISTS tmf_retail (" +
-        "id INTEGER PRIMARY KEY CHECK (id = 1)," +
-        "payload TEXT NOT NULL," +
-        "fetched_at TEXT," +
-        "ts INTEGER" +
-        ")"
-    )
-    .run();
-  await db
-    .prepare(
-      "CREATE TABLE IF NOT EXISTS heal_state (" +
-        "k TEXT PRIMARY KEY," +
-        "ts INTEGER NOT NULL," +
-        "v TEXT" +
-        ")"
-    )
-    .run();
-  await db
-    .prepare(
-      "CREATE TABLE IF NOT EXISTS heal_log (" +
-        "id INTEGER PRIMARY KEY AUTOINCREMENT," +
-        "ts INTEGER NOT NULL," +
-        "reason TEXT," +
-        "ok INTEGER," +
-        "detail TEXT" +
-        ")"
-    )
-    .run();
-  // 建立常用複合索引（避免全表掃描消耗 rows_read）
+// D1 表結構與複合索引已就緒；預設不跑重複 DDL 以防超出 10ms CPU 限制
+let _schemaEnsured = true;
+async function ensureSchema(db, force = false) {
+  if (!force && _schemaEnsured) return;
+  if (!db) return;
   try {
+    await db.prepare("CREATE TABLE IF NOT EXISTS imb (day_key TEXT NOT NULL, session TEXT NOT NULL, t INTEGER NOT NULL, d REAL NOT NULL, inn REAL, outv REAL, ts INTEGER, PRIMARY KEY (day_key, session, t))").run();
+    await db.prepare("CREATE TABLE IF NOT EXISTS presence (sid TEXT PRIMARY KEY, last_seen INTEGER NOT NULL, day_key TEXT)").run();
+    await db.prepare("CREATE TABLE IF NOT EXISTS traffic_day (day_key TEXT PRIMARY KEY, pv INTEGER NOT NULL DEFAULT 0, uv INTEGER NOT NULL DEFAULT 0, peak INTEGER NOT NULL DEFAULT 0)").run();
+    await db.prepare("CREATE TABLE IF NOT EXISTS traffic_sid (day_key TEXT NOT NULL, sid TEXT NOT NULL, PRIMARY KEY (day_key, sid))").run();
+    await db.prepare("CREATE TABLE IF NOT EXISTS price_1m (day_key TEXT NOT NULL, session TEXT NOT NULL, t INTEGER NOT NULL, o REAL, h REAL, l REAL, c REAL NOT NULL, v INTEGER DEFAULT 0, ts INTEGER, source TEXT, PRIMARY KEY (day_key, session, t))").run();
+    await db.prepare("CREATE TABLE IF NOT EXISTS tmf_retail (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL, fetched_at TEXT, ts INTEGER)").run();
+    await db.prepare("CREATE TABLE IF NOT EXISTS heal_state (k TEXT PRIMARY KEY, ts INTEGER NOT NULL, v TEXT)").run();
+    await db.prepare("CREATE TABLE IF NOT EXISTS heal_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, reason TEXT, ok INTEGER, detail TEXT)").run();
     await db.prepare("CREATE INDEX IF NOT EXISTS idx_traffic_sid_day ON traffic_sid (day_key, sid)").run();
     await db.prepare("CREATE INDEX IF NOT EXISTS idx_price_1m_query ON price_1m (day_key, session, t ASC)").run();
     await db.prepare("CREATE INDEX IF NOT EXISTS idx_imb_query ON imb (day_key, session, t ASC)").run();
     await db.prepare("CREATE INDEX IF NOT EXISTS idx_presence_last ON presence (last_seen, sid)").run();
+    _schemaEnsured = true;
   } catch (_) {}
-  _schemaEnsured = true;
 }
 
 
@@ -686,7 +606,7 @@ function barsFromChartJson(chart) {
   return out;
 }
 
-async function backfillChart1m(env) {
+async function backfillChart1m(env, full = false) {
   if (!env.IMB_DB) return { ok: false, reason: "no-db" };
   let lastErr = null;
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -706,21 +626,15 @@ async function backfillChart1m(env) {
       const all = barsFromChartJson(chart);
       const dayKey = tradingDayKey(Date.now());
       const today = all.filter((b) => b.dayKey === dayKey);
-      // D1 只保存當前 session 的尾端；GitHub／前端負責歷史資料。
-      // 首次建立當盤資料時才寫完整當盤，後續每分鐘最多更新最近 3 根。
-      const latest = await env.IMB_DB.prepare(
-        "SELECT session, MAX(t) AS max_t FROM price_1m WHERE day_key = ? GROUP BY session"
-      ).bind(dayKey).all();
-      const maxBySession = {};
-      for (const row of (latest.results || [])) {
-        maxBySession[row.session] = Number(row.max_t) || 0;
+      if (!today.length) return { ok: true, n: 0, dayKey, raw: all.length, today: 0 };
+      
+      // 非全量模式下只更新最新 5 根（大幅降低 Worker CPU 與 D1 batch 壓力）
+      let targetBars = today;
+      if (!full) {
+        targetBars = today.slice(-5);
       }
-      const bars = today.filter((b) => {
-        const maxT = maxBySession[b.session] || 0;
-        return !maxT || b.t >= maxT - 2 * 60000;
-      });
-      const n = await upsertPriceBars(env, bars);
-      return { ok: true, n, dayKey, raw: all.length, today: today.length, attempt: attempt + 1 };
+      const n = await upsertPriceBars(env, targetBars);
+      return { ok: true, n, dayKey, raw: all.length, today: today.length, target: targetBars.length, attempt: attempt + 1 };
     } catch (e) {
       lastErr = String((e && e.message) || e);
     }
@@ -1595,9 +1509,14 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
+    const nowMs = Date.now();
+    const isTradeSession = !!sessionOf(nowMs);
     ctx.waitUntil(
       (async () => {
-        await pollAndStore(env, { chart: true });
+        // 開盤時段才執行行情輪詢與 1m 更新，休市期間跳過以保護 10ms CPU 限制
+        if (isTradeSession) {
+          await pollAndStore(env, { chart: true });
+        }
         try {
           const healRes = await maybeHealGithub(env, "cron-stale");
           if (healRes && healRes.stale) console.log("heal cron triggered", JSON.stringify(healRes).slice(0, 300));
@@ -1609,7 +1528,6 @@ export default {
         try {
           await maybeRefreshTmf(env);
         } catch (e) {
-          /* 記錄而非全吞：官方 OpenAPI 停更時可從 CF 日誌追蹤 */
           console.error("tmf cron failed", String((e && e.message) || e));
         }
       })()
