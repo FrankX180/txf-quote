@@ -90,7 +90,7 @@ def merge_bars(*groups):
 
 
 def fix_future_ts(rows):
-    """Yahoo 夜盤標次交易日：平日最多 -1 天、週五夜最多 -2 天。
+    """Yahoo 夜盤標次交易日：平日最多 -1 天、週五夜最多 -3 天、連假/中秋 -4 天、春節最多 -10 天。
     禁止無限回移：舊夜盤被扣到今晚會在同一分鐘疊 KEEP_DAYS 根（千點刷針）。
     SSOT: 01_Docs/Yahoo-台指期K線日期慣例.md"""
     if not rows:
@@ -100,7 +100,7 @@ def fix_future_ts(rows):
     for b in rows:
         ts = int(b["timestamp"]) // 1000
         n = 0
-        while ts > limit and n < 2:
+        while ts > limit and n < 10:
             ts -= 86400
             n += 1
         if ts > limit:

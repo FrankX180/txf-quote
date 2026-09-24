@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.27</div>
+      <div class="ver foot-right">2.28</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1865,14 +1865,14 @@
       while (d0.getDay() === 0 || d0.getDay() === 6) d0.setDate(d0.getDate() - 1);
       return ymdOf(d0);
     }
-    // Yahoo 夜盤標「下一交易日」牆鐘：平日 +1 天、週五夜 +2 天（下週一）。
+    // Yahoo 夜盤標「下一交易日」牆鐘：平日 +1 天、週五夜 +2~3 天、連假/中秋 +4 天、春節至多 +10 天。
     // SSOT：01_Docs/Yahoo-台指期K線日期慣例.md — 必須回移 timestamp，不能只改 date。
     function fixYahooFutureTs(ts) {
       let t = +ts;
       if (!Number.isFinite(t)) return ts;
       const lim = Date.now() + 120000;
       let n = 0;
-      while (t > lim && n < 2) {
+      while (t > lim && n < 10) {
         t -= 86400000;
         n++;
       }
@@ -5402,7 +5402,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.27";
+        const VER = "2.28";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
