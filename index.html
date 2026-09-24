@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.29</div>
+      <div class="ver foot-right">2.30</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2590,17 +2590,9 @@
     function linePoints() {
       const span = daySpan < 1 ? 1 : daySpan;
       const keep = lastDates(span);
-      // 主體＝minuteSeries（當日走勢：日盤 1 分鐘／夜盤 3 分鐘；多日 5 或 15 分）
+      // 主體＝minuteSeries（當日 1 分／多日 5 或 15 分）
       const livePx0 = n(q() && q().CLastPrice);
-      let rawBars = dropFutureBars(minuteSeries().filter((b) => keep.indexOf(barTradingDay(b)) >= 0));
-      // 當日走勢：夜盤自動降採樣為 3 分鐘節點，日盤維持 1 分鐘
-      if (span <= 1) {
-        const dayBars = rawBars.filter((b) => b.session !== "night");
-        const nightBars = rawBars.filter((b) => b.session === "night");
-        const resampledNight = nightBars.length ? resampleBars(nightBars, 3 * 60 * 1000) : [];
-        rawBars = dayBars.concat(resampledNight);
-        rawBars.sort((a, b) => a.timestamp - b.timestamp);
-      }
+      const rawBars = dropFutureBars(minuteSeries().filter((b) => keep.indexOf(barTradingDay(b)) >= 0));
       const mins = fillMinutes(
         pickSessionPath(
           rawBars,
@@ -2615,6 +2607,43 @@
         .filter((p) => p.time != null && sessKindAt(p.time) !== "closed" && p.time <= Date.now() + 180000);
       pts.sort((a, b) => a.time - b.time);
       pts = dropPxSpikes(pts, (p) => p.px, (p) => p.time);
+
+      // 當日走勢：夜盤折線圖節點降採樣為 3 分鐘，日盤維持 1 分鐘；最後一根即時保留
+      if (span <= 1 && pts.length > 3) {
+        const dayPts = [];
+        const nightPts = [];
+        pts.forEach((p) => {
+          if (sessKindAt(p.time) === "night") nightPts.push(p);
+          else dayPts.push(p);
+        });
+        if (nightPts.length > 2) {
+          const sampledNight = [];
+          const stepMs = 3 * 60 * 1000;
+          let cur = null;
+          nightPts.forEach((p, idx) => {
+            const slot = Math.floor(p.time / stepMs) * stepMs;
+            if (!cur || cur.slot !== slot) {
+              if (cur) sampledNight.push(cur.point);
+              cur = { slot, point: Object.assign({}, p) };
+            } else {
+              cur.point.high = Math.max(cur.point.high != null ? cur.point.high : p.px, p.px);
+              cur.point.low = Math.min(cur.point.low != null ? cur.point.low : p.px, p.px);
+              cur.point.px = p.px;
+              cur.point.close = p.close != null ? p.close : p.px;
+              cur.point.vol = (cur.point.vol || 0) + (p.vol || 0);
+              cur.point.time = p.time;
+            }
+          });
+          if (cur) sampledNight.push(cur.point);
+          // 確保夜盤最後一根 1m 即時點不漏掉
+          const lastNight = nightPts[nightPts.length - 1];
+          if (sampledNight.length && sampledNight[sampledNight.length - 1].time !== lastNight.time) {
+            sampledNight.push(lastNight);
+          }
+          pts = dayPts.concat(sampledNight);
+          pts.sort((a, b) => a.time - b.time);
+        }
+      }
       // 尾端即時：當日併當盤 5 秒 tick；多日併日+夜 tick（盤後夜盤也要接到現在）
       {
         const ticks =
@@ -5416,7 +5445,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.29";
+        const VER = "2.30";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
