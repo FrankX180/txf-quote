@@ -1,5 +1,5 @@
 {
-  "fetchedAt": "2026-09-26 03:30:50",
+  "fetchedAt": "2026-09-26 04:42:56",
   "source": "yahoo tw.stock StockServices.stockList WTX& WCDF& WCCF&",
   "session": "night",
   "night": {
@@ -8,7 +8,7 @@
     "DispEName": "WTX&",
     "CLastPrice": "47956",
     "COpenPrice": "47915",
-    "CHighPrice": "48138",
+    "CHighPrice": "48296",
     "CLowPrice": "47769",
     "CRefPrice": "48125",
     "CDiff": "-169",
