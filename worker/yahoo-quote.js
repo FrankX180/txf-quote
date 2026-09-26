@@ -63,27 +63,27 @@ let _dormantUntil = 0;
 let _yahooFailCount = 0;
 let _yahooBackoffUntil = 0;
 
-/** 計算當前交易盤別的收盤時間戳 (台北時間) */
+/** 計算當前交易盤別的收盤時間戳 (台北時間，避免 Worker UTC 時區 setHours 偏移) */
 function sessionEndMs(ms) {
   const p = twParts(ms);
   const hm = p.hm;
-  // 日盤：收在 13:45
+  const y = Number(p.y);
+  const mo = Number(p.mo) - 1;
+  const d = Number(p.d);
+
+  // 日盤：收在台北時間 13:46:00 (對應 UTC 05:46:00)
   if (hm >= 845 && hm <= 1345) {
-    const end = new Date(ms);
-    end.setHours(13, 46, 0, 0);
-    return end.getTime();
+    return Date.UTC(y, mo, d, 5, 46, 0);
   }
-  // 夜盤前半段 (14:58~23:59)：收在隔日 05:00
+  // 夜盤前半段 (14:58~23:59)：收在台北時間隔日 05:01:00 (對應今日 UTC 21:01:00)
   if (hm >= 1458) {
-    const end = new Date(ms + 24 * 3600 * 1000);
-    end.setHours(5, 5, 0, 0);
-    return end.getTime();
+    return Date.UTC(y, mo, d, 21, 1, 0);
   }
-  // 夜盤後半段 (00:00~05:10)：收在今日 05:00
+  // 夜盤後半段 (00:00~05:10)：收在台北時間今日 05:01:00 (對應昨日 UTC 21:01:00)
   if (hm < 510) {
-    const end = new Date(ms);
-    end.setHours(5, 5, 0, 0);
-    return end.getTime();
+    const prev = new Date(ms - 24 * 3600 * 1000);
+    const pp = twParts(prev.getTime());
+    return Date.UTC(Number(pp.y), Number(pp.mo) - 1, Number(pp.d), 21, 1, 0);
   }
   return 0;
 }
