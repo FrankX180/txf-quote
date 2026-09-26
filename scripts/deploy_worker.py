@@ -9,7 +9,9 @@ SECRETS = Path(r"E:\_PluginTools\Memory\secrets\LLM_API_KEY.MD")
 WORKER = Path(r"E:\_Project\FuturesHTML\worker\yahoo-quote.js")
 EMAIL = "fx0926@gmail.com"
 AID = "a623d11cc8b419579d99db54c35b8d79"
-ZID = "39099a55a79cb78d956a71bba62dcf1c"
+ZID_1985 = "39099a55a79cb78d956a71bba62dcf1c"
+ZID_BLOK = "6cfbdac4f878e0a2a442a0db39f59407"
+ZID = ZID_BLOK
 NAME = "txf-yahoo"
 DB_NAME = "txf-imb"
 
@@ -122,20 +124,23 @@ def main():
         {"enabled": True},
     )
     print("workers_dev", sub and sub.get("success"))
-    dom = call(
-        "PUT",
-        f"https://api.cloudflare.com/client/v4/accounts/{AID}/workers/domains",
-        {
-            "hostname": "wtx.19850926.xyz",
-            "service": NAME,
-            "zone_id": ZID,
-        },
-    )
-    print(
-        "domain",
-        dom and dom.get("success"),
-        (dom or {}).get("errors") or (dom or {}).get("result"),
-    )
+    # 雙網域綁定：主網域 wtx.blok.trading + 舊別名 wtx.19850926.xyz
+    for hid, zid in [("wtx.blok.trading", ZID_BLOK), ("wtx.19850926.xyz", ZID_1985)]:
+        dom = call(
+            "PUT",
+            f"https://api.cloudflare.com/client/v4/accounts/{AID}/workers/domains",
+            {
+                "environment": "production" if zid == ZID_BLOK else "",
+                "hostname": hid,
+                "service": NAME,
+                "zone_id": zid,
+            },
+        )
+        print(
+            f"domain {hid}",
+            dom and dom.get("success"),
+            (dom or {}).get("errors") or (dom or {}).get("result"),
+        )
     print("OK d1", db_id)
     # Cron：每分鐘自打（CF 最短 1 分；真 5 秒另用本機守護）
     sched = call(

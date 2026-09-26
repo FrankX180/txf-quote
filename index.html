@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.32</div>
+      <div class="ver foot-right">2.33</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -818,7 +818,7 @@
     let staleHits = 0;
     let probeOnly = false;
     let lastSig = "";
-    const LIVE = "https://wtx.19850926.xyz/";
+    const LIVE = "https://wtx.blok.trading/";
     const LB_KEY = "txfLastBook";
     const STALE_KEY = "txfStalePause";
     const IMB_KEY = "txfImbMin";
@@ -4634,7 +4634,7 @@
       const bookSk = bookSessNow(); // 08:30 起可更新日盤五檔
       snap = Object.assign({}, snap || {}, {
         fetchedAt: new Date().toLocaleString("zh-TW", { hour12: false }),
-        source: "yahoo via wtx.19850926.xyz",
+        source: "yahoo via wtx.blok.trading",
       });
       const px = n(q0.CLastPrice);
       const vol = n(q0.CTotalVolume) || 0;
@@ -5445,7 +5445,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.32";
+        const VER = "2.33";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
