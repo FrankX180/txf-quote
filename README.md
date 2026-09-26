@@ -7,7 +7,7 @@
 - 台指近月 `WTX&`：報價、五檔、1 分／5 分／15 分
 - 台積電期近月 `WCDF&`、聯電期近月 `WCCF&`：報價
 
-即時報價：Cloudflare Worker `https://wtx.19850926.xyz/` 代打奇摩，頁面每 5 秒更新。電腦關機不影響。
+即時報價：Cloudflare Worker `https://wtx.blok.trading/`（舊別名 `https://wtx.19850926.xyz/`）代打奇摩，頁面每 15 秒更新。電腦關機不影響。
 K 線仍由 GitHub Actions 每 5 分鐘寫入 `data/kline-minute.json`。
 
 前端改完必升頁腳版本並 `git push origin master`（見 `01_Docs/發佈鐵律.md`）。本機存檔不會更新 Pages。

@@ -5,7 +5,7 @@
 
 ## Purpose
 
-Cloudflare Worker `txf-yahoo`：代打奇摩、寫 D1（內外盤差、1 分價）、回 `px1m`／`1m`／報價。網域 `wtx.19850926.xyz`。
+Cloudflare Worker `txf-yahoo`：代打奇摩、寫 D1（內外盤差、1 分價）、回 `px1m`／`1m`／報價。主網域 `wtx.blok.trading`（舊別名 `wtx.19850926.xyz`）。
 
 ## Key Files
 

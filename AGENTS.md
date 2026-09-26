@@ -4,11 +4,11 @@
 
 ## Purpose
 
-公開單頁台指期近月看盤站。前端 `index.html` 上 GitHub Pages；即時報價／1 分 K 走 Cloudflare Worker `wtx.19850926.xyz`；靜態 JSON 由 Actions 每 5 分寫入 `data/`。
+公開單頁台指期近月看盤站。前端 `index.html` 上 GitHub Pages；即時報價／1 分 K 走 Cloudflare Worker `wtx.blok.trading`（舊別名 `wtx.19850926.xyz`）；靜態 JSON 由 Actions 每 5 分寫入 `data/`。
 
 - Pages：`https://frankx180.github.io/txf-quote/`
 - Repo：`https://github.com/FrankX180/txf-quote`
-- Worker：`https://wtx.19850926.xyz/`
+- Worker：`https://wtx.blok.trading/`（舊 `https://wtx.19850926.xyz/`）
 
 ## Key Files
 
@@ -53,12 +53,12 @@
 ### Testing Requirements
 
 - 線上驗：右下角 VER、夜盤走勢對玩股網（15:00 起單一路徑，一小時約 60 根 1 分 K）
-- Worker：`https://wtx.19850926.xyz/?kind=px1m`
+- Worker：`https://wtx.blok.trading/?kind=px1m`
 
 ### Common Patterns
 
 - 前端 `gh(path)` 相對路徑吃 Pages 的 `data/`
-- `LIVE = "https://wtx.19850926.xyz/"`
+- `LIVE = "https://wtx.blok.trading/"`
 - `session` 日／夜；`daySpan` 0＝當日走勢
 
 ## Dependencies
