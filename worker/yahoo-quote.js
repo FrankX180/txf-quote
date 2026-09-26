@@ -58,6 +58,64 @@ function twParts(ms) {
   };
 }
 
+
+let _dormantUntil = 0;
+let _yahooFailCount = 0;
+let _yahooBackoffUntil = 0;
+
+/** 計算當前交易盤別的收盤時間戳 (台北時間) */
+function sessionEndMs(ms) {
+  const p = twParts(ms);
+  const hm = p.hm;
+  // 日盤：收在 13:45
+  if (hm >= 845 && hm <= 1345) {
+    const end = new Date(ms);
+    end.setHours(13, 46, 0, 0);
+    return end.getTime();
+  }
+  // 夜盤前半段 (14:58~23:59)：收在隔日 05:00
+  if (hm >= 1458) {
+    const end = new Date(ms + 24 * 3600 * 1000);
+    end.setHours(5, 5, 0, 0);
+    return end.getTime();
+  }
+  // 夜盤後半段 (00:00~05:10)：收在今日 05:00
+  if (hm < 510) {
+    const end = new Date(ms);
+    end.setHours(5, 5, 0, 0);
+    return end.getTime();
+  }
+  return 0;
+}
+
+/** 0 毫秒極速判定：週末、非交易時段、或颱風假熔斷中，直接完全跳過定時任務 */
+function shouldRunCron(ms) {
+  const p = twParts(ms);
+  const hm = p.hm;
+  const wdFmt = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Taipei", weekday: "short" });
+  const wd = wdFmt.format(new Date(ms));
+
+  // 1. 週末整整兩天完全無盤，直接 0ms return (週六 05:10 ~ 週一 08:44)
+  if (wd === "Sun") return false;
+  if (wd === "Sat" && hm >= 510) return false;
+  if (wd === "Mon" && hm < 845) return false;
+
+  // 2. 颱風假 / 國定假日自適應熔斷中：整盤休眠跳過
+  if (ms < _dormantUntil) return false;
+
+  // 3. Yahoo 連續異常退避冷卻中：暫停輪詢保護 CPU 與配額
+  if (ms < _yahooBackoffUntil) return false;
+
+  // 4. 工作日若處於盤中交易時段：執行
+  if (sessionOf(ms)) return true;
+
+  // 5. 工作日若處於 14:30 ~ 15:30 (盤後法人籌碼出爐守護視窗)：執行
+  if (hm >= 1430 && hm <= 1530) return true;
+
+  // 6. 其他日間空窗 (如 13:46~14:29、15:31~14:57)：完全跳過
+  return false;
+}
+
 function sessionOf(ms) {
   const p = twParts(ms);
   const hm = p.hm;
@@ -784,16 +842,47 @@ async function fetchYahooQuoteRetry(tries) {
 async function pollAndStore(env, opts) {
   const nowMs = Date.now();
   if (!sessionOf(nowMs)) return { skipped: true, reason: "closed" };
+  if (nowMs < _dormantUntil) return { skipped: true, reason: "dormant-holiday" };
+  if (nowMs < _yahooBackoffUntil) return { skipped: true, reason: "yahoo-backoff" };
+
   const out = {};
-  // 先寫內外盤／報價（2026-08-24：先 chart 再 quote 時奇摩常擋第二槍 → px1m 滿、imb 稀疏）
-  const { ok, body, status } = await fetchYahooQuoteRetry(3);
+  const { ok, body, status } = await fetchYahooQuoteRetry(2);
   if (!ok) {
+    _yahooFailCount++;
+    if (_yahooFailCount >= 2) {
+      // Yahoo 連續兩次異常，啟動 5 分鐘冷卻退避，不連續死磕
+      _yahooBackoffUntil = nowMs + 5 * 60 * 1000;
+    }
     out.skippedQuote = true;
     out.reason = "yahoo-fail";
     out.status = status || 0;
   } else {
+    _yahooFailCount = 0;
+    _yahooBackoffUntil = 0;
     try {
       const rows = JSON.parse(body);
+
+      // 【颱風假 / 休市自適應熔斷器】：開盤 15 分鐘後如果市場標記 close 或成交停滯，觸發全盤休眠
+      const p = twParts(nowMs);
+      const hm = p.hm;
+      const isPast15m = (hm >= 900 && hm <= 1345) || (hm >= 1515 || hm < 500);
+      if (isPast15m && Array.isArray(rows) && rows.length) {
+        const rawW = rows.find((x) => x && x.symbol === "WTX&") || rows[0];
+        const statusClose = rawW && rawW.marketStatus === "close";
+        const regTime = rawW && rawW.regularMarketTime ? Date.parse(rawW.regularMarketTime) : 0;
+        const isStaleOver1h = regTime > 0 && (nowMs - regTime > 60 * 60 * 1000);
+
+        if (statusClose || isStaleOver1h) {
+          const endMs = sessionEndMs(nowMs);
+          if (endMs > nowMs) {
+            _dormantUntil = endMs;
+            console.log(`[CircuitBreaker] 偵測到今日休市/颱風假，休眠至 ${new Date(endMs).toISOString()}`);
+            setHealState(env, "dormant_until", endMs, "holiday-breaker").catch(() => {});
+            return { ok: true, dormant: true, until: endMs, reason: "holiday-breaker" };
+          }
+        }
+      }
+
       out.imb = await appendImb(env, rows, nowMs);
       const w = extractWtx(rows);
       out.px = await appendPricePx(env, w && w.px, nowMs, "quote");
@@ -1508,13 +1597,15 @@ export default {
 
   async scheduled(event, env, ctx) {
     const nowMs = Date.now();
+    // 0 毫秒極速跳脫：週末、休市大空窗、颱風假熔斷中，完全不啟動任何非同步工作，CPU 耗時 0ms
+    if (!shouldRunCron(nowMs)) return;
+
     const isTradeSession = !!sessionOf(nowMs);
     const minute = new Date(nowMs).getUTCMinutes();
     // 每 5 分鐘順手跑一次尾端 chart backfill；平常分鐘只跑即時報價與五檔，極致省 CPU
     const needChart = minute % 5 === 0;
     ctx.waitUntil(
       (async () => {
-        // 開盤時段才執行行情輪詢與 1m 更新，休市期間跳過以保護 10ms CPU 限制
         if (isTradeSession) {
           await pollAndStore(env, { chart: needChart });
         }
