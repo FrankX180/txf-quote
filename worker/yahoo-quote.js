@@ -89,6 +89,22 @@ function isHolidayMs(ms) {
   return _holidaySet.has(`${p.y}${p.mo}${p.d}`);
 }
 
+/**
+ * 夜盤歸屬（與前端 nightSessionLive 同一 SSOT）：
+ * 夜盤 14:58（開盤曆日）跨午夜走到次日 05:09，凌晨要問「前一日是不是營業日」。
+ * 前一日休市（國假／週末）就沒有夜盤，不能只看今天。ms 為台北時間。
+ */
+function nightLiveMs(ms) {
+  const p = twParts(ms);
+  const base = p.hm < 510 ? ms - 24 * 3600 * 1000 : ms;
+  const wd = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Taipei",
+    weekday: "short",
+  }).format(new Date(base));
+  if (wd === "Sun" || wd === "Sat") return false;
+  return !isHolidayMs(base);
+}
+
 /** 計算當前交易盤別的收盤時間戳 (台北時間，避免 Worker UTC 時區 setHours 偏移) */
 function sessionEndMs(ms) {
   const p = twParts(ms);
@@ -126,8 +142,12 @@ function shouldRunCron(ms) {
   if (wd === "Sat" && hm >= 510) return false;
   if (wd === "Mon" && hm < 845) return false;
 
-  // 1.5 國定假日（非週末）：日盤與當晚夜盤整日跳過；凌晨殘盤屬前一交易日，不檔
-  if (hm >= 510 && isHolidayMs(ms)) return false;
+  // 1.5 假日判定：凌晨（00:00–05:09）屬前一營業日夜盤，看前一日；其餘看當日
+  if (hm < 510) {
+    if (!nightLiveMs(ms)) return false; // 前一日休市／週末 → 凌晨根本沒有夜盤
+  } else if (isHolidayMs(ms)) {
+    return false; // 國定假日：日盤與當晚夜盤整日跳過
+  }
 
   // 2. 颱風假 / 國定假日自適應熔斷中：整盤休眠跳過
   if (ms < _dormantUntil) return false;
@@ -156,9 +176,11 @@ function sessionOf(ms) {
   const wd = wdFmt.format(new Date(ms)); // Sun Mon ...
   if (wd === "Sun") return null;
   if (wd === "Sat" && hm >= 510) return null;
-  if (hm >= 510 && isHolidayMs(ms)) return null; // 國定假日：凌晨殘盤以外時段無盤
+  // 凌晨（00:00–05:09）屬前一日夜盤；其餘時段看當日
+  if (hm < 510) return nightLiveMs(ms) ? "night" : null;
+  if (isHolidayMs(ms)) return null; // 國定假日：日盤與當晚夜盤皆無盤
   if (hm >= 845 && hm <= 1345) return "day";
-  if (hm >= 1458 || hm < 510) return "night";
+  if (hm >= 1458) return "night";
   return null;
 }
 
