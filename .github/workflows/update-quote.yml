@@ -47,7 +47,8 @@ jobs:
         run: python scripts/holiday_guard.py
   fetch:
     needs: guard
-    if: needs.guard.outputs.state != 'closed'
+    # 只檔「排程」；手動 dispatch／push 一律照跑（例：收假補抓）
+    if: github.event_name != 'schedule' || needs.guard.outputs.state != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
