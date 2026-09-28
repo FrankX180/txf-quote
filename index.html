@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.42</div>
+      <div class="ver foot-right">2.43</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2403,17 +2403,23 @@
     // 平日 +1、週五夜 +3、連假 +4 天）。各複本日曆日不同、盤內時刻卻相同，
     // 逐日鍵挑只會取到其中一份（連假時常是最新那半截）。
     // 收盤後改以「連續段」切開（同場複本之間隔 ≥10 小時），取最完整的一段＝完整一場。
-    function frozenNightSeries(rows) {
+    // kind："night"（15:00→05:00）或 "day"（08:45→13:45）
+    function frozenSessionSeries(rows, kind) {
+      const isNight = kind !== "day";
+      const loMin = isNight ? 15 * 60 : 8 * 60 + 45;
+      const hiMin = isNight ? 5 * 60 : 13 * 60 + 45;
+      const completeMs = isNight ? 12 * 3600000 : 4 * 3600000;
       const bars = [];
       (rows || []).forEach((b) => {
         if (!b || b.timestamp == null) return;
         const ts = fixYahooFutureTs(+b.timestamp);
         const d = new Date(ts);
         const mins = d.getHours() * 60 + d.getMinutes();
-        if (!(mins >= 15 * 60 || mins < 5 * 60)) return;
+        const inWin = isNight ? mins >= loMin || mins < hiMin : mins >= loMin && mins <= hiMin;
+        if (!inWin) return;
         const px = b.close != null ? b.close : b.px;
         if (!pxLooksLikeTxf(px)) return;
-        bars.push(Object.assign({}, b, { timestamp: ts, session: "night" }));
+        bars.push(Object.assign({}, b, { timestamp: ts, session: isNight ? "night" : "day" }));
       });
       if (!bars.length) return [];
       bars.sort((a, b) => a.timestamp - b.timestamp);
@@ -2427,12 +2433,11 @@
         cur.push(b);
       }
       // 先濾掉不完整的碎片（完整夜盤 ≈ 14h），再取「最新」的一場——避免取到較舊但根數略多的一場
-      const COMPLETE_MS = 12 * 60 * 60000;
-      let pool = blocks.filter((g) => g[g.length - 1].timestamp - g[0].timestamp >= COMPLETE_MS);
-      if (!pool.length) pool = blocks;
+      const full = blocks.filter((g) => g[g.length - 1].timestamp - g[0].timestamp >= completeMs);
+      const pool = full.length ? full : blocks;
       let best = pool[0];
       for (const g of pool) {
-        if (g[g.length - 1].timestamp > best[best.length - 1].timestamp) best = g;
+        if (full.length ? g[g.length - 1].timestamp > best[best.length - 1].timestamp : g.length > best.length) best = g;
       }
       const by = new Map();
       for (const b of best) {
@@ -2445,9 +2450,10 @@
     function minuteSeries() {
       const { m1, m5, m15 } = packBars();
       const n = daySpan < 1 ? 1 : daySpan;
-      // 收盤凍結＋看夜盤：改以盤內時刻收斂複本，還原完整一場（避免只取到被切半的最新複本）
-      if (n <= 1 && !marketOpen() && sessKey() === "night") {
-        const frozen = frozenNightSeries(m1);
+      // 收盤凍結＋看單一場次：以盤內時刻收斂複本，還原最新且完整的一場（日夜盤共用）
+      const fk = sessKey();
+      if (n <= 1 && !marketOpen() && (fk === "night" || fk === "day")) {
+        const frozen = frozenSessionSeries(m1, fk);
         if (frozen.length >= 2) return frozen;
       }
       const keep = lastDates(n);
@@ -2711,11 +2717,12 @@
       const livePx0 = n(q() && q().CLastPrice);
       // 收盤凍結＋看夜盤：minuteSeries() 已用「連續段」取出最完整的一場，
       // 不再用日曆交易日鍵過濾（nextTradingYmd 只跳週末，連假時會把真場次對到別的鍵而整段濾掉）。
-      const frozenNight = daySpan < 2 && !marketOpen() && sessKey() === "night";
+      const frozenKind = daySpan < 2 && !marketOpen() ? sessKey() : "";
+      const frozenNight = frozenKind === "night" || frozenKind === "day";
       const series = minuteSeries();
       // 收盤凍結＋看夜盤：直接用該場原始時間點——不套日曆交易日鍵、不做 Friday-nudge、
       // 也不看「不得超過現在」（Yahoo 把整場標到「下一交易日」，尾巴必然落在現在之後；
-      // 那條夾限正是把尾巴砍掉的元凶）。資料已由 frozenNightSeries 取成完整一場。
+      // 那條夾限正是把尾巴砍掉的元凶）。資料已由 frozenSessionSeries 取成完整一場。
       if (frozenNight) {
         const fp = series
           .map((b) => ({
@@ -3177,8 +3184,9 @@
       if (kInt === "1") {
         // 收盤凍結＋夜盤：與走勢同一套——直接採用該場原始時間點（完整一場），
         // 不套日曆交易日鍵、不做 Friday-nudge、不套未來夾限。
-        if (daySpan < 2 && !marketOpen() && sessKey() === "night") {
-          const frozen = frozenNightSeries(m1.length ? m1 : m5);
+        const fk1 = sessKey();
+        if (daySpan < 2 && !marketOpen() && (fk1 === "night" || fk1 === "day")) {
+          const frozen = frozenSessionSeries(m1.length ? m1 : m5, fk1);
           if (frozen.length >= 2) {
             return dropPxSpikes(
               frozen.filter(function (b) { return b && !b.filled; }),
@@ -5605,7 +5613,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.42";
+        const VER = "2.43";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
