@@ -36,9 +36,14 @@ jobs:
       state: ${{ steps.check.outputs.state }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Resolve market state (holiday gate)
         id: check
         shell: bash
+        # 守門失敗時 fail-open：step 不爆、output 空 → fetch 照跑，不因日曆問題停掉正常交易日
+        continue-on-error: true
         run: python scripts/holiday_guard.py
   fetch:
     needs: guard

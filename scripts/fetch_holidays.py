@@ -42,8 +42,9 @@ def fetch_json(url, timeout=20):
 
 
 def collect_rows():
-    """嘗試多個端點與年度參數；回傳 {ymd_dash: name}。任一失敗都不致命。"""
+    """嘗試多個端點與年度參數；回傳 (rows, years)。任一失敗都不致命。"""
     rows = {}
+    years = set()
     this_year = datetime.datetime.now().year
     for base in BASES:
         for suffix in ("", "&queryYear=%d" % this_year, "&queryYear=%d" % (this_year + 1)):
@@ -53,6 +54,9 @@ def collect_rows():
             except Exception as exc:  # noqa: BLE001 - 任一來源失敗都要能繼續
                 print("[warn] %s -> %s" % (url, exc), file=sys.stderr)
                 continue
+            year = j.get("queryYear")
+            if isinstance(year, int):
+                years.add(str(year))
             for row in (j.get("data") or []):
                 if not row or len(row) < 2:
                     continue
@@ -60,7 +64,7 @@ def collect_rows():
                 name = str(row[1]).strip()
                 if len(date) == 10 and date[4] == "-":
                     rows[date] = name
-    return rows
+    return rows, years
 
 
 def normalize(rows):
@@ -77,28 +81,46 @@ def normalize(rows):
 
 
 def load_existing():
+    """回傳 {year: set(YYYYMMDD)}；舊格式（僅 holidays 扁平）也能吃。"""
     try:
         with open(OUT, encoding="utf-8") as fh:
             doc = json.load(fh)
-        return {str(x) for x in (doc.get("holidays") or [])}
+        flat = {str(x) for x in (doc.get("holidays") or [])}
     except Exception:
-        return set()
+        return {}
+    by_year = {}
+    for d in flat:
+        if len(d) == 8:
+            by_year.setdefault(d[:4], set()).add(d)
+    return by_year
 
 
 def main():
-    rows = collect_rows()
+    rows, years = collect_rows()
     if not rows:
         print("[error] 未取得任何證交所日曆資料", file=sys.stderr)
         sys.exit(1)
-    merged = sorted(load_existing() | set(normalize(rows)))
-    years = sorted({x[:4] for x in merged})
+    fresh = normalize(rows)
+    by_year = load_existing()
+    # 來源回報的 queryYear 對該年度是權威：整年覆蓋（改期不會殘留舊假），其他年度保留
+    auth_years = sorted(y for y in years if any(d[:4] == y for d in fresh))
+    for year in auth_years:
+        year_list = [d for d in fresh if d[:4] == year]
+        if year_list:
+            by_year[year] = set(year_list)
+    if not auth_years:
+        # 來源沒帶 queryYear：保守起見以聯集方式併入
+        for d in fresh:
+            by_year.setdefault(d[:4], set()).add(d)
+    merged = sorted({d for vals in by_year.values() for d in vals})
+    merged_years = sorted(by_year)
     now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
     doc = {
         "source": "TWSE holidaySchedule",
         "sourceUrl": BASES[0] + "?response=json",
         "generatedAt": now.strftime("%Y-%m-%dT%H:%M:%S+08:00"),
         "note": "非週末之市場休市日（YYYYMMDD）；開紅盤／封關等交易日與週末已排除。前端／Actions／Worker 皆讀此檔。",
-        "years": years,
+        "years": merged_years,
         "holidays": merged,
     }
     if "--print" in sys.argv:
