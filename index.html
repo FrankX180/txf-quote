@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.37</div>
+      <div class="ver foot-right">2.38</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2503,6 +2503,22 @@
       }
       return "closed";
     }
+    // 棒的分類：只認週末與時段，**不看國定假日**。
+    // 理由：Yahoo 夜盤標「下一交易日」牆鐘（連假 +4 天），長假那場夜盤的 1 分棒會落在
+    // 連假後（如 9/24 夜盤 → 標 9/29 凌晨）甚至假日白天；用假日感知判定會把真棒當 closed
+    // 濾掉，走勢整片空白。判「現在有沒有盤」才用 sessKindAt。
+    function barKindAt(ts) {
+      const d = new Date(ts);
+      const dow = d.getDay(); // 0=日 … 6=六
+      const hm = d.getHours() * 60 + d.getMinutes();
+      // 凌晨 00:00–04:59：僅周二～周六（接前一晚夜盤）
+      if (hm < 5 * 60) return dow === 0 || dow === 1 ? "closed" : "night";
+      // 日盤：周一～五 08:45–13:45
+      if (hm >= 8 * 60 + 45 && hm <= 13 * 60 + 45) return dow >= 1 && dow <= 5 ? "day" : "closed";
+      // 夜盤開盤後：周一～五 14:58 起
+      if (hm >= 14 * 60 + 58) return dow >= 1 && dow <= 5 ? "night" : "closed";
+      return "closed";
+    }
     function chartStepMs() {
       const n = daySpan < 1 ? 1 : daySpan;
       if (n <= 1) return 60000;
@@ -2532,15 +2548,15 @@
         const prev = out[out.length - 1];
         const b = bars[i];
         const hole = b.timestamp - prev.timestamp;
-        const sk0 = sessKindAt(prev.timestamp);
-        const sk1 = sessKindAt(b.timestamp);
+        const sk0 = barKindAt(prev.timestamp);
+        const sk1 = barKindAt(b.timestamp);
         // 同 kind 不夠：跨曆日夜盤（昨晚→今晚）必須切開
         const sameSess =
           sk0 !== "closed" && sk0 === sk1 && barDateAt(prev.timestamp) === barDateAt(b.timestamp);
         if (sameSess && hole > step * 1.5 && hole <= maxFill) {
           const px = prev.close;
           for (let t = prev.timestamp + step; t < b.timestamp - step * 0.4; t += step) {
-            if (sessKindAt(t) !== sk0) break;
+            if (barKindAt(t) !== sk0) break;
             out.push({
               timestamp: t,
               open: px, high: px, low: px, close: px,
@@ -2657,7 +2673,7 @@
           px: b.close, vol: b.volume, time: barWallTs(b),
           open: b.open, high: b.high, low: b.low, close: b.close,
         }))
-        .filter((p) => p.time != null && sessKindAt(p.time) !== "closed" && p.time <= Date.now() + 180000);
+        .filter((p) => p.time != null && barKindAt(p.time) !== "closed" && p.time <= Date.now() + 180000);
       pts.sort((a, b) => a.time - b.time);
       pts = dropPxSpikes(pts, (p) => p.px, (p) => p.time);
 
@@ -2666,7 +2682,7 @@
         const dayPts = [];
         const nightPts = [];
         pts.forEach((p) => {
-          if (sessKindAt(p.time) === "night") nightPts.push(p);
+          if (barKindAt(p.time) === "night") nightPts.push(p);
           else dayPts.push(p);
         });
         if (nightPts.length > 2) {
@@ -2708,7 +2724,7 @@
           ticks.forEach((h) => {
             const ts = h.ts;
             if (typeof ts !== "number") return;
-            if (sessKindAt(ts) === "closed") return;
+            if (barKindAt(ts) === "closed") return;
             if (ts <= lastT) return;
             const px = h.px;
             if (px == null || !pxLooksLikeTxf(px)) return;
@@ -2757,13 +2773,13 @@
           }
         }
       }
-      pts = pts.filter((p) => p && p.time != null && sessKindAt(p.time) !== "closed");
+      pts = pts.filter((p) => p && p.time != null && barKindAt(p.time) !== "closed");
       // 當日＋正在看本盤：只留本盤開盤後的點（擋上一夜殘棒／錯位均線／假高低點）
       if (daySpan < 2) {
         const sk = sessKey();
         if (sessKindAt(Date.now()) === sk) {
           const openMs = sessionOpenAt();
-          pts = pts.filter((p) => p.time >= openMs - 60000 && sessKindAt(p.time) === sk);
+          pts = pts.filter((p) => p.time >= openMs - 60000 && barKindAt(p.time) === sk);
         }
       }
       return pts;
@@ -3099,7 +3115,7 @@
           raw = src.filter((b) => {
             if (!b || b.timestamp == null) return false;
             if (keep.indexOf(barTradingDay(b)) >= 0) return true;
-            return sk && sessKindAt(b.timestamp) === sk && b.timestamp >= openMs - 60000;
+            return sk && barKindAt(b.timestamp) === sk && b.timestamp >= openMs - 60000;
           });
         }
         if (raw.length < 2) raw = src;
@@ -3459,7 +3475,7 @@
       imbHit = null;
       // 副圖：內外盤差面積圖（同主圖遮罩漸層；0 軸上紅下綠）
       if (showImb && !multi && imbH > 0) {
-        const ibs = imbSeries().filter((b) => b && b.t >= t0 && b.t <= t1 && sessKindAt(b.t) !== "closed")
+        const ibs = imbSeries().filter((b) => b && b.t >= t0 && b.t <= t1 && barKindAt(b.t) !== "closed")
           .slice().sort((a, b) => a.t - b.t);
         const zeroY = Math.round(imbTop + imbH / 2) + 0.5;
         // 左緣說明
@@ -5505,7 +5521,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.37";
+        const VER = "2.38";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
