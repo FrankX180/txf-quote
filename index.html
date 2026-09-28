@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.36</div>
+      <div class="ver foot-right">2.37</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1749,8 +1749,29 @@
     function isHoliday(d) {
       return HOLIDAY_SET.has(String(_holYmdKey(d)));
     }
+    // ---- 夜盤歸屬（單一 SSOT）----
+    // 夜盤 14:58（開盤曆日 D）跨午夜走到 D+1 05:09。凌晨 00:00–05:09 的盤別問的是「D 是否營業日」，
+    // 不能只看今天：今天收假（如 9/29 週二）而前一日休市（9/28）時，凌晨根本沒有夜盤。
+    function _prevCalDay(d) {
+      const x = new Date((d || new Date()).getTime());
+      x.setDate(x.getDate() - 1);
+      return x;
+    }
+    function isBizDay(d) {
+      const dow = d.getDay();
+      return dow >= 1 && dow <= 5 && !isHoliday(d);
+    }
+    // 此刻是否有夜盤在走：凌晨看前一日、當晚看當日
+    function nightSessionLive(d) {
+      const hm = d.getHours() * 100 + d.getMinutes();
+      return isBizDay(hm < 510 ? _prevCalDay(d) : d);
+    }
     function closedLabel() {
-      return isHoliday(new Date()) ? "休市" : "快照";
+      const d = new Date();
+      const hm = d.getHours() * 100 + d.getMinutes();
+      // 凌晨屬前一日夜盤：前一日或今日為國定假日＝休市；其餘（週末／收盤後）＝快照
+      if (hm < 510) return isHoliday(d) || isHoliday(_prevCalDay(d)) ? "休市" : "快照";
+      return isHoliday(d) ? "休市" : "快照";
     }
     function liveSess() {
       const d = new Date();
@@ -1767,15 +1788,14 @@
     }
     function marketOpen() {
       const d = new Date();
-      const dow = d.getDay();
       const hm = d.getHours() * 100 + d.getMinutes();
-      // 國定假日：不開盤（凌晨 00:00–05:09 仍屬前一營業日夜盤，不擋）
-      if (isHoliday(d) && hm >= 510) return false;
-      if (dow === 0) return false;
-      if (dow === 6) return hm < 510;
+      // 凌晨 00:00–05:09：屬前一營業日夜盤（前一營業日休市／週末就沒有盤）
+      if (hm < 510) return nightSessionLive(d);
+      // 國定假日／週末：日盤與當晚夜盤都不開
+      if (!isBizDay(d)) return false;
       // 日盤含 08:30 盤前（五檔可更新）；正式成交 08:45；夜盤 14:58 起
       if (hm >= 830 && hm <= 1345) return true;
-      if (hm >= 1458 || hm < 510) return true;
+      if (hm >= 1458) return true;
       return false;
     }
     // ---- 空窗偵測自動補觸發（前端守望） ----
@@ -2466,26 +2486,20 @@
     }
 
     // 盤別：日 08:45–13:45、夜 14:58–次日 05:00；休市／周末不當同盤
-    // 夜盤：周一～周五晚（周五夜→周六 05:00）；周一凌晨與周日無夜盤
+    // 夜盤：營業日晚上（周五夜→周六 05:00）；凌晨接「前一營業日」的夜盤，前一日休市／週末則無
     // 注意：必須與 marketOpen()/liveSess() 的 14:58 對齊，否則 14:58–14:59 會變成 closed 不更新五檔
     function sessKindAt(ts) {
       const d = new Date(ts);
-      const dow = d.getDay(); // 0=日 … 6=六
       const hm = d.getHours() * 60 + d.getMinutes();
-      // 凌晨 00:00–04:59：僅周二～周六（接前一晚夜盤）
-      if (hm < 5 * 60) {
-        if (dow === 0 || dow === 1) return "closed";
-        return "night";
-      }
-      // 日盤：周一～五 08:45–13:45
+      // 凌晨 00:00–04:59：接前一營業日夜盤（前一日休市／周末則無夜盤）
+      if (hm < 5 * 60) return nightSessionLive(d) ? "night" : "closed";
+      // 日盤：營業日 08:45–13:45
       if (hm >= 8 * 60 + 45 && hm <= 13 * 60 + 45) {
-        if (dow >= 1 && dow <= 5) return "day";
-        return "closed";
+        return isBizDay(d) ? "day" : "closed";
       }
-      // 夜盤開盤後：周一～五 14:58 起（與 marketOpen 一致）
+      // 夜盤開盤後：營業日 14:58 起（與 marketOpen 一致）
       if (hm >= 14 * 60 + 58) {
-        if (dow >= 1 && dow <= 5) return "night";
-        return "closed";
+        return isBizDay(d) ? "night" : "closed";
       }
       return "closed";
     }
@@ -4664,8 +4678,10 @@
       const q0 = slimYahoo(wtx);
       const nowTs = Date.now();
       const holNow = new Date(nowTs);
-      // 國定假日視同休市；但凌晨 00:00–05:09 仍屬前一營業日夜盤，不視為休市
-      const hol = isHoliday(holNow) && holNow.getHours() * 100 + holNow.getMinutes() >= 510;
+      // 國定假日視同休市（凌晨 00:00–05:09 屬前一日夜盤，看前一日）
+      const hol = isHoliday(
+        holNow.getHours() * 100 + holNow.getMinutes() < 510 ? _prevCalDay(holNow) : holNow
+      );
       let tradeSk = hol ? "closed" : sessKindAt(nowTs); // day / night / closed（含周末）
       // 奇摩仍給 orderbook 時（常標 close），若本地時段已是夜盤顯示，強制走夜盤更新五檔
       const freezeSk = liveSess();
@@ -5489,7 +5505,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.36";
+        const VER = "2.37";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
