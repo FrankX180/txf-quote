@@ -2,6 +2,7 @@
 # 用法：& R:\PythonProgram\Python312\python.exe scripts\poll_live_daemon.py
 from datetime import datetime, timedelta, timezone
 import json
+import os
 import time
 import urllib.request
 import urllib.error
@@ -9,15 +10,34 @@ import urllib.error
 TZ = timezone(timedelta(hours=8))
 URL = "https://wtx.19850926.xyz/?kind=poll"
 INTERVAL = 15
+HOL_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "holidays.json"
+)
+_HOL = None
+
+
+def holidays():
+    """休市日 SSOT（data/holidays.json）；讀不到就當作沒有假日，不阻擋正常盤。"""
+    global _HOL
+    if _HOL is None:
+        try:
+            with open(HOL_PATH, encoding="utf-8") as fh:
+                _HOL = {str(x) for x in (json.load(fh).get("holidays") or [])}
+        except Exception:  # noqa: BLE001
+            _HOL = set()
+    return _HOL
 
 
 def in_session(now=None):
+    """此刻是否有盤（與前端 nightSessionLive 同語意）：
+    凌晨 00:00–05:09 屬前一營業日夜盤，看前一日；其餘時段看當日。
+    """
     d = now or datetime.now(TZ)
     hm = d.hour * 100 + d.minute
-    wd = d.weekday()  # 0=Mon
-    if wd == 6:
+    ref = d - timedelta(days=1) if hm < 510 else d
+    if ref.weekday() >= 5:  # 週六／週日
         return False
-    if wd == 5 and hm >= 510:
+    if ref.strftime("%Y%m%d") in holidays():
         return False
     if 845 <= hm <= 1345:
         return True
