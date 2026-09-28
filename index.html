@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.41</div>
+      <div class="ver foot-right">2.42</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -3175,6 +3175,18 @@
       const m1 = joinBars(minutePack.night_1m, minutePack.day_1m);
       const m5 = joinBars(minutePack.night_5m, minutePack.day_5m);
       if (kInt === "1") {
+        // 收盤凍結＋夜盤：與走勢同一套——直接採用該場原始時間點（完整一場），
+        // 不套日曆交易日鍵、不做 Friday-nudge、不套未來夾限。
+        if (daySpan < 2 && !marketOpen() && sessKey() === "night") {
+          const frozen = frozenNightSeries(m1.length ? m1 : m5);
+          if (frozen.length >= 2) {
+            return dropPxSpikes(
+              frozen.filter(function (b) { return b && !b.filled; }),
+              function (b) { return b.close; },
+              function (b) { return b.timestamp; }
+            );
+          }
+        }
         // 跟走勢同一裁窗：當日（或 daySpan 天），避免多日 1 分擠成疏疏破圖
         const span = daySpan < 1 ? 1 : daySpan;
         const keep = lastDates(span);
@@ -5593,7 +5605,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.41";
+        const VER = "2.42";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
