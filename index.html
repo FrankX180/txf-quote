@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.39</div>
+      <div class="ver foot-right">2.40</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2426,11 +2426,13 @@
         }
         cur.push(b);
       }
-      let best = blocks[0];
-      for (const g of blocks) {
-        const last = g[g.length - 1].timestamp;
-        const bestLast = best[best.length - 1].timestamp;
-        if (g.length > best.length || (g.length === best.length && last > bestLast)) best = g;
+      // 先濾掉不完整的碎片（完整夜盤 ≈ 14h），再取「最新」的一場——避免取到較舊但根數略多的一場
+      const COMPLETE_MS = 12 * 60 * 60000;
+      let pool = blocks.filter((g) => g[g.length - 1].timestamp - g[0].timestamp >= COMPLETE_MS);
+      if (!pool.length) pool = blocks;
+      let best = pool[0];
+      for (const g of pool) {
+        if (g[g.length - 1].timestamp > best[best.length - 1].timestamp) best = g;
       }
       const by = new Map();
       for (const b of best) {
@@ -5573,7 +5575,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.39";
+        const VER = "2.40";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
