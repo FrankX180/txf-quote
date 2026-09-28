@@ -1585,6 +1585,7 @@ export default {
 
     // 手動／外部守護：強制打奇摩並寫 D1（不走 5 秒 CDN 快取語意）
     if (kind === "poll") {
+      await ensureHolidays();
       const wantChart = url.searchParams.get("chart") === "1";
       const res = await pollAndStore(env, wantChart ? { chart: true } : undefined);
       return jsonResp({ ok: true, ...res, at: new Date().toISOString() }, 200, {
