@@ -1,0 +1,55 @@
+name: refresh-holidays
+
+# 休市日 SSOT（data/holidays.json）自動更新：
+#   每月 1 日抓一次證交所開休市日曆；新年度公告後會自動納入（逐年合併，不覆蓋舊年度）。
+#   也可手動 workflow_dispatch。
+on:
+  schedule:
+    # 每月 1 日 00:10 UTC（台北 08:10）
+    - cron: "10 0 1 * *"
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - "scripts/fetch_holidays.py"
+
+concurrency:
+  group: refresh-holidays
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch TWSE market holiday calendar
+        run: python scripts/fetch_holidays.py
+      - name: Commit data/holidays.json if changed
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/holidays.json
+          if git diff --cached --quiet; then
+            echo "no change"
+            exit 0
+          fi
+          git commit -m "chore(holidays): 更新市場休市日 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          branch="${GITHUB_REF_NAME:-master}"
+          for i in 1 2 3 4 5; do
+            if git push origin "HEAD:refs/heads/${branch}"; then
+              echo "push ok (attempt ${i})"
+              exit 0
+            fi
+            git fetch origin "${branch}"
+            git rebase "origin/${branch}" || { git rebase --abort || true; }
+            sleep $((i * 2))
+          done
+          echo "push failed after retries" >&2
+          exit 1

@@ -63,6 +63,32 @@ let _dormantUntil = 0;
 let _yahooFailCount = 0;
 let _yahooBackoffUntil = 0;
 
+// ── 休市日 SSOT（與前端／Actions 共用 repo 的 data/holidays.json）──
+// 假日只檔日盤與當晚夜盤；凌晨 00:00–05:09 仍屬前一營業日夜盤，不可檔。
+// 取不到時 fail-open（空集合），回退到原有颱風假自適應熔斷。
+const HOLIDAY_URL = "https://raw.githubusercontent.com/FrankX180/txf-quote/master/data/holidays.json";
+let _holidaySet = null;
+let _holidayFetchedAt = 0;
+async function ensureHolidays() {
+  const now = Date.now();
+  if (_holidaySet && now - _holidayFetchedAt < 12 * 3600 * 1000) return;
+  try {
+    const r = await fetch(HOLIDAY_URL, { cf: { cacheTtl: 3600, cacheEverything: true } });
+    if (!r.ok) return;
+    const j = await r.json();
+    const arr = Array.isArray(j) ? j : (j && (j.holidays || j.closed)) || [];
+    if (arr.length) {
+      _holidaySet = new Set(arr.map(String));
+      _holidayFetchedAt = now;
+    }
+  } catch (_) {}
+}
+function isHolidayMs(ms) {
+  if (!_holidaySet) return false;
+  const p = twParts(ms);
+  return _holidaySet.has(`${p.y}${p.mo}${p.d}`);
+}
+
 /** 計算當前交易盤別的收盤時間戳 (台北時間，避免 Worker UTC 時區 setHours 偏移) */
 function sessionEndMs(ms) {
   const p = twParts(ms);
@@ -100,6 +126,9 @@ function shouldRunCron(ms) {
   if (wd === "Sat" && hm >= 510) return false;
   if (wd === "Mon" && hm < 845) return false;
 
+  // 1.5 國定假日（非週末）：日盤與當晚夜盤整日跳過；凌晨殘盤屬前一交易日，不檔
+  if (hm >= 510 && isHolidayMs(ms)) return false;
+
   // 2. 颱風假 / 國定假日自適應熔斷中：整盤休眠跳過
   if (ms < _dormantUntil) return false;
 
@@ -127,6 +156,7 @@ function sessionOf(ms) {
   const wd = wdFmt.format(new Date(ms)); // Sun Mon ...
   if (wd === "Sun") return null;
   if (wd === "Sat" && hm >= 510) return null;
+  if (hm >= 510 && isHolidayMs(ms)) return null; // 國定假日：凌晨殘盤以外時段無盤
   if (hm >= 845 && hm <= 1345) return "day";
   if (hm >= 1458 || hm < 510) return "night";
   return null;
@@ -291,6 +321,7 @@ async function triggerGithubWorkflow(env, reason) {
 }
 async function maybeHealGithub(env, reason) {
   const now = Date.now();
+  await ensureHolidays();
   if (!sessionOf(now)) return { ok: false, reason: "closed", skipped: true };
   // GitHub Actions 約每 5 分鐘更新；每 5 分鐘最多檢查一次，避免 cron 空轉。
   const lastCheck = await getHealState(env, "last_gh_check");
@@ -1597,6 +1628,7 @@ export default {
 
   async scheduled(event, env, ctx) {
     const nowMs = Date.now();
+    await ensureHolidays(); // 休市日 SSOT（模組快取 12h）
     // 0 毫秒極速跳脫：週末、休市大空窗、颱風假熔斷中，完全不啟動任何非同步工作，CPU 耗時 0ms
     if (!shouldRunCron(nowMs)) return;
 

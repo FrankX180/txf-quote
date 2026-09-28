@@ -29,7 +29,7 @@
 | `scripts/` | 抓檔／部署（見 `scripts/AGENTS.md`） |
 | `worker/` | Cloudflare Worker（見 `worker/AGENTS.md`） |
 | `relay/` | 可選本機轉發，Pages 不依賴（見 `relay/AGENTS.md`） |
-| `.github/` | `update-quote.yml` 每 5 分抓檔 |
+| `.github/` | `update-quote.yml`（每 5 分抓檔，休市日由 guard job 跳過）＋ `refresh-holidays.yml`（每月更新休市日） |
 | `90_Tools/` | 空殼 |
 | `98_Archive/` | digest 舊日誌 |
 | `99_TempScripts/` | 探測腳本，gitignore |
@@ -49,6 +49,7 @@
 2. Yahoo 夜盤時間戳：平日 −1 天、週五夜最多 −2 天。**禁止無限 while 回移**（會把 KEEP_DAYS 舊夜盤疊進今晚，千點刷針）。SSOT：`01_Docs/Yahoo-台指期K線日期慣例.md`
 3. 不要把盤中 5 秒全量價 commit 進 GitHub。
 4. 根目錄不發明 02–09 業務夾：這是單頁＋Actions，不是 pipeline。
+5. **休市日 SSOT**：`data/holidays.json`（`scripts/fetch_holidays.py` 抓證交所「市場開休市日期」產生，Actions 每月自動更新）。前端（`loadHolidays`）、GitHub Actions（`scripts/holiday_guard.py`）、Worker（`ensureHolidays`）**都讀同一份，不得各自硬編**。假日只檔日盤與當晚夜盤；**凌晨 00:00–05:09 仍屬前一營業日夜盤，不可檔**。
 
 ### Testing Requirements
 

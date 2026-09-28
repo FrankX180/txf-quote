@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.34</div>
+      <div class="ver foot-right">2.35</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1717,28 +1717,37 @@
       return `${ds.slice(4, 6)}/${ds.slice(6, 8)} ${ts.slice(0, 2)}:${ts.slice(2, 4)}:${ts.slice(4, 6)}`;
     }
 
-    // ── 休市日（期交所／證交所公告之國定假日；僅列落在週一～週五者，週末由 dow 判斷）──
-    // SSOT：每年初依 期交所開休市日曆更新一次（https://www.twse.com.tw/zh/trading/holiday.html）
-    // 颱風等臨時休市無法預排，另由 applyLive 的「成交停滯」判定處理。
-    const MARKET_HOLIDAYS = new Set([
-      "20260101",                                             // 開國紀念日
-      "20260212","20260213","20260216","20260217","20260218","20260219","20260220", // 農曆春節
-      "20260227",                                             // 和平紀念日補假
-      "20260403","20260406",                                 // 兒童節／清明節
-      "20260501",                                             // 勞動節
-      "20260619",                                             // 端午節
-      "20260925",                                             // 中秋節
-      "20260928",                                             // 教師節
-      "20261009",                                             // 國慶日補假
-      "20261026",                                             // 光復節補假
-      "20261225",                                             // 行憲紀念日
-    ]);
+    // ── 休市日 SSOT：data/holidays.json（scripts/fetch_holidays.py 抓證交所日曆產生）──
+    // 前端、GitHub Actions、Cloudflare Worker 都讀同一份。下列清單僅為「JSON 載入前的 bootstrap」，
+    // 執行期由 loadHolidays() 以 JSON 覆蓋；颱風等臨時休市另由成交停滯判定處理。
+    // 注意：假日只檔日盤與當晚夜盤；凌晨 00:00–05:09 仍屬前一營業日夜盤（見 marketOpen）。
+    const MARKET_HOLIDAYS_BOOTSTRAP = [
+      "20260101",
+      "20260212","20260213","20260216","20260217","20260218","20260219","20260220",
+      "20260227",
+      "20260403","20260406",
+      "20260501",
+      "20260619",
+      "20260925",
+      "20260928",
+      "20261009",
+      "20261026",
+      "20261225",
+    ];
+    let HOLIDAY_SET = new Set(MARKET_HOLIDAYS_BOOTSTRAP);
+    async function loadHolidays() {
+      try {
+        const j = await gh("data/holidays.json").then((r) => r.json());
+        const arr = Array.isArray(j) ? j : (j && j.holidays) || [];
+        if (arr.length) HOLIDAY_SET = new Set(arr.map(String));
+      } catch (e) {}
+    }
     function _holYmdKey(d) {
       const t = d || new Date();
       return t.getFullYear() * 10000 + (t.getMonth() + 1) * 100 + t.getDate();
     }
     function isHoliday(d) {
-      return MARKET_HOLIDAYS.has(String(_holYmdKey(d)));
+      return HOLIDAY_SET.has(String(_holYmdKey(d)));
     }
     function closedLabel() {
       return isHoliday(new Date()) ? "休市" : "快照";
@@ -1760,8 +1769,8 @@
       const d = new Date();
       const dow = d.getDay();
       const hm = d.getHours() * 100 + d.getMinutes();
-      // 國定假日：不開盤
-      if (isHoliday(d)) return false;
+      // 國定假日：不開盤（凌晨 00:00–05:09 仍屬前一營業日夜盤，不擋）
+      if (isHoliday(d) && hm >= 510) return false;
       if (dow === 0) return false;
       if (dow === 6) return hm < 510;
       // 日盤含 08:30 盤前（五檔可更新）；正式成交 08:45；夜盤 14:58 起
@@ -4843,6 +4852,7 @@
     }
 
     async function load() {
+      await loadHolidays(); // 先載入休市日 SSOT，再判定今日是否交易日
       // 分拆載入：任一來源失敗不擋整頁；Worker 成功就能更新五檔
       let s = null;
       let hn = [];
@@ -5476,7 +5486,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.34";
+        const VER = "2.35";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");

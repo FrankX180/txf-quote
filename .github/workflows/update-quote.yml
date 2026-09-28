@@ -19,6 +19,8 @@ on:
       - "scripts/fetch_vix.py"
       - "scripts/when.py"
       - "scripts/fetch_imb.py"
+      - "scripts/fetch_holidays.py"
+      - "scripts/holiday_guard.py"
       - ".github/workflows/update-quote.yml"
 # 排程／push 重疊時只留最新一場，避免互搶 data/*.json
 concurrency:
@@ -27,7 +29,20 @@ concurrency:
 permissions:
   contents: write
 jobs:
+  # 休市日（週末／國定假日）直接跳過整條抓取：SSOT = data/holidays.json
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      state: ${{ steps.check.outputs.state }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve market state (holiday gate)
+        id: check
+        shell: bash
+        run: python scripts/holiday_guard.py
   fetch:
+    needs: guard
+    if: needs.guard.outputs.state != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
