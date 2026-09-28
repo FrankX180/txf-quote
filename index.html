@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.40</div>
+      <div class="ver foot-right">2.41</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2713,8 +2713,26 @@
       // 不再用日曆交易日鍵過濾（nextTradingYmd 只跳週末，連假時會把真場次對到別的鍵而整段濾掉）。
       const frozenNight = daySpan < 2 && !marketOpen() && sessKey() === "night";
       const series = minuteSeries();
+      // 收盤凍結＋看夜盤：直接用該場原始時間點——不套日曆交易日鍵、不做 Friday-nudge、
+      // 也不看「不得超過現在」（Yahoo 把整場標到「下一交易日」，尾巴必然落在現在之後；
+      // 那條夾限正是把尾巴砍掉的元凶）。資料已由 frozenNightSeries 取成完整一場。
+      if (frozenNight) {
+        const fp = series
+          .map((b) => ({
+            px: b.close != null ? b.close : b.px,
+            vol: b.volume,
+            time: +b.timestamp,
+            open: b.open,
+            high: b.high,
+            low: b.low,
+            close: b.close,
+          }))
+          .filter((p) => p.time != null && Number.isFinite(p.time) && pxLooksLikeTxf(p.px))
+          .sort((a, b) => a.time - b.time);
+        if (fp.length >= 2) return dropPxSpikes(fp, (p) => p.px, (p) => p.time);
+      }
       const rawBars = dropFutureBars(
-        frozenNight ? series : series.filter((b) => keep.indexOf(barTradingDay(b)) >= 0)
+        series.filter((b) => keep.indexOf(barTradingDay(b)) >= 0)
       );
       const mins = fillMinutes(
         pickSessionPath(
@@ -5575,7 +5593,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.40";
+        const VER = "2.41";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
