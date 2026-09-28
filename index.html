@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.35</div>
+      <div class="ver foot-right">2.36</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -4663,7 +4663,9 @@
       if (!wtx) return;
       const q0 = slimYahoo(wtx);
       const nowTs = Date.now();
-      const hol = isHoliday(new Date(nowTs)); // 國定假日：整日視同休市
+      const holNow = new Date(nowTs);
+      // 國定假日視同休市；但凌晨 00:00–05:09 仍屬前一營業日夜盤，不視為休市
+      const hol = isHoliday(holNow) && holNow.getHours() * 100 + holNow.getMinutes() >= 510;
       let tradeSk = hol ? "closed" : sessKindAt(nowTs); // day / night / closed（含周末）
       // 奇摩仍給 orderbook 時（常標 close），若本地時段已是夜盤顯示，強制走夜盤更新五檔
       const freezeSk = liveSess();
@@ -4908,7 +4910,7 @@
           live = false;
           if ($("live")) {
             $("live").className = "live";
-            $("live").textContent = "快照";
+            $("live").textContent = closedLabel();
           }
         }
       } else if (!snap) {
@@ -5254,6 +5256,7 @@
     async function ensureLive1m(force) {
       if (live1mBusy) return false;
       if (document.visibilityState !== "visible") return false;
+      if (!marketOpen()) return false; // 休市（含國定假日）不催 1 分，避免空打 Worker
       if (!force && !live1mGap()) return false;
       live1mBusy = true;
       let ok = false;
@@ -5486,7 +5489,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.35";
+        const VER = "2.36";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
