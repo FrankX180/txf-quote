@@ -5,6 +5,63 @@ const CHART1M =
   "https://tw.stock.yahoo.com/_td-stock/api/resource/" +
   "StockServices.chart;symbol=WTX%26;period=1m;range=1d";
 
+// ── 期交所 MIS 官方即時報價（REST；盤後即時、欄位穩定）──
+// 台指期夜盤 Yahoo 常滯後或不穩（IP 選擇性 5xx）；以 MIS 即時價覆蓋，Yahoo 供五檔。
+const MIS_API = "https://mis.taifex.com.tw/futures/api/getQuoteList";
+const MIS_REFERER =
+  "https://mis.taifex.com.tw/futures/RegularSession/EquityIndices/FuturesDomestic/";
+const MIS_MONTHS = "FGHJKMNQUVXZ";
+
+function misMonthScore(s) {
+  const m = /^TXF([A-Z])(\d)-M$/.exec(s || "");
+  return m ? Number(m[2]) * 100 + MIS_MONTHS.indexOf(m[1]) : 9e9;
+}
+
+function misTimeIso(dateStr, timeStr) {
+  if (!dateStr || !timeStr || String(dateStr).length < 8) return null;
+  const y = dateStr.slice(0, 4), mo = dateStr.slice(4, 6), d = dateStr.slice(6, 8);
+  const h = timeStr.slice(0, 2), mi = timeStr.slice(2, 4), s = timeStr.slice(4, 6);
+  return y + "-" + mo + "-" + d + "T" + h + ":" + mi + ":" + s + "+08:00";
+}
+
+/** 取台指期近月即時報價；抓不到回 null。 */
+async function fetchMisQuote() {
+  const tries = sessionOf(Date.now()) === "day" ? ["0", "1"] : ["1", "0"];
+  for (const mt of tries) {
+    try {
+      const r = await fetch(MIS_API, {
+        method: "POST",
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
+          "Content-Type": "application/json;charset=UTF-8",
+          Origin: "https://mis.taifex.com.tw",
+          Referer: MIS_REFERER,
+        },
+        body: JSON.stringify({
+          MarketType: mt, SymbolType: "F", KindID: "1", CID: "", ExpireMonth: "", PageNo: 1,
+        }),
+      });
+      if (!r.ok) continue;
+      const j = await r.json();
+      const ql = (j && j.RtData && j.RtData.QuoteList) || [];
+      const cand = ql
+        .filter((x) => /^TXF[A-Z]\d-M$/.test(x.SymbolID || ""))
+        .sort((a, b) => misMonthScore(a.SymbolID) - misMonthScore(b.SymbolID));
+      const pick = cand.find((x) => x.CLastPrice) || null;
+      if (pick) {
+        const num = (v) => (v == null || v === "" ? null : Number(v));
+        return {
+          px: num(pick.CLastPrice), bid: num(pick.CBidPrice1), ask: num(pick.CAskPrice1),
+          open: num(pick.COpenPrice), high: num(pick.CHighPrice), low: num(pick.CLowPrice),
+          ref: num(pick.CRefPrice), diff: num(pick.CDiff), rate: num(pick.CDiffRate),
+          vol: num(pick.CTotalVolume), date: pick.CDate, time: pick.CTime,
+        };
+      }
+    } catch (e) { /* try next MarketType */ }
+  }
+  return null;
+}
+
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
@@ -1617,33 +1674,74 @@ export default {
       });
     }
 
-    const target = kind === "1m" ? CHART1M : YAHOO;
-    const r = await fetch(target, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
-        Referer: "https://tw.stock.yahoo.com/",
-      },
-    });
-    const body = await r.text();
+    const YH_HDR = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
+      Referer: "https://tw.stock.yahoo.com/",
+    };
 
-    const cacheHdr =
-      kind === "1m"
-        ? {
-            "Cache-Control": "public, max-age=0",
-            "CDN-Cache-Control": "public, max-age=10",
-            "Cloudflare-CDN-Cache-Control": "public, max-age=10",
-          }
-        : {
-            "Cache-Control": "public, max-age=0",
-            "CDN-Cache-Control": "public, max-age=5",
-            "Cloudflare-CDN-Cache-Control": "public, max-age=5",
-          };
-    return new Response(body, {
-      status: r.status,
+    if (kind === "1m") {
+      const r = await fetch(CHART1M, { headers: YH_HDR });
+      const body = await r.text();
+      return new Response(body, {
+        status: r.status,
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "Cache-Control": "public, max-age=0",
+          "CDN-Cache-Control": "public, max-age=10",
+          "Cloudflare-CDN-Cache-Control": "public, max-age=10",
+          ...CORS,
+        },
+      });
+    }
+
+    // 報價（root）：Yahoo（五檔／相關）＋期交所 MIS（官方即時價）。
+    // Yahoo 台指期夜盤常滯後或 IP 選擇性 5xx；用 MIS 即時價覆蓋，五檔仍取 Yahoo orderbook。
+    const [yRes, mis] = await Promise.all([
+      fetch(YAHOO, { headers: YH_HDR }),
+      fetchMisQuote(),
+    ]);
+    let rows = null;
+    if (yRes.ok) {
+      try { rows = await yRes.json(); } catch (e) { rows = null; }
+    }
+    if (mis && mis.px != null) {
+      if (!Array.isArray(rows)) rows = [];
+      let w = rows.find((x) => x && x.symbol === "WTX&");
+      if (!w) { w = { symbol: "WTX&", symbolName: "台指期近一" }; rows.unshift(w); }
+      const num = (v) => (v == null ? undefined : { raw: String(v) });
+      w.price = num(mis.px);
+      if (mis.bid != null) w.bid = num(mis.bid);
+      if (mis.ask != null) w.ask = num(mis.ask);
+      if (mis.diff != null) w.change = num(mis.diff);
+      if (mis.rate != null) w.changePercent = mis.rate.toFixed(2) + "%";
+      if (mis.ref != null) w.regularMarketPreviousClose = num(mis.ref);
+      if (mis.open != null) w.regularMarketOpen = num(mis.open);
+      if (mis.high != null) w.regularMarketDayHigh = num(mis.high);
+      if (mis.low != null) w.regularMarketDayLow = num(mis.low);
+      if (mis.vol != null) w.volume = String(mis.vol);
+      const iso = misTimeIso(mis.date, mis.time);
+      if (iso) w.regularMarketTime = iso;
+    }
+    if (!Array.isArray(rows)) {
+      const body = await yRes.text().catch(() => "");
+      return new Response(body, {
+        status: yRes.status,
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "Cache-Control": "public, max-age=0",
+          "CDN-Cache-Control": "public, max-age=5",
+          "Cloudflare-CDN-Cache-Control": "public, max-age=5",
+          ...CORS,
+        },
+      });
+    }
+    return new Response(JSON.stringify(rows), {
+      status: 200,
       headers: {
         "content-type": "application/json; charset=utf-8",
-        ...cacheHdr,
+        "Cache-Control": "public, max-age=0",
+        "CDN-Cache-Control": "public, max-age=5",
+        "Cloudflare-CDN-Cache-Control": "public, max-age=5",
         ...CORS,
       },
     });
