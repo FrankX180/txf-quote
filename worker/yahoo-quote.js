@@ -25,7 +25,9 @@ function misTimeIso(dateStr, timeStr) {
 }
 
 /** 取台指期近月即時報價；抓不到回 null。 */
+let _misDebug = "";
 async function fetchMisQuote() {
+  _misDebug = "";
   const tries = sessionOf(Date.now()) === "day" ? ["0", "1"] : ["1", "0"];
   for (const mt of tries) {
     try {
@@ -41,8 +43,12 @@ async function fetchMisQuote() {
           MarketType: mt, SymbolType: "F", KindID: "1", CID: "", ExpireMonth: "", PageNo: 1,
         }),
       });
-      if (!r.ok) continue;
-      const j = await r.json();
+      if (!r.ok) { _misDebug += " MT" + mt + ":http" + r.status; continue; }
+      const txt = await r.text();
+      let j;
+      try { j = JSON.parse(txt); } catch (e) {
+        _misDebug += " MT" + mt + ":notjson(" + txt.slice(0, 100) + ")"; continue;
+      }
       const ql = (j && j.RtData && j.RtData.QuoteList) || [];
       const cand = ql
         .filter((x) => /^TXF[A-Z]\d-M$/.test(x.SymbolID || ""))
@@ -57,7 +63,10 @@ async function fetchMisQuote() {
           vol: num(pick.CTotalVolume), date: pick.CDate, time: pick.CTime,
         };
       }
-    } catch (e) { /* try next MarketType */ }
+      _misDebug += " MT" + mt + ":empty(RtCode=" + (j && j.RtCode) + ",n=" + ql.length + ")";
+    } catch (e) {
+      _misDebug += " MT" + mt + ":ex(" + String((e && e.message) || e).slice(0, 100) + ")";
+    }
   }
   return null;
 }
@@ -1677,7 +1686,7 @@ export default {
     if (kind === "mis") {
       // 診斷：CF Worker 打期交所 MIS 是否通
       const m = await fetchMisQuote();
-      return jsonResp({ ok: !!m, mis: m, at: new Date().toISOString() }, 200, {
+      return jsonResp({ ok: !!m, mis: m, debug: _misDebug, at: new Date().toISOString() }, 200, {
         "Cache-Control": "no-store",
         "CDN-Cache-Control": "no-store",
         "Cloudflare-CDN-Cache-Control": "no-store",
