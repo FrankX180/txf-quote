@@ -217,8 +217,8 @@ function shouldRunCron(ms) {
     return false; // 國定假日：日盤與當晚夜盤整日跳過
   }
 
-  // 2. 颱風假 / 國定假日自適應熔斷中：整盤休眠跳過
-  if (ms < _dormantUntil) return false;
+  // 2. 颱風假熔斷不在此擋：交給 pollAndStore 判斷（有成交即自動解除休眠）。
+  //    在此擋會讓誤熔斷整場叫不醒（2026-09-30 夜盤 15:15-19:05 停寫）。
 
   // 3. Yahoo 連續異常退避冷卻中：暫停輪詢保護 CPU 與配額
   if (ms < _yahooBackoffUntil) return false;
