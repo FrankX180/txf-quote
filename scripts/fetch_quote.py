@@ -1,6 +1,7 @@
 # 奇摩 stockList WTX&：報價 + 五檔 → data/snapshot.json
 # 勿打 query1.finance.yahoo.com。
 import json
+import re
 import time
 import urllib.error
 import urllib.request
@@ -18,6 +19,10 @@ URL = (
 # Yahoo 對此端點會按來源 IP 選擇性回 500（本機／GitHub Runner 中、CF 邊緣不中），
 # 直連失敗時改走 Worker，等於借道 Cloudflare IP 繞過。
 WORKER = "https://wtx.blok.trading/"
+# 期交所 MIS 官方即時報價（REST）。注意：MIS 自身掛在 Cloudflare 後面，
+# CF Worker 打它會 CF-to-CF 520、瀏覽器直連被 CORS 擋；只有 Actions（Azure）／本機能通。
+MIS = "https://mis.taifex.com.tw/futures/api/getQuoteList"
+MIS_MONTHS = "ABCDEFGHIJKL"  # MIS 月份字母 A=1月..L=12月（非期貨慣用碼）
 HDR = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
     "Referer": "https://tw.stock.yahoo.com/",
@@ -63,6 +68,83 @@ def get_list(retries: int = 3) -> list:
             print("WARN get_list[%s] returned empty/invalid payload; try next source" % src_name, flush=True)
             break  # 換來源
     raise last_err
+
+
+def _mis_quote(sess):
+    """取台指期近月即時報價（MIS 官方）。盤別 → MarketType（day=0/night=1），失敗再試另一個。"""
+    want = "0" if sess == "day" else "1"
+    for m in (want, "0" if want == "1" else "1"):
+        try:
+            body = {"MarketType": m, "SymbolType": "F", "KindID": "1", "CID": "", "ExpireMonth": "", "PageNo": 1}
+            req = urllib.request.Request(
+                MIS,
+                data=json.dumps(body).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json;charset=UTF-8",
+                    "Origin": "https://mis.taifex.com.tw",
+                    "Referer": "https://mis.taifex.com.tw/futures/RegularSession/EquityIndices/FuturesDomestic/",
+                    "User-Agent": HDR["User-Agent"],
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=25) as r:
+                j = json.loads(r.read().decode("utf-8", "replace"))
+            ql = (j.get("RtData") or {}).get("QuoteList") or []
+
+            def score(sid):
+                mm = re.match(r"^TXF([A-Z])(\d)-M$", sid or "")
+                if not mm:
+                    return 10 ** 9
+                mi = MIS_MONTHS.find(mm.group(1))
+                return 10 ** 9 if mi < 0 else int(mm.group(2)) * 100 + mi
+
+            cand = sorted(
+                [x for x in ql if re.match(r"^TXF[A-Z]\d-M$", x.get("SymbolID") or "")],
+                key=lambda x: score(x.get("SymbolID")),
+            )
+            best = next((x for x in cand if x.get("CLastPrice")), None)
+            if best:
+                return best
+        except Exception as e:  # noqa: BLE001
+            print("WARN mis MT%s %s" % (m, e), flush=True)
+    return None
+
+
+def apply_mis(rows, sess):
+    """用 MIS 官方價覆盖 WTX& 列的報價欄位（五檔 orderbook 仍留 Yahoo）。"""
+    mis = _mis_quote(sess)
+    if not mis:
+        return rows
+    if not rows:
+        rows = [{"symbol": "WTX&", "symbolName": "台指期近一"}]
+    w = pick(rows, "WTX&") or rows[0]
+
+    def val(k):
+        v = mis.get(k)
+        return None if v in (None, "") else str(v)
+
+    if val("CLastPrice") is not None:
+        w["price"] = {"raw": val("CLastPrice")}
+    if val("CBidPrice1") is not None:
+        w["bid"] = {"raw": val("CBidPrice1")}
+    if val("CAskPrice1") is not None:
+        w["ask"] = {"raw": val("CAskPrice1")}
+    if val("CDiff") is not None:
+        w["change"] = {"raw": val("CDiff")}
+    if val("CDiffRate") is not None:
+        w["changePercent"] = val("CDiffRate") + "%"
+    if val("CRefPrice") is not None:
+        w["regularMarketPreviousClose"] = {"raw": val("CRefPrice")}
+    if val("CTotalVolume") is not None:
+        w["volume"] = val("CTotalVolume")
+    dt, tt = str(mis.get("CDate") or ""), str(mis.get("CTime") or "")
+    if len(dt) >= 8 and len(tt) >= 6:
+        w["regularMarketTime"] = "%s-%s-%sT%s:%s:%s+08:00" % (
+            dt[0:4], dt[4:6], dt[6:8], tt[0:2], tt[2:4], tt[4:6])
+    if not w.get("symbolName"):
+        w["symbolName"] = "台指期近一"
+    print("MIS applied px=%s t=%s" % (val("CLastPrice"), w.get("regularMarketTime")), flush=True)
+    return rows
 
 
 def pick(rows, symbol):
@@ -360,18 +442,20 @@ def main():
     DATA.mkdir(exist_ok=True)
     now = datetime.now(TZ)
     now_iso = now.strftime("%Y-%m-%d %H:%M:%S")
+    rows = None
     try:
         rows = get_list()
     except Exception as e:
-        # 重試仍失敗：不寫壞資料、不中斷其他 step（vix/imb/kline 仍要 commit）。
-        # 有舊 snapshot 就沿用（下一輪 5 分鐘後自然補）；首跑無舊檔才大聲失敗。
+        print("WARN get_list failed (%s); try MIS-only" % e, flush=True)
+        rows = []
+    # 以 MIS 官方即時價覆蓋（Actions 可打 MIS；CF Worker 不行）
+    rows = apply_mis(rows, sess_now(now))
+    if not rows:
+        # 兩源都掛：不寫壞資料、不中斷其他 step；有舊 snapshot 就沿用
         if (DATA / "snapshot.json").exists():
-            print(
-                "WARN quote fetch failed after retries (%s); keep previous snapshot" % e,
-                flush=True,
-            )
+            print("WARN no quote source (yahoo+mis); keep previous snapshot", flush=True)
             return
-        raise
+        raise SystemExit("no quote source")
     d = pick(rows, "WTX&") or (rows[0] if rows else {})
     q = slim(d)
     related = [

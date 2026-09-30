@@ -10,11 +10,13 @@ const CHART1M =
 const MIS_API = "https://mis.taifex.com.tw/futures/api/getQuoteList";
 const MIS_REFERER =
   "https://mis.taifex.com.tw/futures/RegularSession/EquityIndices/FuturesDomestic/";
-const MIS_MONTHS = "FGHJKMNQUVXZ";
+const MIS_MONTHS = "ABCDEFGHIJKL";  // MIS 月份字母 A=1月..L=12月（非期貨慣用碼）
 
 function misMonthScore(s) {
   const m = /^TXF([A-Z])(\d)-M$/.exec(s || "");
-  return m ? Number(m[2]) * 100 + MIS_MONTHS.indexOf(m[1]) : 9e9;
+  if (!m) return 9e9;
+  const mi = MIS_MONTHS.indexOf(m[1]);
+  return mi < 0 ? 9e9 : Number(m[2]) * 100 + mi;
 }
 
 function misTimeIso(dateStr, timeStr) {
