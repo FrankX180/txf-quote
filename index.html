@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.45</div>
+      <div class="ver foot-right">2.46</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2149,8 +2149,8 @@
         );
       } catch (e) {}
     }
-    // 清洗已存的內外盤壞樣本（2026-09-30 事故：Yahoo 抽風回 0／壞值留下負向凹洞）。
-    // 規則同 recordImb：內/外盤量必為正；相鄰分鐘差值跳動 >500 口視為離群，移除。
+    // 清洗已存的內外盤壞樣本（Yahoo 抽風回 0／壞值留下負向凹洞）。
+    // 壞點丟掉；相鄰分鐘跳動 >500 口丟掉。繪圖時 fillImbMinutes 會把缺口用前值補平。
     function sanitizeImbBars(arr) {
       if (!Array.isArray(arr)) return [];
       const out = [];
@@ -2166,6 +2166,27 @@
           Math.abs((n(b.d) || 0) - (n(prev.d) || 0)) > 500
         )
           continue;
+        out.push(b);
+      }
+      return out;
+    }
+    function fillImbMinutes(arr) {
+      if (!arr || arr.length < 2) return arr || [];
+      const step = 60000;
+      const maxFill = 12 * 60 * 60 * 1000;
+      const out = [arr[0]];
+      for (let i = 1; i < arr.length; i++) {
+        const prev = out[out.length - 1];
+        const b = arr[i];
+        const hole = b.t - prev.t;
+        const sk0 = barKindAt(prev.t);
+        const sk1 = barKindAt(b.t);
+        if (sk0 !== "closed" && sk0 === sk1 && hole > step * 1.5 && hole <= maxFill) {
+          for (let t = prev.t + step; t < b.t - step * 0.4; t += step) {
+            if (barKindAt(t) !== sk0) break;
+            out.push({ t: t, d: prev.d, in: prev.in, out: prev.out, ts: prev.ts, filled: true });
+          }
+        }
         out.push(b);
       }
       return out;
@@ -2196,17 +2217,18 @@
     /** 每 5 秒寫入；同一分鐘覆寫為最新差值 d=外-內 */
     function recordImb(sk, inn, outv, ts) {
       if (!sk) return;
-      if (inn == null || outv == null || isNaN(inn) || isNaN(outv)) return;
-      // 合理性防護：累計內/外盤量必為正。Yahoo 抽風時會回 0／壞值，out=0 會讓差值灌成大負數，
-      // 在副圖畫出負向凹洞（2026-09-30 事故）。寧可少一根，也不畫壞樣本。
-      if (inn <= 0 || outv <= 0) return;
       const t = ts || Date.now();
       const slot = Math.floor(t / 60000) * 60000;
-      const d = outv - inn;
       const arr = imbBars[sk] || (imbBars[sk] = []);
       const last = arr.length ? arr[arr.length - 1] : null;
-      // 離群防護：相鄰分鐘的正常差值變化只有數十口；單筆跳動過大＝壞樣本，丟棄。
-      // 非相鄰（跨盤別／資料缺口）不套此限，以免新盤首點被誤丟。
+      // Yahoo 抽風回 0／缺欄：承接上一分鐘，避免副圖斷點
+      if (inn == null || outv == null || isNaN(inn) || isNaN(outv) || inn <= 0 || outv <= 0) {
+        if (!last || slot - last.t > 300000) return;
+        inn = last.in;
+        outv = last.out;
+      }
+      const d = outv - inn;
+      // 離群丟棄（不可沿用前值：沿用會把基準凍住，真實大跳動後整場卡死）；缺口由 fillImbMinutes 補平
       if (last && last.t !== slot && slot - last.t <= 120000 && Math.abs(d - (last.d || 0)) > 500) return;
       if (last && last.t === slot) {
         last.d = d;
@@ -2309,7 +2331,7 @@
     }
     function imbSeries() {
       const sk = sessKey();
-      const arr = imbBars[sk] || [];
+      const arr = fillImbMinutes(imbBars[sk] || []);
       if (sk === "day") return arr.map(adjustDayImbBar);
       if (sk !== "night") return arr;
       return arr.map((b) =>
@@ -5641,7 +5663,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.45";
+        const VER = "2.46";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");

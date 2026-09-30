@@ -275,6 +275,16 @@ function extractWtx(rows) {
   return { inn, outv, px: rawNum(w.price) };
 }
 
+/** 夜盤 Yahoo 常標 marketStatus=close，不可當颱風假。有內外盤或有量即視為在交易。 */
+function looksLikeLiveQuote(rawW) {
+  if (!rawW) return false;
+  const w = extractWtx([rawW]);
+  if (w && w.inn > 0 && w.outv > 0) return true;
+  const px = rawNum(rawW.price);
+  const vol = rawNum(rawW.volume);
+  return px != null && px > 10000 && vol != null && vol > 0;
+}
+
 // D1 表結構與複合索引已就緒；預設不跑重複 DDL 以防超出 10ms CPU 限制
 let _schemaEnsured = true;
 async function ensureSchema(db, force = false) {
@@ -870,23 +880,45 @@ async function loadPricePack(env, dayKey) {
   }
 }
 
+async function lastImbBar(env, dayKey, sess) {
+  if (!env.IMB_DB || !dayKey || !sess) return null;
+  try {
+    await ensureSchema(env.IMB_DB);
+    return await env.IMB_DB.prepare(
+      "SELECT d, inn, outv FROM imb WHERE day_key = ? AND session = ? ORDER BY t DESC LIMIT 1"
+    )
+      .bind(dayKey, sess)
+      .first();
+  } catch (e) {
+    return null;
+  }
+}
+
 async function appendImb(env, rows, nowMs) {
   if (!env.IMB_DB) return { ok: false, reason: "no-db" };
   const sess = sessionOf(nowMs);
   if (!sess) return { ok: false, reason: "closed" };
   const w = extractWtx(rows);
-  if (!w || w.inn == null || w.outv == null) return { ok: false, reason: "no-imb" };
-  // 合理性防護：累計內/外盤量必為正；Yahoo 抽風會回 0／壞值，會讓 d 暴走（副圖凹洞）
-  if (!(w.inn > 0) || !(w.outv > 0)) return { ok: false, reason: "bad-imb" };
   const dayKey = tradingDayKey(nowMs);
   const slot = minuteSlot(nowMs);
-  const d = w.outv - w.inn;
+  let inn = w && w.inn;
+  let outv = w && w.outv;
+  // Yahoo 抽風回 0／缺欄：承接上一分鐘，避免夜盤副圖斷點（不可回補歷史，只能把當根補上）
+  if (!(inn > 0) || !(outv > 0)) {
+    const prev = await lastImbBar(env, dayKey, sess);
+    if (!prev || !(prev.inn > 0) || !(prev.outv > 0)) {
+      return { ok: false, reason: w ? "bad-imb" : "no-imb" };
+    }
+    inn = prev.inn;
+    outv = prev.outv;
+  }
+  const d = outv - inn;
   await ensureSchema(env.IMB_DB);
   await env.IMB_DB.prepare(
     "INSERT INTO imb (day_key, session, t, d, inn, outv, ts) VALUES (?, ?, ?, ?, ?, ?, ?) " +
       "ON CONFLICT(day_key, session, t) DO UPDATE SET d=excluded.d, inn=excluded.inn, outv=excluded.outv, ts=excluded.ts"
   )
-    .bind(dayKey, sess, slot, d, w.inn, w.outv, nowMs)
+    .bind(dayKey, sess, slot, d, inn, outv, nowMs)
     .run();
   return { ok: true, dayKey, sess, d, slot };
 }
@@ -965,7 +997,6 @@ async function fetchYahooQuoteRetry(tries) {
 async function pollAndStore(env, opts) {
   const nowMs = Date.now();
   if (!sessionOf(nowMs)) return { skipped: true, reason: "closed" };
-  if (nowMs < _dormantUntil) return { skipped: true, reason: "dormant-holiday" };
   if (nowMs < _yahooBackoffUntil) return { skipped: true, reason: "yahoo-backoff" };
 
   const out = {};
@@ -973,9 +1004,9 @@ async function pollAndStore(env, opts) {
   if (!ok) {
     _yahooFailCount++;
     if (_yahooFailCount >= 2) {
-      // Yahoo 連續兩次異常，啟動 5 分鐘冷卻退避，不連續死磕
       _yahooBackoffUntil = nowMs + 5 * 60 * 1000;
     }
+    if (nowMs < _dormantUntil) return { skipped: true, reason: "dormant-holiday" };
     out.skippedQuote = true;
     out.reason = "yahoo-fail";
     out.status = status || 0;
@@ -985,21 +1016,29 @@ async function pollAndStore(env, opts) {
     try {
       const rows = JSON.parse(body);
 
-      // 【颱風假 / 休市自適應熔斷器】：開盤 15 分鐘後如果市場標記 close 或成交停滯，觸發全盤休眠
+      // 颱風假熔斷：開盤 15 分後「真的沒有交易跡象」才睡。
+      // Yahoo 夜盤常標 marketStatus=close，15:15 起會誤睡到 05:01（副圖 16:00 起斷點；2026-09-30）。
       const p = twParts(nowMs);
       const hm = p.hm;
       const isPast15m = (hm >= 900 && hm <= 1345) || (hm >= 1515 || hm < 500);
-      if (isPast15m && Array.isArray(rows) && rows.length) {
-        const rawW = rows.find((x) => x && x.symbol === "WTX&") || rows[0];
-        const statusClose = rawW && rawW.marketStatus === "close";
-        const regTime = rawW && rawW.regularMarketTime ? Date.parse(rawW.regularMarketTime) : 0;
+      const rawW = Array.isArray(rows) && rows.length
+        ? (rows.find((x) => x && x.symbol === "WTX&") || rows[0])
+        : null;
+      if (looksLikeLiveQuote(rawW)) {
+        _dormantUntil = 0;
+      } else if (nowMs < _dormantUntil) {
+        return { skipped: true, reason: "dormant-holiday" };
+      } else if (isPast15m && rawW) {
+        const statusClose = rawW.marketStatus === "close";
+        const regTime = rawW.regularMarketTime ? Date.parse(rawW.regularMarketTime) : 0;
         const isStaleOver1h = regTime > 0 && (nowMs - regTime > 60 * 60 * 1000);
-
-        if (statusClose || isStaleOver1h) {
+        const sess = sessionOf(nowMs);
+        const closeHalt = sess === "day" && statusClose;
+        if (closeHalt || isStaleOver1h) {
           const endMs = sessionEndMs(nowMs);
           if (endMs > nowMs) {
             _dormantUntil = endMs;
-            console.log(`[CircuitBreaker] 偵測到今日休市/颱風假，休眠至 ${new Date(endMs).toISOString()}`);
+            console.log(`[CircuitBreaker] 休市/颱風假，休眠至 ${new Date(endMs).toISOString()}`);
             setHealState(env, "dormant_until", endMs, "holiday-breaker").catch(() => {});
             return { ok: true, dormant: true, until: endMs, reason: "holiday-breaker" };
           }
