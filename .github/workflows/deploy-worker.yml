@@ -1,0 +1,29 @@
+name: deploy-worker
+
+# 雲端部署 Cloudflare Worker（不需任何本機檔案、不需本機憑證）。
+# 憑證：repo secret `CLOUDFLARE_API_KEY`（Cloudflare Global API Key）。
+# 改 worker/yahoo-quote.js 或部署腳本即自動上線；亦可 workflow_dispatch 手動觸發。
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - "worker/yahoo-quote.js"
+      - "scripts/deploy_worker.py"
+
+concurrency:
+  group: deploy-worker
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Deploy Worker (yahoo-quote.js + D1 + cron)
+        env:
+          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+        run: python scripts/deploy_worker.py

@@ -1,12 +1,19 @@
 # Deploy worker/yahoo-quote.js + bind D1 database txf-imb
+# 可本機跑，也可由 GitHub Actions 跑（雲端部署，不需任何本機檔案）：
+#   金鑰優先序＝環境變數 CLOUDFLARE_API_KEY → 本機 secrets 檔。
+#   WORKER 走相對路徑（不綁任何一台機器）。
 from pathlib import Path
 import json
+import os
 import uuid
 import urllib.request
 import urllib.error
 
-SECRETS = Path(r"E:\_PluginTools\Memory\secrets\LLM_API_KEY.MD")
-WORKER = Path(r"E:\_Project\FuturesHTML\worker\yahoo-quote.js")
+SECRETS = Path(
+    os.environ.get("CF_SECRETS_FILE")
+    or r"E:\_PluginTools\Memory\secrets\LLM_API_KEY.MD"
+)
+WORKER = Path(__file__).resolve().parents[1] / "worker" / "yahoo-quote.js"
 EMAIL = "fx0926@gmail.com"
 AID = "a623d11cc8b419579d99db54c35b8d79"
 ZID_1985 = "39099a55a79cb78d956a71bba62dcf1c"
@@ -17,11 +24,21 @@ DB_NAME = "txf-imb"
 
 
 def cf_key():
-    lines = SECRETS.read_text(encoding="utf-8").splitlines()
-    for i, line in enumerate(lines):
-        if line.strip().upper() == "CLOUDFLARE API KEY" and i + 1 < len(lines):
-            return lines[i + 1].strip()
-    raise SystemExit("no CF key")
+    key = (
+        os.environ.get("CLOUDFLARE_API_KEY")
+        or os.environ.get("CF_API_KEY")
+        or ""
+    ).strip()
+    if key:
+        return key
+    if SECRETS.exists():
+        lines = SECRETS.read_text(encoding="utf-8").splitlines()
+        for i, line in enumerate(lines):
+            if line.strip().upper() == "CLOUDFLARE API KEY" and i + 1 < len(lines):
+                return lines[i + 1].strip()
+    raise SystemExit(
+        "no CF key (set CLOUDFLARE_API_KEY env var, or provide a local secrets file)"
+    )
 
 
 def call(method, url, data=None, headers=None, raw=None):

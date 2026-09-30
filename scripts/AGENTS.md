@@ -19,18 +19,17 @@ GitHub Actions／本機抓行情與部署 Worker。台北時段閘門在 `when.p
 | `fetch_vix.py` | 期交所 VIXTWN → `data/vix.json`（自家 SSOT，一日一次累積） |
 | `fetch_tmf_retail.py` | 微型臺指散戶多空 |
 | `fetch_imb.py` | Worker D1 內外盤差 → `imb-*.json` |
-| `poll_live_daemon.py` | 本機每 15 秒 `?kind=poll` |
-| `deploy_worker.py` | 上傳 `yahoo-quote.js`、綁 D1／自訂網域／cron |
+| `deploy_worker.py` | 上傳 `yahoo-quote.js`、綁 D1／自訂網域／cron。金鑰優先讀環境變數 `CLOUDFLARE_API_KEY`（CI 用），fallback 本機 secrets 檔 |
 
 ## For AI Agents
 
 - 改 `fetch_minute.py` 回移必須與前端／Worker 對齊（最多 2 天）
-- 部署：`& R:\PythonProgram\Python312\python.exe E:\_Project\FuturesHTML\scripts\deploy_worker.py`（高風險：覆蓋正式 Worker／D1／cron，不要「順便驗證」）
+- 部署：push 後由 `.github/workflows/deploy-worker.yml` **雲端自動部署**（secret `CLOUDFLARE_API_KEY`）；本機可選 `python scripts/deploy_worker.py`。高風險：覆蓋正式 Worker／D1／cron，不要「順便驗證」
 - CF key：`E:\_PluginTools\Memory\secrets\LLM_API_KEY.MD`
 - 奇摩只用 `tw.stock.yahoo.com/_td-stock/api/resource/...`，禁 `query1.finance.yahoo.com`；snapshot OHLC 禁寫奇摩混盤開高低
 - `fetch_uncovered.py` ~1800 行，不要憑檔頭重寫 main；散戶 `-(外資+投信+自營)`；大台等值 `TX+MTX/4+TMF/20`
 - 法人已定案後不要套 `forced()` 重抓
-- `poll_live_daemon.py` 自寫 `in_session`，不要改去 import when（窗差是刻意的）
+- 本機 15 秒高頻 daemon 已除役（`98_Archive/_local_deprecated/poll_live_daemon.py`）；高頻由 Worker cron（每分）承接，勿再掛本機常駐程式
 - `fetch_imb.py` 註解會騙人，非週日幾乎都會抓
 - 月 K 依結算日切段，斷鏈改 `taifex_settlement_dates.json`，不要放寬 STALE
 
