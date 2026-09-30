@@ -1,0 +1,63 @@
+name: fubon-imb
+
+# 富邦逐筆補 D1 內外盤缺口（Yahoo 為主、富邦為輔）。scripts/fubon_imb_fill.py：
+# 沒缺口就不登入；有缺口才 apikey_login 換行情 token、立即 logout，純 HTTP 抓逐筆後補值。
+# secrets：FUBON_ID、FUBON_API_KEY、FUBON_CERT_B64（、FUBON_CERT_PASS 選填）、CLOUDFLARE_API_KEY。
+# 不放交易密碼。SDK 由富邦官網下載 Linux wheel（不依賴本機）。
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - "scripts/fubon_imb_fill.py"
+      - ".github/workflows/fubon-imb.yml"
+
+concurrency:
+  group: fubon-imb
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      state: ${{ steps.check.outputs.state }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - id: check
+        continue-on-error: true
+        run: python scripts/holiday_guard.py
+  fill:
+    needs: guard
+    if: github.event_name != 'schedule' || needs.guard.outputs.state != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@v4
+        with:
+          path: ~/fubon_sdk
+          key: fubon-neo-2.4.0-linux
+      - name: Install fubon_neo (official Linux wheel)
+        run: |
+          mkdir -p ~/fubon_sdk && cd ~/fubon_sdk
+          if ! ls *.whl >/dev/null 2>&1; then
+            curl -sSL -o sdk.zip "https://www.fbs.com.tw/TradeAPI_SDK/fubon_binary/fubon_neo-2.4.0-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.zip"
+            unzip -o sdk.zip && rm sdk.zip
+          fi
+          pip install --quiet ./*.whl
+      - name: Fill imb gaps from Fubon trades
+        env:
+          FUBON_ID: ${{ secrets.FUBON_ID }}
+          FUBON_API_KEY: ${{ secrets.FUBON_API_KEY }}
+          FUBON_CERT_B64: ${{ secrets.FUBON_CERT_B64 }}
+          FUBON_CERT_PASS: ${{ secrets.FUBON_CERT_PASS }}
+          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+        run: python scripts/fubon_imb_fill.py
