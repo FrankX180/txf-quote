@@ -14,6 +14,10 @@ URL = (
     "https://tw.stock.yahoo.com/_td-stock/api/resource/"
     "StockServices.stockList;symbols=WTX%26,WCDF%26,WCCF%26"
 )
+# 備源：自家 Cloudflare Worker 直接 proxy 同一支 Yahoo stockList（同格式）。
+# Yahoo 對此端點會按來源 IP 選擇性回 500（本機／GitHub Runner 中、CF 邊緣不中），
+# 直連失敗時改走 Worker，等於借道 Cloudflare IP 繞過。
+WORKER = "https://wtx.blok.trading/"
 HDR = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
     "Referer": "https://tw.stock.yahoo.com/",
@@ -21,29 +25,37 @@ HDR = {
 KEEP_POINTS = 800
 
 
-def get_list(retries: int = 4) -> list:
-    """Yahoo 對這支 endpoint 偶發 5xx／逾時；重試而非讓整條 pipeline 陪葬。
-    4xx（除 429）是請求本身有問題，重試無意義，直接拋。"""
+def _fetch_once(url: str) -> list:
+    req = urllib.request.Request(url, headers=HDR)
+    with urllib.request.urlopen(req, timeout=25) as r:
+        j = json.loads(r.read().decode("utf-8", "replace"))
+    return j if isinstance(j, list) else [j]
+
+
+def get_list(retries: int = 3) -> list:
+    """先直連 Yahoo；失敗改走自家 Worker（借 CF IP 繞過 IP 選擇性 5xx）。
+    4xx（除 429）是請求本身有問題，重試無意義，直接換來源。"""
     last_err = None
-    for i in range(retries):
-        try:
-            req = urllib.request.Request(URL, headers=HDR)
-            with urllib.request.urlopen(req, timeout=25) as r:
-                j = json.loads(r.read().decode("utf-8", "replace"))
-            return j if isinstance(j, list) else [j]
-        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as e:
-            last_err = e
-            code = getattr(e, "code", None)
-            if code is not None and 400 <= code < 500 and code != 429:
-                raise
-            if i < retries - 1:
-                wait = 0.8 * (2 ** i)
-                print(
-                    "WARN get_list attempt %d/%d failed: %s; retry in %.1fs"
-                    % (i + 1, retries, e, wait),
-                    flush=True,
-                )
-                time.sleep(wait)
+    for src_name, url in (("yahoo", URL), ("worker", WORKER)):
+        for i in range(retries):
+            try:
+                rows = _fetch_once(url)
+                if src_name != "yahoo":
+                    print("WARN get_list via %s fallback" % src_name, flush=True)
+                return rows
+            except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as e:
+                last_err = e
+                code = getattr(e, "code", None)
+                if code is not None and 400 <= code < 500 and code != 429:
+                    break  # 4xx 無意義，換來源
+                if i < retries - 1:
+                    wait = 0.6 * (2 ** i)
+                    print(
+                        "WARN get_list[%s] attempt %d/%d failed: %s; retry in %.1fs"
+                        % (src_name, i + 1, retries, e, wait),
+                        flush=True,
+                    )
+                    time.sleep(wait)
     raise last_err
 
 
