@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.44</div>
+      <div class="ver foot-right">2.45</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2149,6 +2149,27 @@
         );
       } catch (e) {}
     }
+    // 清洗已存的內外盤壞樣本（2026-09-30 事故：Yahoo 抽風回 0／壞值留下負向凹洞）。
+    // 規則同 recordImb：內/外盤量必為正；相鄰分鐘差值跳動 >500 口視為離群，移除。
+    function sanitizeImbBars(arr) {
+      if (!Array.isArray(arr)) return [];
+      const out = [];
+      for (let i = 0; i < arr.length; i++) {
+        const b = arr[i];
+        if (!b || b.t == null) continue;
+        if (!(n(b.in) > 0) || !(n(b.out) > 0)) continue;
+        const prev = out[out.length - 1];
+        if (
+          prev &&
+          b.t - prev.t > 0 &&
+          b.t - prev.t <= 120000 &&
+          Math.abs((n(b.d) || 0) - (n(prev.d) || 0)) > 500
+        )
+          continue;
+        out.push(b);
+      }
+      return out;
+    }
     function loadImbBars() {
       try {
         const o = JSON.parse(localStorage.getItem(IMB_KEY) || "null");
@@ -2166,9 +2187,10 @@
         )
           return;
         imbBars = {
-          day: Array.isArray(o.bars.day) ? o.bars.day : [],
-          night: Array.isArray(o.bars.night) ? o.bars.night : [],
+          day: sanitizeImbBars(Array.isArray(o.bars.day) ? o.bars.day : []),
+          night: sanitizeImbBars(Array.isArray(o.bars.night) ? o.bars.night : []),
         };
+        saveImbBars();  // 清洗後的結果寫回，壞點不再殘留
       } catch (e) {}
     }
     /** 每 5 秒寫入；同一分鐘覆寫為最新差值 d=外-內 */
@@ -2339,8 +2361,8 @@
           if (latest && latest.night && latest.night.length) pack = latest;
         }
         if (!pack) return;
-        imbBars.day = mergeImbSide(imbBars.day, pack.day);
-        imbBars.night = mergeImbSide(imbBars.night, pack.night);
+        imbBars.day = sanitizeImbBars(mergeImbSide(imbBars.day, pack.day));
+        imbBars.night = sanitizeImbBars(mergeImbSide(imbBars.night, pack.night));
         saveImbBars();
         if (sessKey() === "day") await refreshNightImbBase();
       } catch (e) {}
@@ -5619,7 +5641,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.44";
+        const VER = "2.45";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
