@@ -1,6 +1,8 @@
 # 奇摩 stockList WTX&：報價 + 五檔 → data/snapshot.json
 # 勿打 query1.finance.yahoo.com。
 import json
+import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -19,11 +21,30 @@ HDR = {
 KEEP_POINTS = 800
 
 
-def get_list() -> list:
-    req = urllib.request.Request(URL, headers=HDR)
-    with urllib.request.urlopen(req, timeout=25) as r:
-        j = json.loads(r.read().decode("utf-8", "replace"))
-    return j if isinstance(j, list) else [j]
+def get_list(retries: int = 4) -> list:
+    """Yahoo 對這支 endpoint 偶發 5xx／逾時；重試而非讓整條 pipeline 陪葬。
+    4xx（除 429）是請求本身有問題，重試無意義，直接拋。"""
+    last_err = None
+    for i in range(retries):
+        try:
+            req = urllib.request.Request(URL, headers=HDR)
+            with urllib.request.urlopen(req, timeout=25) as r:
+                j = json.loads(r.read().decode("utf-8", "replace"))
+            return j if isinstance(j, list) else [j]
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as e:
+            last_err = e
+            code = getattr(e, "code", None)
+            if code is not None and 400 <= code < 500 and code != 429:
+                raise
+            if i < retries - 1:
+                wait = 0.8 * (2 ** i)
+                print(
+                    "WARN get_list attempt %d/%d failed: %s; retry in %.1fs"
+                    % (i + 1, retries, e, wait),
+                    flush=True,
+                )
+                time.sleep(wait)
+    raise last_err
 
 
 def pick(rows, symbol):
@@ -321,7 +342,18 @@ def main():
     DATA.mkdir(exist_ok=True)
     now = datetime.now(TZ)
     now_iso = now.strftime("%Y-%m-%d %H:%M:%S")
-    rows = get_list()
+    try:
+        rows = get_list()
+    except Exception as e:
+        # 重試仍失敗：不寫壞資料、不中斷其他 step（vix/imb/kline 仍要 commit）。
+        # 有舊 snapshot 就沿用（下一輪 5 分鐘後自然補）；首跑無舊檔才大聲失敗。
+        if (DATA / "snapshot.json").exists():
+            print(
+                "WARN quote fetch failed after retries (%s); keep previous snapshot" % e,
+                flush=True,
+            )
+            return
+        raise
     d = pick(rows, "WTX&") or (rows[0] if rows else {})
     q = slim(d)
     related = [

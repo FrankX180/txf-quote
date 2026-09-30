@@ -56,6 +56,8 @@ jobs:
         with:
           python-version: "3.12"
       - name: Fetch Yahoo WTX quote and 5-level book
+        # Yahoo 偶發 5xx；腳本內已重試，這裡第二層保險：真的掛掉也不要拖垮其他資料的 commit
+        continue-on-error: true
         run: python scripts/fetch_quote.py
       - name: Fetch Yahoo WTX 1m/5m/15m
         run: python scripts/fetch_minute.py
