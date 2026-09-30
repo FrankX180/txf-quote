@@ -16,6 +16,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -74,8 +75,54 @@ def d1(sql, params=None):
     return r["result"][0]["results"]
 
 
-# ── 富邦：登入換 token（用完即 logout）──
+# ── 富邦：登入換 token（用完即 logout；卡住就砍掉整個進程，連線隨進程關閉）──
+LOGIN_TIMEOUT = 60
+
+
 def fubon_token():
+    """登入＋換 token＋logout 放在執行緒；逾時直接 os._exit，避免殭屍連線佔配額。"""
+    box = {}
+
+    def run():
+        try:
+            box["tok"] = _login_exchange()
+        except BaseException as e:  # noqa: BLE001
+            box["err"] = e
+
+    th = threading.Thread(target=run, daemon=True)
+    th.start()
+    th.join(LOGIN_TIMEOUT)
+    if th.is_alive():
+        print("FAIL fubon login hung >%ds; force exit (sockets close with process)" % LOGIN_TIMEOUT, flush=True)
+        os._exit(3)
+    if "err" in box:
+        raise SystemExit("fubon login FAIL: %s" % box["err"])
+    return box["tok"]
+
+
+def get_token(symbol):
+    """先用 D1 快取的 token（登出後仍有效）；失效才重新登入。登入次數越少越穩。"""
+    d1("CREATE TABLE IF NOT EXISTS fubon_tok (id INTEGER PRIMARY KEY CHECK (id = 1), tok TEXT NOT NULL, ts INTEGER NOT NULL)")
+    row = d1("SELECT tok FROM fubon_tok WHERE id = 1")
+    if row:
+        try:
+            urllib.request.urlopen(urllib.request.Request(MD + "quote/" + symbol, headers={
+                "X-SDK-TOKEN": row[0]["tok"], "User-Agent": "Mozilla/5.0"}), timeout=15).read()
+            print("token: cached OK")
+            return row[0]["tok"]
+        except urllib.error.HTTPError as e:
+            if e.code not in (401, 403):
+                print("token check HTTP", e.code, "-> relogin")
+        except Exception as e:  # noqa: BLE001
+            print("token check err", str(e)[:80], "-> relogin")
+    tok = fubon_token()
+    d1("INSERT INTO fubon_tok (id, tok, ts) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET tok=excluded.tok, ts=excluded.ts",
+       [tok, int(time.time() * 1000)])
+    print("token: fresh login")
+    return tok
+
+
+def _login_exchange():
     pid = os.environ.get("FUBON_ID")
     key = os.environ.get("FUBON_API_KEY")
     cert_b64 = os.environ.get("FUBON_CERT_B64")
@@ -190,13 +237,15 @@ def main():
         print("no Yahoo anchor yet", day_key, sess)
         return
     first_real = min(real)
-    want = [t for t in range(first_real, upto_ms + 1, 60000) if t not in real and t not in final]
+    # 只補「D1 完全沒有」或自己的暫定列；Yahoo 壞列（0 值）不可覆寫，列入會害每輪都登入
+    have = {r["t"] for r in rows}
+    want = [t for t in range(max(first_real, start_ms), upto_ms + 1, 60000) if t not in have or t in prov]
     print("session", day_key, sess, "real", len(real), "final", len(final), "prov", len(prov), "gaps", len(want))
     if not want:
         return
 
     sym = near_month_symbol(day_key, sess)
-    tok = fubon_token()
+    tok = get_token(sym)
     trades = fetch_trades(tok, sym, sess)
     cum = minute_cum(trades, start_ms, upto_ms + 60000)
     print("fubon", sym, "trades", len(trades), "vol", sum(x["size"] for x in trades))
