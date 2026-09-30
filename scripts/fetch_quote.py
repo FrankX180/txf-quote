@@ -34,15 +34,13 @@ def _fetch_once(url: str) -> list:
 
 def get_list(retries: int = 3) -> list:
     """先直連 Yahoo；失敗改走自家 Worker（借 CF IP 繞過 IP 選擇性 5xx）。
-    4xx（除 429）是請求本身有問題，重試無意義，直接換來源。"""
+    4xx（除 429）是請求本身有問題，重試無意義，直接換來源。
+    200 也可能帶空／異常 payload，一律驗證有無 symbol 才收，避免污染 snapshot。"""
     last_err = None
     for src_name, url in (("yahoo", URL), ("worker", WORKER)):
         for i in range(retries):
             try:
                 rows = _fetch_once(url)
-                if src_name != "yahoo":
-                    print("WARN get_list via %s fallback" % src_name, flush=True)
-                return rows
             except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as e:
                 last_err = e
                 code = getattr(e, "code", None)
@@ -56,6 +54,14 @@ def get_list(retries: int = 3) -> list:
                         flush=True,
                     )
                     time.sleep(wait)
+                continue
+            if any(isinstance(x, dict) and x.get("symbol") for x in rows):
+                if src_name != "yahoo":
+                    print("WARN get_list via %s fallback" % src_name, flush=True)
+                return rows
+            last_err = ValueError("invalid quote payload from %s" % src_name)
+            print("WARN get_list[%s] returned empty/invalid payload; try next source" % src_name, flush=True)
+            break  # 換來源
     raise last_err
 
 
