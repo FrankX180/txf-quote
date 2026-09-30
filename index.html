@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.46</div>
+      <div class="ver foot-right">2.47</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2173,7 +2173,8 @@
     function fillImbMinutes(arr) {
       if (!arr || arr.length < 2) return arr || [];
       const step = 60000;
-      const maxFill = 12 * 60 * 60 * 1000;
+      // 只補短暫抽風；長缺口（Worker 停寫）資料已遺失，照實留白，不畫假平台
+      const maxFill = 10 * 60 * 1000;
       const out = [arr[0]];
       for (let i = 1; i < arr.length; i++) {
         const prev = out[out.length - 1];
@@ -3648,14 +3649,24 @@
             x: xAtI(0, b.t + 30000),
             y: zeroY - (b.d / maxAbs) * half,
             d: b.d,
+            t: b.t,
           }));
+          // 長缺口（>10 分，資料已遺失）斷段留白，不連線
+          const IMB_GAP = 10 * 60000;
+          const imbRuns = [];
+          segs.forEach((p, i) => {
+            if (!i || p.t - segs[i - 1].t > IMB_GAP) imbRuns.push([]);
+            imbRuns[imbRuns.length - 1].push(p);
+          });
 
-          function imbArea(seg) {
+          function imbArea() {
             ctx.beginPath();
-            ctx.moveTo(seg[0].x, zeroY);
-            seg.forEach((p) => ctx.lineTo(p.x, p.y));
-            ctx.lineTo(seg[seg.length - 1].x, zeroY);
-            ctx.closePath();
+            imbRuns.forEach((seg) => {
+              ctx.moveTo(seg[0].x, zeroY);
+              seg.forEach((p) => ctx.lineTo(p.x, p.y));
+              ctx.lineTo(seg[seg.length - 1].x, zeroY);
+              ctx.closePath();
+            });
           }
 
           // 正：0 軸以上紅漸層；負：0 軸以下綠漸層（遮罩同主圖）
@@ -3671,7 +3682,7 @@
             ctx.beginPath();
             ctx.rect(padL, imbTop, cw, Math.max(0, zeroY - imbTop));
             ctx.clip();
-            imbArea(segs);
+            imbArea();
             ctx.fillStyle = gUp;
             ctx.fill();
             ctx.restore();
@@ -3680,7 +3691,7 @@
             ctx.beginPath();
             ctx.rect(padL, zeroY, cw, Math.max(0, imbTop + imbH - zeroY));
             ctx.clip();
-            imbArea(segs);
+            imbArea();
             ctx.fillStyle = gDn;
             ctx.fill();
             ctx.restore();
@@ -3691,6 +3702,7 @@
             ctx.lineCap = "round";
             for (let i = 1; i < segs.length; i++) {
               const a = segs[i - 1], b = segs[i];
+              if (b.t - a.t > IMB_GAP) continue;
               if (a.d * b.d < 0 && b.d !== a.d) {
                 const t = (0 - a.d) / (b.d - a.d);
                 const xm = a.x + (b.x - a.x) * t;
@@ -5663,7 +5675,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.46";
+        const VER = "2.47";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
