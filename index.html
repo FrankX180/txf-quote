@@ -617,7 +617,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.43</div>
+      <div class="ver foot-right">2.44</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2175,11 +2175,17 @@
     function recordImb(sk, inn, outv, ts) {
       if (!sk) return;
       if (inn == null || outv == null || isNaN(inn) || isNaN(outv)) return;
+      // 合理性防護：累計內/外盤量必為正。Yahoo 抽風時會回 0／壞值，out=0 會讓差值灌成大負數，
+      // 在副圖畫出負向凹洞（2026-09-30 事故）。寧可少一根，也不畫壞樣本。
+      if (inn <= 0 || outv <= 0) return;
       const t = ts || Date.now();
       const slot = Math.floor(t / 60000) * 60000;
       const d = outv - inn;
       const arr = imbBars[sk] || (imbBars[sk] = []);
       const last = arr.length ? arr[arr.length - 1] : null;
+      // 離群防護：相鄰分鐘的正常差值變化只有數十口；單筆跳動過大＝壞樣本，丟棄。
+      // 非相鄰（跨盤別／資料缺口）不套此限，以免新盤首點被誤丟。
+      if (last && last.t !== slot && slot - last.t <= 120000 && Math.abs(d - (last.d || 0)) > 500) return;
       if (last && last.t === slot) {
         last.d = d;
         last.in = inn;
@@ -5613,7 +5619,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.43";
+        const VER = "2.44";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");

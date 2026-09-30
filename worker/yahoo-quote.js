@@ -876,6 +876,8 @@ async function appendImb(env, rows, nowMs) {
   if (!sess) return { ok: false, reason: "closed" };
   const w = extractWtx(rows);
   if (!w || w.inn == null || w.outv == null) return { ok: false, reason: "no-imb" };
+  // 合理性防護：累計內/外盤量必為正；Yahoo 抽風會回 0／壞值，會讓 d 暴走（副圖凹洞）
+  if (!(w.inn > 0) || !(w.outv > 0)) return { ok: false, reason: "bad-imb" };
   const dayKey = tradingDayKey(nowMs);
   const slot = minuteSlot(nowMs);
   const d = w.outv - w.inn;
