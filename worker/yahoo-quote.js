@@ -1674,6 +1674,16 @@ export default {
       });
     }
 
+    if (kind === "mis") {
+      // 診斷：CF Worker 打期交所 MIS 是否通
+      const m = await fetchMisQuote();
+      return jsonResp({ ok: !!m, mis: m, at: new Date().toISOString() }, 200, {
+        "Cache-Control": "no-store",
+        "CDN-Cache-Control": "no-store",
+        "Cloudflare-CDN-Cache-Control": "no-store",
+      });
+    }
+
     const YH_HDR = {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
       Referer: "https://tw.stock.yahoo.com/",
