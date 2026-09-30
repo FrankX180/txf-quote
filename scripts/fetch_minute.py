@@ -20,10 +20,12 @@ FUBON_HDR = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
     "Referer": "https://fubon-ebrokerdj.fbs.com.tw/",
 }
+# 備源：自家 Cloudflare Worker proxy 同一支 Yahoo chart（CF IP 可過 Yahoo 的 IP 選擇性 5xx）。
+WORKER_1M = "https://wtx.blok.trading/?kind=1m"
 
 
-def get(url: str) -> dict:
-    req = urllib.request.Request(url, headers=HDR)
+def get(url: str, headers=None) -> dict:
+    req = urllib.request.Request(url, headers=headers or HDR)
     with urllib.request.urlopen(req, timeout=25) as r:
         return json.loads(r.read().decode("utf-8", "replace"))
 
@@ -72,12 +74,19 @@ def bars_from_chart(chart: dict):
     return night, day
 
 
+YH_1M = (
+    "https://tw.stock.yahoo.com/_td-stock/api/resource/"
+    f"StockServices.chart;symbol={SYM};period=1m;range=1d"
+)
+
+
 def fetch_1m():
-    url = (
-        "https://tw.stock.yahoo.com/_td-stock/api/resource/"
-        f"StockServices.chart;symbol={SYM};period=1m;range=1d"
-    )
-    j = get(url)
+    """1m 先直連 Yahoo；失敗改走自家 Worker（借 CF IP 繞過 IP 選擇性 5xx）。"""
+    try:
+        j = get(YH_1M)
+    except Exception as e:
+        print("WARN 1m yahoo failed (%s); via worker" % e, flush=True)
+        j = get(WORKER_1M)
     return bars_from_chart(j)
 
 
@@ -238,20 +247,32 @@ def main():
     yn, yd = [], []
     src = []
     if do_y:
-        yn, yd = fetch_1m()
+        try:
+            yn, yd = fetch_1m()
+        except Exception as e:
+            print("WARN 1m fetch failed (%s); keep old" % e, flush=True)
+            yn, yd = [], []
         src.append("yahoo 1m")
     fn, fd = [], []
     if do_f:
-        fn, fd = fetch_fubon_1m()
-        src.append("fubon 1m")
+        try:
+            fn, fd = fetch_fubon_1m()
+            src.append("fubon 1m")
+        except Exception as e:
+            print("WARN fubon 1m failed (%s)" % e, flush=True)
     n1 = fix_future_ts(trim_days(merge_bars(on, yn, fn)))
     d1 = fix_future_ts(trim_days(merge_bars(od, yd, fd)))
     n5, d5, n15, d15 = [], [], [], []
     old = json.loads(OUT.read_text(encoding="utf-8")) if OUT.exists() else {}
     if do_y:
-        n5, d5 = fetch_apac("5m")
-        n15, d15 = fetch_apac("15m")
-        src.append("yahoo 5m 15m")
+        try:
+            n5, d5 = fetch_apac("5m")
+            n15, d15 = fetch_apac("15m")
+            src.append("yahoo 5m 15m")
+        except Exception as e:
+            print("WARN apac 5m/15m failed (%s); keep old" % e, flush=True)
+            n5, d5 = old.get("night_5m") or [], old.get("day_5m") or []
+            n15, d15 = old.get("night_15m") or [], old.get("day_15m") or []
         n5, d5, n15, d15 = (fix_future_ts(x) for x in (n5, d5, n15, d15))
     else:
         n5, d5 = old.get("night_5m") or [], old.get("day_5m") or []
