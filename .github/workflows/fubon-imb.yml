@@ -7,6 +7,10 @@ name: fubon-imb
 on:
   schedule:
     - cron: "*/5 * * * *"
+  # GitHub 排程常延遲／漏跑；update-quote 有 Worker heal 主動 dispatch 保底，跟著它跑最可靠
+  workflow_run:
+    workflows: [update-quote]
+    types: [completed]
   workflow_dispatch:
   push:
     branches: [main, master]
