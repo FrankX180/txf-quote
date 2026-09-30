@@ -26,7 +26,9 @@ import deploy_worker as dw  # noqa: E402  (CF key / D1 id)
 
 TPE = datetime.timezone(datetime.timedelta(hours=8))
 MD = "https://api.fugle.tw/marketdata/v1.0/futopt/intraday/"
-MARK = 59999  # ts = t + MARK → 本腳本補的列
+MARK = 59999  # ts = t + MARK：本腳本補的定稿列（前後都有 Yahoo 錨）
+PROV = 59998  # ts = t + PROV：尾端暫定列（Yahoo 還沒回來，之後重算）
+OWN = (MARK, PROV)
 MONTHS = "ABCDEFGHIJKL"  # 期貨月份碼 A=1月..L=12月
 DRY = "--dry-run" in sys.argv
 
@@ -172,7 +174,7 @@ def main():
             hour=15 if sess == "night" else 8, minute=0 if sess == "night" else 45, tzinfo=TPE)
         end = start + datetime.timedelta(hours=14 if sess == "night" else 5)
     start_ms = int(start.timestamp() * 1000)
-    upto_ms = min(int(end.timestamp() * 1000), (int(now.timestamp() * 1000) // 60000 - 1) * 60000)
+    upto_ms = min(int(end.timestamp() * 1000), (int(now.timestamp() * 1000) // 60000 - 3) * 60000)  # 留 3 分給 Worker 寫入，免誤判缺口
     if upto_ms <= start_ms:
         print("session not started", day_key, sess)
         return
@@ -181,14 +183,15 @@ def main():
         return
 
     rows = d1("SELECT t, d, inn, outv, ts FROM imb WHERE day_key=? AND session=? ORDER BY t", [day_key, sess])
-    real = {r["t"]: r for r in rows if (r["ts"] or 0) % 60000 != MARK and (r["inn"] or 0) > 0 and (r["outv"] or 0) > 0}
-    mine = {r["t"] for r in rows if (r["ts"] or 0) % 60000 == MARK}
+    real = {r["t"]: r for r in rows if (r["ts"] or 0) % 60000 not in OWN and (r["inn"] or 0) > 0 and (r["outv"] or 0) > 0}
+    final = {r["t"] for r in rows if (r["ts"] or 0) % 60000 == MARK}
+    prov = {r["t"] for r in rows if (r["ts"] or 0) % 60000 == PROV}
     if not real:
         print("no Yahoo anchor yet", day_key, sess)
         return
     first_real = min(real)
-    want = [t for t in range(first_real, upto_ms + 1, 60000) if t not in real]
-    print("session", day_key, sess, "real", len(real), "mine", len(mine), "gaps", len(want))
+    want = [t for t in range(first_real, upto_ms + 1, 60000) if t not in real and t not in final]
+    print("session", day_key, sess, "real", len(real), "final", len(final), "prov", len(prov), "gaps", len(want))
     if not want:
         return
 
@@ -213,19 +216,20 @@ def main():
             kin = (N["inn"] - P["inn"]) / (cum[nxt][0] - cum[prev][0]) if cum[nxt][0] > cum[prev][0] else 1.0
             kout = (N["outv"] - P["outv"]) / (cum[nxt][1] - cum[prev][1]) if cum[nxt][1] > cum[prev][1] else 1.0
         else:
-            kin = kout = 1.0  # 尾端缺口（Yahoo 還沒回來）：直接疊富邦增量
-        inn = round(P["inn"] + (cum[t][0] - cum[prev][0]) * kin)
-        outv = round(P["outv"] + (cum[t][1] - cum[prev][1]) * kout)
-        fill.append((t, outv - inn, inn, outv))
-    print("fill", len(fill), "sample", [(datetime.datetime.fromtimestamp(t / 1000, TPE).strftime("%H:%M"), d) for t, d, _, _ in fill[:3]])
+            kin = kout = None  # 尾端缺口（Yahoo 還沒回來）：直接疊富邦增量，標暫定
+        mark = MARK if kin is not None else PROV
+        inn = round(P["inn"] + (cum[t][0] - cum[prev][0]) * (kin or 1.0))
+        outv = round(P["outv"] + (cum[t][1] - cum[prev][1]) * (kout or 1.0))
+        fill.append((t, outv - inn, inn, outv, mark))
+    print("fill", len(fill), "sample", [(datetime.datetime.fromtimestamp(t / 1000, TPE).strftime("%H:%M"), d) for t, d, _, _, _ in fill[:3]])
     if DRY or not fill:
         print("DRY-RUN" if DRY else "nothing")
         return
     for i in range(0, len(fill), 25):
-        vals = ",".join("('%s','%s',%d,%d,%d,%d,%d)" % (day_key, sess, t, d, a, b, t + MARK) for t, d, a, b in fill[i:i + 25])
+        vals = ",".join("('%s','%s',%d,%d,%d,%d,%d)" % (day_key, sess, t, d, a, b, t + m) for t, d, a, b, m in fill[i:i + 25])
         d1("INSERT INTO imb (day_key, session, t, d, inn, outv, ts) VALUES " + vals +
            " ON CONFLICT(day_key, session, t) DO UPDATE SET d=excluded.d, inn=excluded.inn, outv=excluded.outv, ts=excluded.ts"
-           " WHERE imb.ts % 60000 = " + str(MARK))
+           " WHERE imb.ts % 60000 IN (%d, %d)" % OWN)
     print("OK upserted", len(fill))
 
 
