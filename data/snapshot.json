@@ -1,5 +1,5 @@
 {
-  "fetchedAt": "2026-10-02 09:29:08",
+  "fetchedAt": "2026-10-02 09:40:36",
   "source": "yahoo tw.stock StockServices.stockList WTX& WCDF& WCCF&",
   "session": "day",
   "night": {
@@ -46,7 +46,7 @@
     "DispEName": "WTX&",
     "CLastPrice": "48475",
     "COpenPrice": "48552",
-    "CHighPrice": "48679",
+    "CHighPrice": "48691",
     "CLowPrice": "48480",
     "CRefPrice": "48698",
     "CDiff": "-223",
@@ -54,44 +54,44 @@
     "CTotalVolume": "37493",
     "CDate": "20261001",
     "CTime": "045959",
-    "inMarket": "24939",
-    "outMarket": "22549",
+    "inMarket": "26412",
+    "outMarket": "23603",
     "marketStatus": "open",
-    "CBidPrice1": "48602",
+    "CBidPrice1": "48533",
     "CBidSize1": "1",
-    "CAskPrice1": "48606",
-    "CAskSize1": "1",
-    "CBidPrice2": "48601",
-    "CBidSize2": "3",
-    "CAskPrice2": "48607",
-    "CAskSize2": "2",
-    "CBidPrice3": "48600",
-    "CBidSize3": "10",
-    "CAskPrice3": "48608",
-    "CAskSize3": "2",
-    "CBidPrice4": "48599",
+    "CAskPrice1": "48538",
+    "CAskSize1": "2",
+    "CBidPrice2": "48532",
+    "CBidSize2": "1",
+    "CAskPrice2": "48539",
+    "CAskSize2": "3",
+    "CBidPrice3": "48531",
+    "CBidSize3": "2",
+    "CAskPrice3": "48540",
+    "CAskSize3": "4",
+    "CBidPrice4": "48530",
     "CBidSize4": "3",
-    "CAskPrice4": "48609",
-    "CAskSize4": "3",
-    "CBidPrice5": "48598",
-    "CBidSize5": "6",
-    "CAskPrice5": "48610",
-    "CAskSize5": "1"
+    "CAskPrice4": "48541",
+    "CAskSize4": "1",
+    "CBidPrice5": "48529",
+    "CBidSize5": "2",
+    "CAskPrice5": "48542",
+    "CAskSize5": "4"
   },
   "related": [
     {
       "symbol": "WCDF&",
       "name": "台積電期貨近一",
-      "last": "2520",
-      "diff": "-10",
-      "rate": "-0.40"
+      "last": "2515",
+      "diff": "-15",
+      "rate": "-0.59"
     },
     {
       "symbol": "WCCF&",
       "name": "聯電期貨近一",
       "last": "160",
-      "diff": "-3",
-      "rate": "-1.84"
+      "diff": "-4",
+      "rate": "-2.15"
     }
   ]
 }
