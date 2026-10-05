@@ -1,5 +1,5 @@
 {
-  "fetchedAt": "2026-10-05 09:52:34",
+  "fetchedAt": "2026-10-05 10:04:34",
   "source": "yahoo tw.stock StockServices.stockList WTX& WCDF& WCCF&",
   "session": "day",
   "night": {
@@ -46,7 +46,7 @@
     "DispEName": "WTX&",
     "CLastPrice": "49346",
     "COpenPrice": "49470",
-    "CHighPrice": "50022",
+    "CHighPrice": "50029",
     "CLowPrice": "49461",
     "CRefPrice": "48669",
     "CDiff": "677",
@@ -54,44 +54,44 @@
     "CTotalVolume": "32209",
     "CDate": "20261002",
     "CTime": "045958",
-    "inMarket": "25270",
-    "outMarket": "26690",
+    "inMarket": "25957",
+    "outMarket": "27257",
     "marketStatus": "open",
-    "CBidPrice1": "49998",
-    "CBidSize1": "2",
-    "CAskPrice1": "50002",
-    "CAskSize1": "3",
-    "CBidPrice2": "49996",
-    "CBidSize2": "2",
-    "CAskPrice2": "50003",
-    "CAskSize2": "4",
-    "CBidPrice3": "49995",
-    "CBidSize3": "1",
-    "CAskPrice3": "50004",
-    "CAskSize3": "4",
-    "CBidPrice4": "49993",
-    "CBidSize4": "2",
-    "CAskPrice4": "50005",
-    "CAskSize4": "7",
-    "CBidPrice5": "49992",
-    "CBidSize5": "3",
-    "CAskPrice5": "50006",
-    "CAskSize5": "1"
+    "CBidPrice1": "49971",
+    "CBidSize1": "3",
+    "CAskPrice1": "49976",
+    "CAskSize1": "1",
+    "CBidPrice2": "49970",
+    "CBidSize2": "4",
+    "CAskPrice2": "49977",
+    "CAskSize2": "2",
+    "CBidPrice3": "49969",
+    "CBidSize3": "4",
+    "CAskPrice3": "49978",
+    "CAskSize3": "2",
+    "CBidPrice4": "49968",
+    "CBidSize4": "4",
+    "CAskPrice4": "49979",
+    "CAskSize4": "2",
+    "CBidPrice5": "49967",
+    "CBidSize5": "1",
+    "CAskPrice5": "49980",
+    "CAskSize5": "4"
   },
   "related": [
     {
       "symbol": "WCDF&",
       "name": "台積電期貨近一",
-      "last": "2595",
-      "diff": "75",
-      "rate": "2.98"
+      "last": "2590",
+      "diff": "70",
+      "rate": "2.78"
     },
     {
       "symbol": "WCCF&",
       "name": "聯電期貨近一",
-      "last": "156",
-      "diff": "-6",
-      "rate": "-3.69"
+      "last": "154",
+      "diff": "-8",
+      "rate": "-4.92"
     }
   ]
 }
