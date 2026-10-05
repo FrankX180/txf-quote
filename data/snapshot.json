@@ -1,5 +1,5 @@
 {
-  "fetchedAt": "2026-10-05 08:57:05",
+  "fetchedAt": "2026-10-05 09:07:36",
   "source": "yahoo tw.stock StockServices.stockList WTX& WCDF& WCCF&",
   "session": "day",
   "night": {
@@ -46,7 +46,7 @@
     "DispEName": "WTX&",
     "CLastPrice": "49346",
     "COpenPrice": "49470",
-    "CHighPrice": "49562",
+    "CHighPrice": "49663",
     "CLowPrice": "49461",
     "CRefPrice": "48669",
     "CDiff": "677",
@@ -54,44 +54,44 @@
     "CTotalVolume": "32209",
     "CDate": "20261002",
     "CTime": "045958",
-    "inMarket": "17081",
-    "outMarket": "17815",
-    "marketStatus": "preopen",
-    "CBidPrice1": "49616",
-    "CBidSize1": "1",
-    "CAskPrice1": "49620",
+    "inMarket": "19089",
+    "outMarket": "20771",
+    "marketStatus": "open",
+    "CBidPrice1": "49960",
+    "CBidSize1": "5",
+    "CAskPrice1": "49964",
     "CAskSize1": "2",
-    "CBidPrice2": "49614",
+    "CBidPrice2": "49959",
     "CBidSize2": "2",
-    "CAskPrice2": "49621",
-    "CAskSize2": "3",
-    "CBidPrice3": "49613",
-    "CBidSize3": "5",
-    "CAskPrice3": "49622",
-    "CAskSize3": "1",
-    "CBidPrice4": "49611",
-    "CBidSize4": "1",
-    "CAskPrice4": "49624",
-    "CAskSize4": "3",
-    "CBidPrice5": "49610",
+    "CAskPrice2": "49965",
+    "CAskSize2": "10",
+    "CBidPrice3": "49957",
+    "CBidSize3": "2",
+    "CAskPrice3": "49966",
+    "CAskSize3": "4",
+    "CBidPrice4": "49955",
+    "CBidSize4": "2",
+    "CAskPrice4": "49967",
+    "CAskSize4": "5",
+    "CBidPrice5": "49954",
     "CBidSize5": "3",
-    "CAskPrice5": "49625",
-    "CAskSize5": "8"
+    "CAskPrice5": "49968",
+    "CAskSize5": "4"
   },
   "related": [
     {
       "symbol": "WCDF&",
       "name": "台積電期貨近一",
-      "last": "2575",
-      "diff": "55",
-      "rate": "2.18"
+      "last": "2590",
+      "diff": "70",
+      "rate": "2.78"
     },
     {
       "symbol": "WCCF&",
       "name": "聯電期貨近一",
-      "last": "165",
-      "diff": "2",
-      "rate": "1.54"
+      "last": "162",
+      "diff": "0",
+      "rate": "-0.31"
     }
   ]
 }
