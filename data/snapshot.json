@@ -1,5 +1,5 @@
 {
-  "fetchedAt": "2026-10-05 09:07:36",
+  "fetchedAt": "2026-10-05 09:17:31",
   "source": "yahoo tw.stock StockServices.stockList WTX& WCDF& WCCF&",
   "session": "day",
   "night": {
@@ -46,7 +46,7 @@
     "DispEName": "WTX&",
     "CLastPrice": "49346",
     "COpenPrice": "49470",
-    "CHighPrice": "49663",
+    "CHighPrice": "49991",
     "CLowPrice": "49461",
     "CRefPrice": "48669",
     "CDiff": "677",
@@ -54,44 +54,44 @@
     "CTotalVolume": "32209",
     "CDate": "20261002",
     "CTime": "045958",
-    "inMarket": "19089",
-    "outMarket": "20771",
+    "inMarket": "20908",
+    "outMarket": "22408",
     "marketStatus": "open",
-    "CBidPrice1": "49960",
-    "CBidSize1": "5",
-    "CAskPrice1": "49964",
+    "CBidPrice1": "49913",
+    "CBidSize1": "2",
+    "CAskPrice1": "49919",
     "CAskSize1": "2",
-    "CBidPrice2": "49959",
-    "CBidSize2": "2",
-    "CAskPrice2": "49965",
-    "CAskSize2": "10",
-    "CBidPrice3": "49957",
+    "CBidPrice2": "49912",
+    "CBidSize2": "3",
+    "CAskPrice2": "49920",
+    "CAskSize2": "2",
+    "CBidPrice3": "49911",
     "CBidSize3": "2",
-    "CAskPrice3": "49966",
-    "CAskSize3": "4",
-    "CBidPrice4": "49955",
-    "CBidSize4": "2",
-    "CAskPrice4": "49967",
-    "CAskSize4": "5",
-    "CBidPrice5": "49954",
-    "CBidSize5": "3",
-    "CAskPrice5": "49968",
-    "CAskSize5": "4"
+    "CAskPrice3": "49921",
+    "CAskSize3": "3",
+    "CBidPrice4": "49910",
+    "CBidSize4": "3",
+    "CAskPrice4": "49922",
+    "CAskSize4": "2",
+    "CBidPrice5": "49909",
+    "CBidSize5": "2",
+    "CAskPrice5": "49923",
+    "CAskSize5": "2"
   },
   "related": [
     {
       "symbol": "WCDF&",
       "name": "台積電期貨近一",
-      "last": "2590",
-      "diff": "70",
-      "rate": "2.78"
+      "last": "2585",
+      "diff": "65",
+      "rate": "2.58"
     },
     {
       "symbol": "WCCF&",
       "name": "聯電期貨近一",
-      "last": "162",
-      "diff": "0",
-      "rate": "-0.31"
+      "last": "160",
+      "diff": "-3",
+      "rate": "-1.85"
     }
   ]
 }
