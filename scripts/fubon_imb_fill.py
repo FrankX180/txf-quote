@@ -278,7 +278,7 @@ def main():
         vals = ",".join("('%s','%s',%d,%d,%d,%d,%d)" % (day_key, sess, t, d, a, b, t + m) for t, d, a, b, m in fill[i:i + 25])
         d1("INSERT INTO imb (day_key, session, t, d, inn, outv, ts) VALUES " + vals +
            " ON CONFLICT(day_key, session, t) DO UPDATE SET d=excluded.d, inn=excluded.inn, outv=excluded.outv, ts=excluded.ts"
-           " WHERE imb.ts % 60000 IN (%d, %d)" % OWN)
+           " WHERE imb.ts %% 60000 IN (%d, %d)" % OWN)
     print("OK upserted", len(fill))
 
 
