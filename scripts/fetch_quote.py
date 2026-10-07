@@ -137,6 +137,16 @@ def apply_mis(rows, sess):
         w["regularMarketPreviousClose"] = {"raw": val("CRefPrice")}
     if val("CTotalVolume") is not None:
         w["volume"] = val("CTotalVolume")
+    # MIS 官方開高低＝當盤純值（實測：夜盤 MT=1 亦為當盤，日期 CDate＝當前交易日）。
+    # 直接蓋 slim()；下游 ohlc_from_kline 只在 MIS 無值時 fallback。
+    for mis_key, slim_key in (("COpenPrice", "misOpen"), ("CHighPrice", "misHigh"), ("CLowPrice", "misLow")):
+        if val(mis_key) is not None:
+            w[slim_key] = val(mis_key)
+    # 漲跌停（前端未接，先落地備用）
+    if val("CCeilPrice") is not None:
+        w["misCeil"] = val("CCeilPrice")
+    if val("CFloorPrice") is not None:
+        w["misFloor"] = val("CFloorPrice")
     dt, tt = str(mis.get("CDate") or ""), str(mis.get("CTime") or "")
     if len(dt) >= 8 and len(tt) >= 6:
         w["regularMarketTime"] = "%s-%s-%sT%s:%s:%s+08:00" % (
@@ -252,10 +262,13 @@ def slim(d):
         "DispCName": d.get("symbolName") or "台指期近一",
         "DispEName": "WTX&",
         "CLastPrice": fmt_num(last),
-        # 奇摩 regularMarketOpen/High/Low 是混盤，勿寫入；後續用 1 分 K 覆寫
-        "COpenPrice": "",
-        "CHighPrice": "",
-        "CLowPrice": "",
+        # 奇摩 regularMarketOpen/High/Low 是混盤，勿寫入；由 apply_mis 蓋入官方當盤值，
+        # 或（MIS 無值時）由 ohlc_from_kline 以 1 分 K 回填。
+        "COpenPrice": fmt_num(d.get("misOpen")),
+        "CHighPrice": fmt_num(d.get("misHigh")),
+        "CLowPrice": fmt_num(d.get("misLow")),
+        "CCeilPrice": fmt_num(d.get("misCeil")),
+        "CFloorPrice": fmt_num(d.get("misFloor")),
         "CRefPrice": fmt_num(ref),
         "CDiff": fmt_num(diff),
         "CDiffRate": "" if rate is None else ("%.2f" % rate),
@@ -414,9 +427,13 @@ def ohlc_from_kline(base_q, sess="day"):
         lows = [b.get("low") for b in part if b.get("low") is not None]
         if not highs or not lows:
             return out
-        out["COpenPrice"] = fmt_num(part[0].get("open"))
-        out["CHighPrice"] = fmt_num(max(highs))
-        out["CLowPrice"] = fmt_num(min(lows))
+        # MIS 官方開高低已有值就不覆寫（MIS 無值才用 K 線 fallback）
+        if not out.get("COpenPrice"):
+            out["COpenPrice"] = fmt_num(part[0].get("open"))
+        if not out.get("CHighPrice"):
+            out["CHighPrice"] = fmt_num(max(highs))
+        if not out.get("CLowPrice"):
+            out["CLowPrice"] = fmt_num(min(lows))
         # 日盤收盤後才覆寫 last；盤中保留報價 last
         if sess == "day" and base_q.get("CLastPrice") in (None, ""):
             out["CLastPrice"] = fmt_num(part[-1].get("close"))
