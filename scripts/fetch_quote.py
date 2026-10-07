@@ -104,6 +104,8 @@ def _mis_quote(sess):
             )
             best = next((x for x in cand if x.get("CLastPrice")), None)
             if best:
+                best["_mt"] = m
+                best["_want"] = want
                 return best
         except Exception as e:  # noqa: BLE001
             print("WARN mis MT%s %s" % (m, e), flush=True)
@@ -137,16 +139,17 @@ def apply_mis(rows, sess):
         w["regularMarketPreviousClose"] = {"raw": val("CRefPrice")}
     if val("CTotalVolume") is not None:
         w["volume"] = val("CTotalVolume")
-    # MIS 官方開高低＝當盤純值（實測：夜盤 MT=1 亦為當盤，日期 CDate＝當前交易日）。
-    # 直接蓋 slim()；下游 ohlc_from_kline 只在 MIS 無值時 fallback。
-    for mis_key, slim_key in (("COpenPrice", "misOpen"), ("CHighPrice", "misHigh"), ("CLowPrice", "misLow")):
-        if val(mis_key) is not None:
-            w[slim_key] = val(mis_key)
-    # 漲跌停（前端未接，先落地備用）
-    if val("CCeilPrice") is not None:
-        w["misCeil"] = val("CCeilPrice")
-    if val("CFloorPrice") is not None:
-        w["misFloor"] = val("CFloorPrice")
+    # MIS 官方開高低／漲跌停＝當盤值：僅在「本次查詢盤別＝目標盤別」時採用，
+    # 避免休市／日收後 fallback 取到他盤值污染當盤 OHLC（下游 ohlc_from_kline 會回填）。
+    if sess in ("day", "night") and mis.get("_mt") == mis.get("_want"):
+        for mis_key, slim_key in (("COpenPrice", "misOpen"), ("CHighPrice", "misHigh"), ("CLowPrice", "misLow")):
+            if val(mis_key) is not None:
+                w[slim_key] = val(mis_key)
+        # 漲跌停（前端未接，先落地備用）
+        if val("CCeilPrice") is not None:
+            w["misCeil"] = val("CCeilPrice")
+        if val("CFloorPrice") is not None:
+            w["misFloor"] = val("CFloorPrice")
     dt, tt = str(mis.get("CDate") or ""), str(mis.get("CTime") or "")
     if len(dt) >= 8 and len(tt) >= 6:
         w["regularMarketTime"] = "%s-%s-%sT%s:%s:%s+08:00" % (
