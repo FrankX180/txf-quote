@@ -1,5 +1,5 @@
 {
-  "fetchedAt": "2026-10-08 10:51:23",
+  "fetchedAt": "2026-10-08 10:52:13",
   "source": "yahoo tw.stock StockServices.stockList WTX& WCDF& WCCF&",
   "session": "day",
   "night": {
@@ -58,29 +58,29 @@
     "CTotalVolume": "29250",
     "CDate": "20261007",
     "CTime": "045957",
-    "inMarket": "23847",
-    "outMarket": "23194",
+    "inMarket": "23851",
+    "outMarket": "23203",
     "marketStatus": "open",
-    "CBidPrice1": "49604",
+    "CBidPrice1": "49608",
     "CBidSize1": "1",
-    "CAskPrice1": "49609",
+    "CAskPrice1": "49612",
     "CAskSize1": "2",
-    "CBidPrice2": "49603",
+    "CBidPrice2": "49607",
     "CBidSize2": "1",
-    "CAskPrice2": "49610",
-    "CAskSize2": "3",
-    "CBidPrice3": "49602",
+    "CAskPrice2": "49613",
+    "CAskSize2": "1",
+    "CBidPrice3": "49606",
     "CBidSize3": "3",
-    "CAskPrice3": "49611",
+    "CAskPrice3": "49614",
     "CAskSize3": "3",
-    "CBidPrice4": "49601",
-    "CBidSize4": "1",
-    "CAskPrice4": "49612",
-    "CAskSize4": "4",
-    "CBidPrice5": "49600",
-    "CBidSize5": "9",
-    "CAskPrice5": "49613",
-    "CAskSize5": "3"
+    "CBidPrice4": "49604",
+    "CBidSize4": "2",
+    "CAskPrice4": "49615",
+    "CAskSize4": "2",
+    "CBidPrice5": "49603",
+    "CBidSize5": "1",
+    "CAskPrice5": "49616",
+    "CAskSize5": "5"
   },
   "related": [
     {
@@ -93,9 +93,9 @@
     {
       "symbol": "WCCF&",
       "name": "聯電期貨近一",
-      "last": "149",
-      "diff": "0",
-      "rate": "-0.33"
+      "last": "148",
+      "diff": "-1",
+      "rate": "-0.67"
     }
   ]
 }
