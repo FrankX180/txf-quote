@@ -402,9 +402,16 @@ def sess_now(dt=None):
         return None
     if wd == 5 and h >= 510:
         return None
+    # 凌晨屬前一營業日夜盤：假日看前一日。其餘看當日（對齊 Worker sessionOf）。
+    if h < 510:
+        if holiday_closed(d):
+            return None
+        return "night"
+    if holiday_closed(d):
+        return None
     if 845 <= h <= 1345:
         return "day"
-    if h >= 1455 or h < 510:
+    if h >= 1458:
         return "night"
     return None
 

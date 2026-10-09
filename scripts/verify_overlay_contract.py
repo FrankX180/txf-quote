@@ -100,6 +100,10 @@ check("night-after-midnight source uses trade key",
       fq.yahoo_source_day_key(night_row))
 check("night-after-midnight book_fresh=True",
       fq.book_fresh(night_row, night_tail) is True)
+check("holiday 15:00 sess_now is None",
+      fq.sess_now(holiday) is None, fq.sess_now(holiday))
+check("holiday 00:30 sess_now is night",
+      fq.sess_now(night_tail) == "night", fq.sess_now(night_tail))
 
 print()
 if _fails:
