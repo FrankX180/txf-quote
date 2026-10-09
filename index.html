@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">2.63</div>
+      <div class="ver foot-right" id="verFoot">2.64</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -5352,7 +5352,6 @@
 
     async function load() {
       await loadHolidays(); // 先載入休市日 SSOT，再判定今日是否交易日
-      await loadTwnRatio(); // 自建 ratio/rateAdj（GAS 備援）
 
       // 台灣休市日優先拉取富台指資料以供走勢圖與頂部開盤價估算
       if (isTaiwanHolidayNow()) {
@@ -6000,7 +5999,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.63";
+        const VER = "2.64";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {

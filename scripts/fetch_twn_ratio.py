@@ -92,16 +92,19 @@ def main():
             out["twnPx"] = twn
             out["ratioSession"] = sess
             out["ratioAt"] = now_iso
+            out.pop("seed", None)  # 真值落地後清掉接續標記
             print("OK ratio=%.6f tx=%.2f twn=%.2f sess=%s" % (out["ratio"], tx, twn, sess), flush=True)
         else:
             print("WARN ratio skip (tx=%s twn=%s)" % (tx, twn), flush=True)
     else:
         print("INFO ratio frozen (sess=%s holiday=%s)" % (sess or "-", holiday_closed(now)), flush=True)
 
-    # --- 台指前日結算（供頁面算漲跌）；取 snapshot 日盤收，缺就沿用 ---
+    # --- 台指前日結算（供頁面算漲跌）＝日盤收盤 ---
+    # 正確來源＝夜盤參考價 night.CRefPrice（＝日盤收盤；實測 49357，與期交所/GAS 一致）；
+    # 退回 day.CLastPrice（1 分收，可能差數點）。
     try:
         snap = json.loads((DATA / "snapshot.json").read_text(encoding="utf-8"))
-        dc = (snap.get("day") or {}).get("CLastPrice")
+        dc = (snap.get("night") or {}).get("CRefPrice") or (snap.get("day") or {}).get("CLastPrice")
         if dc:
             out["dayClose"] = int(float(dc))
     except Exception:

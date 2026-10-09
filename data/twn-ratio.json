@@ -1,7 +1,13 @@
 {
-  "updatedAt": "2026-10-10 00:42:29",
-  "liveRate": 31.957,
+  "updatedAt": "2026-10-10 01:06:14",
+  "liveRate": 31.949,
   "baseRate": 31.932,
-  "rateAdj": 1.000782914,
-  "dayClose": 49349
+  "rateAdj": 1.000532381,
+  "dayClose": 49357,
+  "ratio": 11.4128,
+  "txPx": 48705,
+  "twnPx": 4271,
+  "ratioSession": "gas-lastLive",
+  "ratioAt": "2026-10-10 01:06:14",
+  "seed": "GAS 退場前接續值（ratioUsed=11.4128 / dayClose=49357）；週一 overlap 由自建同刻 ratio 覆寫"
 }

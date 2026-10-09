@@ -1586,20 +1586,11 @@ async function handleTwnQuote(request, env, ctx) {
   if (cached) return cached;
 
   try {
-    // 1. 抓取即時 USD/TWD 與富台基準倍數及即時價 (Google Apps Script 超高可用，平均 300ms)
-    let gasData = null;
-    try {
-      const gasUrl = "https://script.google.com/macros/s/AKfycbyX-wGspxXlgk9pcYGKH6PD1AElWRny-4ZP1XFx1MCSpQwz4hexET3x7AS1034ea2kAzQ/exec";
-      const gasResp = await fetch(gasUrl, {
-        headers: { "User-Agent": "Mozilla/5.0" },
-        cf: { cacheTtl: 5 }
-      });
-      if (gasResp.ok) gasData = await gasResp.json().catch(() => null);
-    } catch (_) {}
-
-    // 2. 抓取 HiStock 分時序列 (若超時則平滑降級)
+    // 富台價與換算係數已全面自建：分時序列走 HiStock，ratio/rateAdj/dayClose 走 data/twn-ratio.json（前端自讀）。
+    // 原本等的那支 GAS 實測 3.4~65s（極不穩），是首屏卡 10 秒的元凶 → 已自關鍵路徑移除；gas 固定 null 供前端回退鏈。
+    // 抓取 HiStock 分時序列 (若超時則平滑降級)
     let points = [];
-    let latestPrice = (gasData && gasData.rtxNow) || 0;
+    let latestPrice = 0;
     let latestTs = Date.now();
 
     try {
@@ -1632,7 +1623,7 @@ async function handleTwnQuote(request, env, ctx) {
       latestPrice: latestPrice,
       latestTs: latestTs,
       points: points,
-      gas: gasData || null,
+      gas: null, // GAS 已退場（實測 3.4~65s）；ratio/rateAdj/dayClose 走 data/twn-ratio.json
       updatedAt: new Date().toISOString(),
     };
 
