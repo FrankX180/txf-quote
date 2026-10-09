@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.57</div>
+      <div class="ver foot-right">2.58</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2613,19 +2613,17 @@
         if (b.length >= 2) return b;
         return take(m15);
       }
-      // 2 日 → 5m；3～5 日 → 15m
-      // 有 5m/15m 也要併更細棒：GitHub 5m 常停在日收 13:45，夜盤 live 在 1m
-      const want5 = n === 2;
-      const primary = want5 ? m5 : m15;
-      const stepMs = want5 ? 5 * 60 * 1000 : 15 * 60 * 1000;
+      // 2~5 日：统一 5m；5m 不足再退 15m，最后退 1m
+      const stepMs = 5 * 60 * 1000;
+      const primary = m5;
       const out = [];
       keep.slice().reverse().forEach((d) => {
         let rows = primary.filter((b) => dateKey(b.date) === d);
-        const fine = (want5 ? m1 : m5.concat(m1)).filter((b) => dateKey(b.date) === d);
+        const fine = m1.filter((b) => dateKey(b.date) === d);
         if (fine.length) {
           rows = mergeBarLists(rows, resampleBars(fine, stepMs));
         }
-        if (rows.length < 2 && want5) {
+        if (rows.length < 2) {
           rows = m15.filter((b) => dateKey(b.date) === d);
         }
         rows.forEach((b) => out.push(b));
@@ -2636,10 +2634,8 @@
       }
       const fb = take(primary);
       if (fb.length >= 2) return fb;
-      if (want5) {
-        const b15 = take(m15);
-        if (b15.length >= 2) return b15;
-      }
+      const b15 = take(m15);
+      if (b15.length >= 2) return b15;
       return take(m1);
     }
 
@@ -2723,8 +2719,8 @@
     function chartStepMs() {
       const n = daySpan < 1 ? 1 : daySpan;
       if (n <= 1) return 60000;
-      if (n === 2) return 5 * 60000;
-      return 15 * 60000;
+      // 多日統一 5 分（2 日原為 5 分、3~5 日原為 15 分）；與富台重採樣一致
+      return 5 * 60000;
     }
     // 同盤內缺棒：用前收持平補點，避免走勢破圖；跨盤（午休／日夜）不補
     function fillMinutes(bars, stepOverride) {
@@ -3075,13 +3071,39 @@
           pts = pts.filter((p) => p.time >= openMs - 60000 && barKindAt(p.time) === sk);
         }
       }
-      // 多日＋休市：台指歷史尾巴接上富台（SGX 有盤）走勢，填補放假時段
-      if (daySpan >= 2 && twnAppend && twnAppend.length) {
-        const lastHistT = pts.length ? pts[pts.length - 1].time : 0;
-        const tail = twnAppend.filter((p) => p.time > lastHistT);
-        if (tail.length >= 2) pts = pts.concat(tail);
+      // 多日＋休市：台指歷史濾掉休市殘值，再將富台（SGX 有盤）重採樣後接在尾巴
+      if (daySpan >= 2) {
+        // 台指歷史：移除落在休市時段的點（如假日盤後殘值），避免與富台接成跳空
+        pts = pts.filter((p) => sessKindAt(p.time) !== "closed");
+        if (twnAppend && twnAppend.length) {
+          const stepMs = 5 * 60000;
+          const lastHistT = pts.length ? pts[pts.length - 1].time : 0;
+          const tail = resampleTwnTail(twnAppend.filter((p) => p.time > lastHistT), stepMs);
+          if (tail.length >= 2) pts = pts.concat(tail);
+        }
       }
       return pts;
+    }
+
+    // 富台段多日重採樣：對齊台指歷史粒度（2日＝5分、3~5日＝15分），密度才一致
+    function resampleTwnTail(arr, stepMs) {
+      const out = [];
+      let cur = null;
+      (arr || []).forEach((p) => {
+        const slot = Math.floor(p.time / stepMs) * stepMs;
+        if (!cur || cur.slot !== slot) {
+          if (cur) out.push(cur.pt);
+          cur = { slot, pt: Object.assign({}, p) };
+        } else {
+          cur.pt.px = p.px;
+          cur.pt.close = p.px;
+          cur.pt.high = Math.max(cur.pt.high != null ? cur.pt.high : p.px, p.px);
+          cur.pt.low = Math.min(cur.pt.low != null ? cur.pt.low : p.px, p.px);
+          cur.pt.time = p.time;
+        }
+      });
+      if (cur) out.push(cur.pt);
+      return out;
     }
 
     function parseYmd(ymd) {
@@ -5923,7 +5945,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.57";
+        const VER = "2.58";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
