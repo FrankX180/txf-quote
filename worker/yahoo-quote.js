@@ -276,9 +276,37 @@ function extractWtx(rows) {
   return { inn, outv, px: rawNum(w.price) };
 }
 
-/** 夜盤 Yahoo 常標 marketStatus=close，不可當颱風假。有內外盤或有量即視為在交易。 */
-function looksLikeLiveQuote(rawW) {
+/** Yahoo regularMarketTime → 台北曆日 YYYYMMDD；解析不到回 ""。 */
+function yahooSourceDayKey(rawW) {
+  if (!rawW) return "";
+  const t = rawW.regularMarketTime;
+  let ms = 0;
+  if (typeof t === "number" && t > 1e9) {
+    ms = t < 1e12 ? t * 1000 : t;
+  } else if (typeof t === "string" && t) {
+    ms = Date.parse(t);
+  } else if (t && typeof t === "object") {
+    const raw = t.raw != null ? t.raw : t.fmt;
+    if (typeof raw === "number" && raw > 1e9) ms = raw < 1e12 ? raw * 1000 : raw;
+    else if (typeof raw === "string") ms = Date.parse(raw);
+  }
+  if (!ms || !Number.isFinite(ms)) return "";
+  const p = twParts(ms);
+  return p.y + p.mo + p.d;
+}
+
+/** 來源日必須等於今日交易鍵，才准把 Yahoo 五檔／內外盤當 live。 */
+function yahooBookFresh(rawW, nowMs) {
   if (!rawW) return false;
+  const src = yahooSourceDayKey(rawW);
+  return !!src && src === tradingDayKey(nowMs);
+}
+
+/** 夜盤 Yahoo 常標 marketStatus=close，不可當颱風假。有內外盤或有量即視為在交易。
+ *  來源日≠今日交易鍵（假日殘值）一律不當 live。 */
+function looksLikeLiveQuote(rawW, nowMs) {
+  if (!rawW) return false;
+  if (!yahooBookFresh(rawW, nowMs != null ? nowMs : Date.now())) return false;
   const w = extractWtx([rawW]);
   if (w && w.inn > 0 && w.outv > 0) return true;
   const px = rawNum(rawW.price);
@@ -899,6 +927,10 @@ async function appendImb(env, rows, nowMs) {
   if (!env.IMB_DB) return { ok: false, reason: "no-db" };
   const sess = sessionOf(nowMs);
   if (!sess) return { ok: false, reason: "closed" };
+  const rawW = Array.isArray(rows) && rows.length
+    ? (rows.find((x) => x && x.symbol === "WTX&") || rows[0])
+    : null;
+  if (!yahooBookFresh(rawW, nowMs)) return { ok: false, reason: "stale-source-day" };
   const w = extractWtx(rows);
   const dayKey = tradingDayKey(nowMs);
   const slot = minuteSlot(nowMs);
@@ -1025,7 +1057,7 @@ async function pollAndStore(env, opts) {
       const rawW = Array.isArray(rows) && rows.length
         ? (rows.find((x) => x && x.symbol === "WTX&") || rows[0])
         : null;
-      if (looksLikeLiveQuote(rawW)) {
+      if (looksLikeLiveQuote(rawW, nowMs)) {
         _dormantUntil = 0;
       } else if (nowMs < _dormantUntil) {
         return { skipped: true, reason: "dormant-holiday" };
@@ -1855,11 +1887,8 @@ export default {
       if (mis.diff != null) w.change = num(mis.diff);
       if (mis.rate != null) w.changePercent = mis.rate.toFixed(2) + "%";
       if (mis.ref != null) w.regularMarketPreviousClose = num(mis.ref);
-      // 盤別防護：僅「查詢盤別＝目標盤別」時才覆蓋當盤 OHLC（對齊 PY overlay 契約）
-      const mtOk = mis.mt === mis.want;
-      if (mtOk && mis.open != null) w.regularMarketOpen = num(mis.open);
-      if (mtOk && mis.high != null) w.regularMarketDayHigh = num(mis.high);
-      if (mtOk && mis.low != null) w.regularMarketDayLow = num(mis.low);
+      // 盤別防護：成交／量／時間仍覆蓋。OHLC 不寫 regularMarketOpen/High/Low
+      //（前端不讀這三欄，改由 1 分 K patchQuoteOHLC；見報價覆蓋契約 §3）。
       if (mis.vol != null) w.volume = String(mis.vol);
       const iso = misTimeIso(mis.date, mis.time);
       if (iso) w.regularMarketTime = iso;

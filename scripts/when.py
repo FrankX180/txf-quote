@@ -46,6 +46,9 @@ def in_session(dt=None):
 
 
 def want_yahoo_quote(dt=None):
+    from holiday_guard import is_closed
+    if is_closed(dt):
+        return False
     return forced() or in_session(dt)
 
 

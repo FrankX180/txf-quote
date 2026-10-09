@@ -8,6 +8,8 @@ import urllib.request
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
+from holiday_guard import is_closed as holiday_closed
+
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
 TZ = timezone(timedelta(hours=8))
@@ -244,6 +246,40 @@ def parse_mkt_time(d):
     return datetime.now(TZ)
 
 
+def trading_day_key(dt=None):
+    """夜盤跨午夜：00:00-05:59 歸前一曆日交易鍵（對齊 Worker tradingDayKey）。"""
+    d = dt or datetime.now(TZ)
+    if d.hour * 100 + d.minute >= 600:
+        return d.strftime("%Y%m%d")
+    return (d - timedelta(days=1)).strftime("%Y%m%d")
+
+
+def yahoo_source_day_key(d):
+    """Yahoo regularMarketTime 的台北曆日 YYYYMMDD；解析不到回空字串（視為 STALE）。"""
+    t = d.get("regularMarketTime") if isinstance(d, dict) else None
+    if isinstance(t, dict):
+        t = t.get("raw") or t.get("fmt")
+    dt = None
+    if isinstance(t, (int, float)) and t > 1e9:
+        dt = datetime.fromtimestamp(int(t), TZ)
+    elif isinstance(t, str) and t:
+        try:
+            dt = datetime.fromisoformat(t.replace("Z", "+00:00")).astimezone(TZ)
+        except ValueError:
+            dt = None
+    return dt.strftime("%Y%m%d") if dt else ""
+
+
+def book_fresh(d, now=None):
+    """來源日必須等於今日交易鍵，才准把 Yahoo 五檔／內外盤當 live。
+    休市日（holidays.json）一律 STALE——payload 有值 ≠ 今日成交。"""
+    now = now or datetime.now(TZ)
+    if holiday_closed(now):
+        return False
+    src = yahoo_source_day_key(d)
+    return bool(src) and src == trading_day_key(now)
+
+
 def slim(d):
     last = raw(d.get("price"))
     ref = raw(d.get("regularMarketPreviousClose"))
@@ -478,6 +514,16 @@ def main():
         raise SystemExit("no quote source")
     d = pick(rows, "WTX&") or (rows[0] if rows else {})
     q = slim(d)
+    fresh = book_fresh(d, now)
+    if not fresh:
+        print("STALE yahoo book/imb sourceDay=%s tradeKey=%s holiday=%s" % (
+            yahoo_source_day_key(d) or "-",
+            trading_day_key(now),
+            holiday_closed(now),
+        ), flush=True)
+        q = strip_book(q)
+        q["inMarket"] = ""
+        q["outMarket"] = ""
     related = [
         slim_mini(pick(rows, "WCDF&")),
         slim_mini(pick(rows, "WCCF&")),
@@ -500,11 +546,17 @@ def main():
 
     if cur == "day":
         day_q = day_ohlc_from_kline(dict(q))
-        copy_book(day_q, q)
+        if fresh:
+            copy_book(day_q, q)
+        elif prev.get("day"):
+            copy_book(day_q, prev["day"])
         night_q = keep_other(prev.get("night"), q)
     elif cur == "night":
         night_q = ohlc_from_kline(dict(q), "night")
-        copy_book(night_q, q)
+        if fresh:
+            copy_book(night_q, q)
+        elif prev.get("night"):
+            copy_book(night_q, prev["night"])
         if prev.get("day"):
             day_q = day_ohlc_from_kline(dict(prev["day"]))
             copy_book(day_q, prev["day"])
@@ -513,10 +565,14 @@ def main():
     else:
         # 休市（日收後～夜開前等）：仍用最新一口更新「應顯示盤」收／量／五檔
         # 舊邏輯只抄 prev，會卡在中午舊價（例 12:24=45937）
+        # 國定假日／來源日≠今日：五檔與內外盤不得用殘值覆蓋。
         h = now.hour * 100 + now.minute
         if h >= 1458 or h < 845:
             night_q = ohlc_from_kline(dict(q), "night")
-            copy_book(night_q, q)
+            if fresh:
+                copy_book(night_q, q)
+            elif prev.get("night"):
+                copy_book(night_q, prev["night"])
             if prev.get("day"):
                 day_q = day_ohlc_from_kline(dict(prev["day"]))
                 copy_book(day_q, prev["day"])
@@ -526,7 +582,7 @@ def main():
             # 日收後～夜開前：更新日盤收／量／五檔，但昨收鎖定上一版（奇摩 previousClose 已滾夜盤）
             day_q = day_ohlc_from_kline(dict(q))
             prev_day = prev.get("day") or {}
-            if book_real(q):
+            if fresh and book_real(q):
                 copy_book(day_q, q)
             elif prev_day:
                 copy_book(day_q, prev_day)

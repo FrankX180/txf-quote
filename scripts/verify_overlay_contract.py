@@ -75,6 +75,24 @@ rows3 = fq.apply_mis(yahoo_rows(), "day")
 q3 = fq.slim(fq.pick(rows3, "WTX&"))
 check("盤別不符 COpenPrice 留空", q3["COpenPrice"] == "", q3["COpenPrice"])
 
+# ── case 4：假日／來源日≠今日交易鍵 → 五檔與內外盤 STALE ──
+from datetime import datetime, timezone, timedelta
+TZ = timezone(timedelta(hours=8))
+holiday = datetime(2026, 10, 9, 14, 16, tzinfo=TZ)
+stale_row = {
+    "symbol": "WTX&",
+    "regularMarketTime": "2026-10-08T20:59:53Z",
+    "inMarket": 20.399,
+    "outMarket": 18.4,
+}
+check("holiday book_fresh=False",
+      fq.book_fresh(stale_row, holiday) is False)
+live_day = datetime(2026, 10, 8, 11, 0, tzinfo=TZ)
+live_row = dict(stale_row, regularMarketTime="2026-10-08T03:00:00Z")
+# 10/08 是交易日且來源日＝交易鍵 → True（holidays.json 不含 20261008）
+check("trading-day book_fresh=True",
+      fq.book_fresh(live_row, live_day) is True)
+
 print()
 if _fails:
     print("CONTRACT FAIL:", len(_fails), _fails)
