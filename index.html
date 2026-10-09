@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.60</div>
+      <div class="ver foot-right">2.61</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1846,14 +1846,14 @@
     }
 
     let twnData = null;
-    let twnModeActive = false;
-    let twnLoaded = false;  // 富台資料是否已載入（防開頁閃舊夜盤）
 
-    // 依本機（台北）時鐘判定當前 SGX 富台盤別：日盤 08:45–14:00、其餘為夜盤
+    // SGX 富台盤別（單一 SSOT）：日盤 08:45–13:45，其餘為夜盤（含 13:46–14:14 空窗，歸夜盤當 fallback）
+    function twnSessOfHm(hm) {
+      return hm >= 845 && hm <= 1345 ? "day" : "night";
+    }
     function twnSessNow() {
       const d = new Date();
-      const hm = d.getHours() * 100 + d.getMinutes();
-      return hm >= 845 && hm <= 1400 ? "day" : "night";
+      return twnSessOfHm(d.getHours() * 100 + d.getMinutes());
     }
 
     async function fetchTwnQuote() {
@@ -1863,7 +1863,6 @@
         const j = await res.json();
         if (j && j.ok) {
           twnData = j;
-          twnLoaded = true;
           return j;
         }
       } catch (_) {}
@@ -2898,15 +2897,10 @@
             });
           if (daySpan < 2) {
             // 當日：依當前 SGX 盤別自動選段（日/夜）；同盤取點數最多的一段
-            const sessOfTs = (ms) => {
-              const d = new Date(ms);
-              const hm = d.getHours() * 100 + d.getMinutes();
-              return hm >= 845 && hm <= 1345 ? "day" : "night";
-            };
             const wantSess = twnSessNow();
             let seg = null;
             for (const s of segs) {
-              if (sessOfTs(s[0][0]) !== wantSess) continue;
+              if (twnSessOfHm(new Date(s[0][0]).getHours() * 100 + new Date(s[0][0]).getMinutes()) !== wantSess) continue;
               if (!seg || s.length > seg.length) seg = s;
             }
             if (!seg) for (const s of segs) { if (!seg || s.length > seg.length) seg = s; }
@@ -3127,7 +3121,7 @@
       });
     }
 
-    // 富台段多日重採樣：對齊台指歷史粒度（2日＝5分、3~5日＝15分），密度才一致
+    // 富台段多日重採樣：對齊台指歷史粒度（多日統一 5 分），密度才一致
     function resampleTwnTail(arr, stepMs) {
       const out = [];
       let cur = null;
@@ -5987,7 +5981,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.60";
+        const VER = "2.61";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
