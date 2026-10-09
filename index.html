@@ -618,7 +618,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.50</div>
+      <div class="ver foot-right">2.51</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2833,10 +2833,30 @@
         const ratio = Number(gas.ratioUsed || gas.ratio) || 11.4063;
         const rtxNow = Number(gas.rtxNow || twnData.latestPrice) || 0;
         const estOpen = Number(gas.bestEst || gas.estOpen) || (rtxNow ? Math.round(rtxNow * ratio) : 0);
-        const pts = [];
+        // 先依 >30 分間隙切段，只取「最後一段」（最新 SESSION，避免跨夜長假斷線）
+        const rawSegs = [];
+        let _cur = [];
         for (let i = 0; i < twnData.points.length; i++) {
           const pt = twnData.points[i];
           if (!Array.isArray(pt) || pt.length < 2) continue;
+          if (_cur.length && pt[0] - _cur[_cur.length - 1][0] > 30 * 60 * 1000) {
+            rawSegs.push(_cur);
+            _cur = [];
+          }
+          _cur.push(pt);
+        }
+        if (_cur.length) rawSegs.push(_cur);
+        // 取「最新一段」＝當前進行中的 SESSION（使用者要的新 session 走勢）
+        // 若最新段過短（<20 點）則回退到點數最多的一段，避免短暫斷點造成空圖
+        let seg = rawSegs.length ? rawSegs[rawSegs.length - 1] : [];
+        if (seg.length < 20) {
+          let best = [];
+          for (const s of rawSegs) { if (s.length > best.length) best = s; }
+          if (best.length) seg = best;
+        }
+        const pts = [];
+        for (let i = 0; i < seg.length; i++) {
+          const pt = seg[i];
           const t = pt[0];
           const rawPx = Number(pt[1]);
           if (!Number.isFinite(rawPx)) continue;
@@ -5241,8 +5261,13 @@
         if (!marketOpen()) {
           live = false;
           if ($("live")) {
-            $("live").className = "live";
-            $("live").textContent = closedLabel();
+            if (isTaiwanHolidayNow() && twnData) {
+              $("live").className = "live holiday-twn";
+              $("live").textContent = "休市・富台連動";
+            } else {
+              $("live").className = "live";
+              $("live").textContent = closedLabel();
+            }
           }
         }
       } else if (!snap) {
@@ -5821,7 +5846,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.50";
+        const VER = "2.51";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
