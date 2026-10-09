@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.59</div>
+      <div class="ver foot-right">2.60</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -3071,9 +3071,10 @@
           pts = pts.filter((p) => p.time >= openMs - 60000 && barKindAt(p.time) === sk);
         }
       }
-      // 多日＋休市：台指歷史濾掉休市殘值，再將富台（SGX 有盤）重採樣後接在尾巴
+      // 多日＋休市：台指歷史清掉真克隆殘值，再將富台（SGX 有盤）重採樣後接在尾巴
       if (daySpan >= 2) {
-        // 台指歷史：移除休市時段殘值（如假日 15:00 後的盤後殘值）與跨日克隆複本
+        // 注意：不可用「假日感知」過濾夜盤——Yahoo 把夜盤標到下一交易日，
+        // 用假日判定會把合法夜盤（如週五夜→下週一）整段誤砍（見 01_Docs 日期慣例、DevLog 20260821）
         pts = sanitizeHistPts(pts);
         if (twnAppend && twnAppend.length) {
           const stepMs = 5 * 60000;
@@ -3085,22 +3086,45 @@
       return pts;
     }
 
-    // 台指歷史點清洗：① 濾掉休市時段殘值；② 剔除跨日克隆複本（同一時刻逐點相同）
-    function histSessClosed(ts) {
-      const d = new Date(ts);
-      const hm = d.getHours() * 100 + d.getMinutes();
-      if (hm < 500) return !isBizDay(_prevCalDay(d));
-      if (hm >= 845 && hm <= 1345) return !isBizDay(d);
-      if (hm >= 1458) return !isBizDay(d);
-      return true;
-    }
+    // 台指歷史點清洗：只剔除「真克隆殘值」——整段（同一 wall 日 15:00–15:45）
+    // 與另一群組同刻逐筆完全相同者。不碰假日、不碰夜盤日期歸屬。
     function sanitizeHistPts(pts) {
-      const out = [];
+      // 先按 wall 日分組，取各組 15:00–15:45 段落的逐分簽章
+      const groups = new Map(); // wallDay -> [pts]
       for (const p of pts) {
-        if (histSessClosed(p.time)) continue;
-        out.push(p);
+        const d = new Date(p.time);
+        const k = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(p);
       }
-      return out;
+      const sigOf = (arr) => {
+        const m = new Map();
+        for (const p of arr) {
+          const d = new Date(p.time);
+          const hm = d.getHours() * 100 + d.getMinutes();
+          if (hm >= 1500 && hm <= 1545) m.set(hm, Math.round(p.px));
+        }
+        return m;
+      };
+      const keys = [...groups.keys()].sort((a, b) => a - b);
+      const sigs = new Map();
+      for (const k of keys) sigs.set(k, sigOf(groups.get(k)));
+      // 找出「同刻同值 ≥ 20 筆」的後出現群組 → 後者為克隆
+      const cloneDays = new Set();
+      for (let i = 0; i < keys.length; i++) {
+        for (let j = i + 1; j < keys.length; j++) {
+          const a = sigs.get(keys[i]), b = sigs.get(keys[j]);
+          let common = 0;
+          for (const [hm, v] of b) if (a.has(hm) && a.get(hm) === v) common++;
+          if (common >= 20) cloneDays.add(keys[j]);
+        }
+      }
+      if (!cloneDays.size) return pts;
+      return pts.filter((p) => {
+        const d = new Date(p.time);
+        const k = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+        return !cloneDays.has(k);
+      });
     }
 
     // 富台段多日重採樣：對齊台指歷史粒度（2日＝5分、3~5日＝15分），密度才一致
@@ -5963,7 +5987,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.59";
+        const VER = "2.60";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
