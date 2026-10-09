@@ -291,13 +291,13 @@ function yahooSourceDayKey(rawW) {
     else if (typeof raw === "string") ms = Date.parse(raw);
   }
   if (!ms || !Number.isFinite(ms)) return "";
-  const p = twParts(ms);
-  return p.y + p.mo + p.d;
+  return tradingDayKey(ms);
 }
 
 /** 來源日必須等於今日交易鍵，才准把 Yahoo 五檔／內外盤當 live。 */
 function yahooBookFresh(rawW, nowMs) {
   if (!rawW) return false;
+  if (!sessionOf(nowMs)) return false;
   const src = yahooSourceDayKey(rawW);
   return !!src && src === tradingDayKey(nowMs);
 }
@@ -1892,6 +1892,17 @@ export default {
       if (mis.vol != null) w.volume = String(mis.vol);
       const iso = misTimeIso(mis.date, mis.time);
       if (iso) w.regularMarketTime = iso;
+    }
+    const nowMs = Date.now();
+    await ensureHolidays();
+    if (Array.isArray(rows)) {
+      const wtx = rows.find((x) => x && x.symbol === "WTX&") || rows[0];
+      if (wtx && !yahooBookFresh(wtx, nowMs)) {
+        // 假日／來源日≠交易鍵：不把殘值五檔與內外盤送給前端 applyLive。
+        delete wtx.orderbook;
+        wtx.inMarket = null;
+        wtx.outMarket = null;
+      }
     }
     if (!Array.isArray(rows)) {
       const body = await yRes.text().catch(() => "");

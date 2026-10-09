@@ -5079,10 +5079,15 @@
         // 盤前（如周一 08:30–08:44）：更新五檔+最新價，不寫走勢／內外盤點
         liveK = bookSk;
         const prev = Object.assign({}, (snap && snap[bookSk]) || {});
-        ["CLastPrice", "CRefPrice", "CDiff", "CDiffRate", "CTotalVolume", "CDate", "CTime", "inMarket", "outMarket"].forEach((k) => {
+        ["CLastPrice", "CRefPrice", "CDiff", "CDiffRate", "CTotalVolume", "CDate", "CTime"].forEach((k) => {
           if (q0[k] != null && q0[k] !== "") prev[k] = q0[k];
         });
-        if (hasBook) {
+        if (!hol) {
+          ["inMarket", "outMarket"].forEach((k) => {
+            if (q0[k] != null && q0[k] !== "") prev[k] = q0[k];
+          });
+        }
+        if (hasBook && !hol) {
           for (let i = 1; i <= 5; i++) {
             ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach((k) => {
               const key = k + i;
@@ -5108,7 +5113,8 @@
           if (q0.CTime != null && q0.CTime !== "") prev.CTime = q0.CTime;
           if (q0.CDate != null && q0.CDate !== "") prev.CDate = q0.CDate;
         }
-        if (n(q0.inMarket) > 0 && n(q0.outMarket) > 0) {
+        // 國定假日：Worker 可能仍吐上一交易日殘值；內外盤／五檔凍結，只許更新價量（且 volOk 已擋量倒退）
+        if (!hol && n(q0.inMarket) > 0 && n(q0.outMarket) > 0) {
           prev.inMarket = q0.inMarket;
           prev.outMarket = q0.outMarket;
         }

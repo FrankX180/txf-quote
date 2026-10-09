@@ -267,7 +267,9 @@ def yahoo_source_day_key(d):
             dt = datetime.fromisoformat(t.replace("Z", "+00:00")).astimezone(TZ)
         except ValueError:
             dt = None
-    return dt.strftime("%Y%m%d") if dt else ""
+    # 必須用交易鍵而非日曆日：夜盤 00:00–05:59 台北屬前一營業日。
+    # 例：2026-10-08T16:30:00Z = 10/09 00:30 台北 → 交易鍵 20261008。
+    return trading_day_key(dt) if dt else ""
 
 
 def book_fresh(d, now=None):

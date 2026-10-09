@@ -92,6 +92,14 @@ live_row = dict(stale_row, regularMarketTime="2026-10-08T03:00:00Z")
 # 10/08 是交易日且來源日＝交易鍵 → True（holidays.json 不含 20261008）
 check("trading-day book_fresh=True",
       fq.book_fresh(live_row, live_day) is True)
+# 夜盤過午夜：來源 ISO 的台北曆日是 10/09，交易鍵仍是 10/08
+night_tail = datetime(2026, 10, 9, 0, 30, tzinfo=TZ)
+night_row = {"symbol": "WTX&", "regularMarketTime": "2026-10-08T16:30:00Z"}
+check("night-after-midnight source uses trade key",
+      fq.yahoo_source_day_key(night_row) == "20261008",
+      fq.yahoo_source_day_key(night_row))
+check("night-after-midnight book_fresh=True",
+      fq.book_fresh(night_row, night_tail) is True)
 
 print()
 if _fails:
