@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.58</div>
+      <div class="ver foot-right">2.59</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -3073,8 +3073,8 @@
       }
       // 多日＋休市：台指歷史濾掉休市殘值，再將富台（SGX 有盤）重採樣後接在尾巴
       if (daySpan >= 2) {
-        // 台指歷史：移除落在休市時段的點（如假日盤後殘值），避免與富台接成跳空
-        pts = pts.filter((p) => sessKindAt(p.time) !== "closed");
+        // 台指歷史：移除休市時段殘值（如假日 15:00 後的盤後殘值）與跨日克隆複本
+        pts = sanitizeHistPts(pts);
         if (twnAppend && twnAppend.length) {
           const stepMs = 5 * 60000;
           const lastHistT = pts.length ? pts[pts.length - 1].time : 0;
@@ -3083,6 +3083,24 @@
         }
       }
       return pts;
+    }
+
+    // 台指歷史點清洗：① 濾掉休市時段殘值；② 剔除跨日克隆複本（同一時刻逐點相同）
+    function histSessClosed(ts) {
+      const d = new Date(ts);
+      const hm = d.getHours() * 100 + d.getMinutes();
+      if (hm < 500) return !isBizDay(_prevCalDay(d));
+      if (hm >= 845 && hm <= 1345) return !isBizDay(d);
+      if (hm >= 1458) return !isBizDay(d);
+      return true;
+    }
+    function sanitizeHistPts(pts) {
+      const out = [];
+      for (const p of pts) {
+        if (histSessClosed(p.time)) continue;
+        out.push(p);
+      }
+      return out;
     }
 
     // 富台段多日重採樣：對齊台指歷史粒度（2日＝5分、3~5日＝15分），密度才一致
@@ -5945,7 +5963,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.58";
+        const VER = "2.59";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
