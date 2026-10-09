@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.56</div>
+      <div class="ver foot-right">2.57</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2861,11 +2861,11 @@
       // 台灣休市期間且已有富台指資料時：走勢以富台指（SGX TWN）換算為台指點數
       // 對齊法：以 GAS 的 bestEst 為頭部錨點；橘線以「富台最新點」為基準平移
       // → 預設（當前 session）時折線終點 == 頂部預估點數
+      let twnAppend = null;
       if (isTaiwanHolidayNow() && twnData && Array.isArray(twnData.points) && twnData.points.length > 0) {
         const gas = twnData.gas || {};
         const ratio = Number(gas.ratioUsed || gas.ratio) || 11.4063;
         const estOpen = Number(gas.bestEst || gas.estOpen) || 0;
-        // HiStock 時間戳的小時是正確的 session 時刻（如夜盤 19..01）；日期偶有偏移，但單一 session 標小時無影響
         const raw = [];
         for (const p of twnData.points) {
           if (!Array.isArray(p) || p.length < 2) continue;
@@ -2873,6 +2873,11 @@
           const px = Number(p[1]);
           if (!Number.isFinite(ts) || !Number.isFinite(px)) continue;
           raw.push([ts, px]);
+        }
+        // HiStock 時間戳比真實時間超前（時區＋日期位移）：以「最後一點＝現在」正規化回真實時刻
+        if (raw.length) {
+          const off = raw[raw.length - 1][0] - Date.now();
+          if (Math.abs(off) > 60 * 1000) for (const r of raw) r[0] -= off;
         }
         if (raw.length >= 2) {
           // 依 >30 分間隙切段（各為一個 SGX session）
@@ -2886,35 +2891,37 @@
             cur.push(raw[i]);
           }
           if (cur.length) segs.push(cur);
-          // session 判定（日盤 08:45–13:45，其餘為夜盤）
-          const sessOfTs = (ms) => {
-            const d = new Date(ms);
-            const hm = d.getHours() * 100 + d.getMinutes();
-            return hm >= 845 && hm <= 1345 ? "day" : "night";
-          };
-          // 目標 session：依當前 SGX 時鐘自動切換（日/夜）；同 session 取點數最多的一段
-          const wantSess = twnSessNow();
-          let seg = null;
-          for (const s of segs) {
-            if (sessOfTs(s[0][0]) !== wantSess) continue;
-            if (!seg || s.length > seg.length) seg = s;
-          }
-          if (!seg) {
-            for (const s of segs) { if (!seg || s.length > seg.length) seg = s; }
-          }
           // 錨點＝全資料最新一點（＝現在那點），確保頭尾一致
-          const lastSeg = segs[segs.length - 1];
-          const anchorRaw = lastSeg[lastSeg.length - 1][1];
-          const pts = [];
-          for (let i = 0; i < seg.length; i++) {
-            const t = seg[i][0];
-            const rawPx = Number(seg[i][1]);
-            const px = estOpen
-              ? Math.round(estOpen + (rawPx - anchorRaw) * ratio)
-              : Math.round(rawPx * ratio);
-            pts.push({ time: t, px: px, rawPx: rawPx, vol: 1, open: px, high: px, low: px, close: px });
+          const anchorRaw = raw[raw.length - 1][1];
+          const toPts = (seg) =>
+            seg.map((p) => {
+              const px = estOpen
+                ? Math.round(estOpen + (Number(p[1]) - anchorRaw) * ratio)
+                : Math.round(Number(p[1]) * ratio);
+              return { time: p[0], px: px, rawPx: Number(p[1]), vol: 1, open: px, high: px, low: px, close: px, twn: true };
+            });
+          if (daySpan < 2) {
+            // 當日：依當前 SGX 盤別自動選段（日/夜）；同盤取點數最多的一段
+            const sessOfTs = (ms) => {
+              const d = new Date(ms);
+              const hm = d.getHours() * 100 + d.getMinutes();
+              return hm >= 845 && hm <= 1345 ? "day" : "night";
+            };
+            const wantSess = twnSessNow();
+            let seg = null;
+            for (const s of segs) {
+              if (sessOfTs(s[0][0]) !== wantSess) continue;
+              if (!seg || s.length > seg.length) seg = s;
+            }
+            if (!seg) for (const s of segs) { if (!seg || s.length > seg.length) seg = s; }
+            const tpts = toPts(seg);
+            if (tpts.length > 0) return tpts;
+          } else {
+            // 多日：合併所有富台段（涵蓋連假期間），接在台指歷史之後
+            const all = [];
+            for (const s of segs) for (const p of toPts(s)) all.push(p);
+            if (all.length >= 2) twnAppend = all;
           }
-          if (pts.length > 0) return pts;
         }
       }
 
@@ -3067,6 +3074,12 @@
           const openMs = sessionOpenAt();
           pts = pts.filter((p) => p.time >= openMs - 60000 && barKindAt(p.time) === sk);
         }
+      }
+      // 多日＋休市：台指歷史尾巴接上富台（SGX 有盤）走勢，填補放假時段
+      if (daySpan >= 2 && twnAppend && twnAppend.length) {
+        const lastHistT = pts.length ? pts[pts.length - 1].time : 0;
+        const tail = twnAppend.filter((p) => p.time > lastHistT);
+        if (tail.length >= 2) pts = pts.concat(tail);
       }
       return pts;
     }
@@ -3643,7 +3656,7 @@
           if (run.length >= 2) runs.push(run);
           run = [];
         }
-        run.push({ x: xAtI(i, pts[i].time), y: yAt(pts[i].px), px: pts[i].px });
+        run.push({ x: xAtI(i, pts[i].time), y: yAt(pts[i].px), px: pts[i].px, twn: !!pts[i].twn });
       }
       if (run.length >= 2) runs.push(run);
 
@@ -3694,6 +3707,15 @@
         }
         for (let i = 1; i < seg.length; i++) {
           const a = seg[i - 1], b = seg[i];
+          // 富台填補段（多日）：橘色；其餘紅/綠跨平盤色
+          if (a.twn || b.twn) {
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.strokeStyle = TWN_COLOR;
+            ctx.stroke();
+            continue;
+          }
           if ((a.px - flat) * (b.px - flat) < 0 && b.px !== a.px) {
             const t = (flat - a.px) / (b.px - a.px);
             const xm = a.x + (b.x - a.x) * t;
@@ -3789,7 +3811,8 @@
       const barH = soBar ? soBar.h : null;
       const barL = soBar ? soBar.l : null;
       const cl = soBar && soBar.c != null ? soBar.c : n(qx && qx.CLastPrice);
-      if (!twnSim && [o, barH, barL, cl].every((v) => v != null)) {
+      // 休市不畫右側當日 K 棒（多日時它是台指舊收盤，會與富台走勢斷層）
+      if (!twnSim && !isTaiwanHolidayNow() && [o, barH, barL, cl].every((v) => v != null)) {
         const mid = Math.round(w - 14) + 0.5;
         const yH = yAt(barH), yL = yAt(barL);
         const yTop = yAt(Math.max(o, cl));
@@ -5900,7 +5923,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.56";
+        const VER = "2.57";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
