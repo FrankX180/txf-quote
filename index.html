@@ -1002,8 +1002,9 @@
       const isHol = isTaiwanHolidayNow();
       if (isHol && twnData && twnData.latestPrice) {
         const gas = twnData.gas || {};
-        const mult = Number(gas.ratioUsed || gas.ratio) || 11.406323;
-        const rateAdj = Number(gas.rateAdj) || 1;
+        const tr = twnRatio || {};
+        const mult = Number(tr.ratio) || Number(gas.ratioUsed || gas.ratio) || 11.406323;
+        const rateAdj = Number(tr.rateAdj) || Number(gas.rateAdj) || 1;
         const hsLast = (function () {
           const P = twnData.points || [];
           for (let i = P.length - 1; i >= 0; i--) {
@@ -1014,7 +1015,7 @@
         })();
         const rtxNow = hsLast || Number(gas.rtxNow || twnData.latestPrice) || 0;
         const estOpen = Math.round(rtxNow * mult * rateAdj);
-        const dayClose = Number(gas.dayClose) || n(q() && q().CRefPrice) || estOpen;
+        const dayClose = Number(tr.dayClose) || Number(gas.dayClose) || n(q() && q().CRefPrice) || estOpen;
         const diff = estOpen - dayClose;
         const rate = (diff / dayClose) * 100;
 
@@ -1799,6 +1800,14 @@
       "20261225",
     ];
     let HOLIDAY_SET = new Set(MARKET_HOLIDAYS_BOOTSTRAP);
+    // 自建富台換算係數（scripts/fetch_twn_ratio.py → data/twn-ratio.json）；GAS 降為備援
+    let twnRatio = null;
+    async function loadTwnRatio() {
+      try {
+        const j = await gh("data/twn-ratio.json").then((r) => r.json());
+        if (j && (j.ratio || j.rateAdj)) twnRatio = j;
+      } catch (e) {}
+    }
     async function loadHolidays() {
       try {
         const j = await gh("data/holidays.json").then((r) => r.json());
@@ -1866,6 +1875,7 @@
 
     async function fetchTwnQuote() {
       try {
+        await loadTwnRatio();
         const res = await fetch(LIVE + "?kind=twn", { cache: "no-cache" });
         if (!res.ok) return null;
         const j = await res.json();
@@ -2867,8 +2877,9 @@
       let twnAppend = null;
       if (isTaiwanHolidayNow() && twnData && Array.isArray(twnData.points) && twnData.points.length > 0) {
         const gas = twnData.gas || {};
-        const ratio = Number(gas.ratioUsed || gas.ratio) || 11.4063;
-        const rateAdj = Number(gas.rateAdj) || 1;
+        const tr = twnRatio || {};
+        const ratio = Number(tr.ratio) || Number(gas.ratioUsed || gas.ratio) || 11.4063;
+        const rateAdj = Number(tr.rateAdj) || Number(gas.rateAdj) || 1;
         const raw = [];
         for (const p of twnData.points) {
           if (!Array.isArray(p) || p.length < 2) continue;
@@ -5341,6 +5352,7 @@
 
     async function load() {
       await loadHolidays(); // 先載入休市日 SSOT，再判定今日是否交易日
+      await loadTwnRatio(); // 自建 ratio/rateAdj（GAS 備援）
 
       // 台灣休市日優先拉取富台指資料以供走勢圖與頂部開盤價估算
       if (isTaiwanHolidayNow()) {
@@ -5988,7 +6000,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.62";
+        const VER = "2.63";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");

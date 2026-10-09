@@ -21,6 +21,7 @@ on:
       - "scripts/fetch_imb.py"
       - "scripts/fetch_holidays.py"
       - "scripts/holiday_guard.py"
+      - "scripts/fetch_twn_ratio.py"
       - ".github/workflows/update-quote.yml"
 # 排程／push 重疊時只留最新一場，避免互搶 data/*.json
 concurrency:
@@ -59,6 +60,9 @@ jobs:
         # Yahoo 偶發 5xx；腳本內已重試，這裡第二層保險：真的掛掉也不要拖垮其他資料的 commit
         continue-on-error: true
         run: python scripts/fetch_quote.py
+      - name: Fetch self-built TWN ratio (台指÷富台 同刻 + wise 匯率)
+        continue-on-error: true
+        run: python scripts/fetch_twn_ratio.py
       - name: Fetch Yahoo WTX 1m/5m/15m
         run: python scripts/fetch_minute.py
         continue-on-error: true
@@ -87,7 +91,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/snapshot.json data/history-night.json data/history-day.json \
+          git add data/snapshot.json data/history-night.json data/history-day.json data/twn-ratio.json \
                   data/kline-minute.json data/uncovered.json data/tmf_retail.json \
                   data/kline-daily.json data/vix.json data/imb-*.json data/imb-latest.json
           if git diff --cached --quiet; then
