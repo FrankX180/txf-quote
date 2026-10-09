@@ -476,6 +476,7 @@
     .note { font-size: 12px; color: var(--muted); margin-top: 10px; }
     .live { font-size: 11px; margin-left: 8px; color: #9ca3af; }
     .live.on { color: #16a34a; }
+    .live.holiday-twn { color: #d97706; font-weight: 600; }
     .szbar { display: block; height: 14px; background: var(--dn); max-width: 100%; }
     .szbar.r { background: var(--up); margin-left: auto; }
     .foot {
@@ -617,7 +618,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.48</div>
+      <div class="ver foot-right">2.49</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1773,6 +1774,37 @@
       if (hm < 510) return isHoliday(d) || isHoliday(_prevCalDay(d)) ? "休市" : "快照";
       return isHoliday(d) ? "休市" : "快照";
     }
+    // 當前是否處於台灣休市中（國定假日全天，或週末收盤後至週一開盤前）
+    function isTaiwanHolidayNow(d) {
+      d = d || new Date();
+      const hm = d.getHours() * 100 + d.getMinutes();
+      if (hm < 510) {
+        if (isHoliday(d) || isHoliday(_prevCalDay(d))) return true;
+      } else {
+        if (isHoliday(d)) return true;
+      }
+      const dow = d.getDay();
+      if (dow === 0) return true;
+      if (dow === 6 && hm >= 510) return true;
+      if (dow === 1 && hm < 845) return true;
+      return false;
+    }
+
+    let twnData = null;
+    let twnModeActive = false;
+
+    async function fetchTwnQuote() {
+      try {
+        const res = await fetch(LIVE + "?kind=twn", { cache: "no-cache" });
+        if (!res.ok) return null;
+        const j = await res.json();
+        if (j && j.ok) {
+          twnData = j;
+          return j;
+        }
+      } catch (_) {}
+      return null;
+    }
     function liveSess() {
       const d = new Date();
       const dow = d.getDay();
@@ -2762,6 +2794,37 @@
     }
 
     function linePoints() {
+      // 台灣休市期間且已有富台指資料時：自動切換為富台指走勢（以休市前最後台指換算倍數投影）
+      if (isTaiwanHolidayNow() && twnData && Array.isArray(twnData.points) && twnData.points.length > 0) {
+        let ratio = 11.4063;
+        if (twnData.gas && (twnData.gas.ratioUsed || twnData.gas.ratio)) {
+          ratio = Number(twnData.gas.ratioUsed || twnData.gas.ratio);
+        } else {
+          const prevClose = n(q() && (q().CYesterdayClose || q().CPreviousClose)) || 48705;
+          const rtxPrice = Number(twnData.latestPrice) || 4271;
+          if (rtxPrice > 1000) ratio = prevClose / rtxPrice;
+        }
+        const pts = [];
+        for (let i = 0; i < twnData.points.length; i++) {
+          const pt = twnData.points[i];
+          if (!Array.isArray(pt) || pt.length < 2) continue;
+          const t = pt[0];
+          const rawPx = pt[1];
+          const px = Math.round(rawPx * ratio);
+          pts.push({
+            time: t,
+            px: px,
+            rawPx: rawPx,
+            vol: 1,
+            open: px,
+            high: px,
+            low: px,
+            close: px
+          });
+        }
+        if (pts.length > 0) return pts;
+      }
+
       const span = daySpan < 1 ? 1 : daySpan;
       const keep = lastDates(span);
       // 主體＝minuteSeries（當日 1 分／多日 5 或 15 分）
@@ -4991,12 +5054,21 @@
       // 休市仍限速拉 Worker（GitHub snapshot 可能停很久；收盤價仍在奇摩）
       if (!marketOpen()) {
         live = false;
-        if ($("live")) {
+        // 台灣休市時，主動拉取富台指（SGX TWN）即時走勢與預估開盤價
+        if (isTaiwanHolidayNow()) {
+          const twn = await fetchTwnQuote();
+          if (twn && $("live")) {
+            $("live").className = "live holiday-twn";
+            $("live").textContent = "休市・富台連動";
+            if (chartMode === "line") draw();
+          }
+        }
+        if ($("live") && (!isTaiwanHolidayNow() || !twnData)) {
           $("live").className = "live";
           $("live").textContent = closedLabel();
         }
         const mark = window.__txfClosedPollAt || 0;
-        if (Date.now() - mark < 30000) return;
+        if (Date.now() - mark < 15000) return;
         window.__txfClosedPollAt = Date.now();
         try {
           const rows = await fetch(LIVE, { cache: "default" }).then((r) => r.json());
@@ -5004,8 +5076,13 @@
             applyLive(rows);
             live = false;
             if ($("live")) {
-              $("live").className = "live";
-              $("live").textContent = closedLabel();
+              if (isTaiwanHolidayNow() && twnData) {
+                $("live").className = "live holiday-twn";
+                $("live").textContent = "休市・富台連動";
+              } else {
+                $("live").className = "live";
+                $("live").textContent = closedLabel();
+              }
             }
           }
         } catch (e) {}
@@ -5675,7 +5752,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.48";
+        const VER = "2.49";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");

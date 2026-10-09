@@ -63,6 +63,7 @@ async function fetchMisQuote() {
           open: num(pick.COpenPrice), high: num(pick.CHighPrice), low: num(pick.CLowPrice),
           ref: num(pick.CRefPrice), diff: num(pick.CDiff), rate: num(pick.CDiffRate),
           vol: num(pick.CTotalVolume), date: pick.CDate, time: pick.CTime,
+          mt, want: tries[0],
         };
       }
       _misDebug += " MT" + mt + ":empty(RtCode=" + (j && j.RtCode) + ",n=" + ql.length + ")";
@@ -217,8 +218,8 @@ function shouldRunCron(ms) {
     return false; // 國定假日：日盤與當晚夜盤整日跳過
   }
 
-  // 2. 颱風假熔斷不在此擋：交給 pollAndStore 判斷（有成交即自動解除休眠）。
-  //    在此擋會讓誤熔斷整場叫不醒（2026-09-30 夜盤 15:15-19:05 停寫）。
+  // 2. 颱風假 / 國定假日自適應熔斷中：整盤休眠跳過
+  if (ms < _dormantUntil) return false;
 
   // 3. Yahoo 連續異常退避冷卻中：暫停輪詢保護 CPU 與配額
   if (ms < _yahooBackoffUntil) return false;
@@ -1557,6 +1558,11 @@ export default {
     const url = new URL(request.url);
     const kind = url.searchParams.get("kind");
 
+    if (kind === "twn") {
+      const { handleTwnQuote } = await import("./twn-quote.js");
+      return handleTwnQuote(request, env, ctx);
+    }
+
     if (kind === "ping") {
       try {
         const st = await handlePing(env, url);
@@ -1777,9 +1783,11 @@ export default {
       if (mis.diff != null) w.change = num(mis.diff);
       if (mis.rate != null) w.changePercent = mis.rate.toFixed(2) + "%";
       if (mis.ref != null) w.regularMarketPreviousClose = num(mis.ref);
-      if (mis.open != null) w.regularMarketOpen = num(mis.open);
-      if (mis.high != null) w.regularMarketDayHigh = num(mis.high);
-      if (mis.low != null) w.regularMarketDayLow = num(mis.low);
+      // 盤別防護：僅「查詢盤別＝目標盤別」時才覆蓋當盤 OHLC（對齊 PY overlay 契約）
+      const mtOk = mis.mt === mis.want;
+      if (mtOk && mis.open != null) w.regularMarketOpen = num(mis.open);
+      if (mtOk && mis.high != null) w.regularMarketDayHigh = num(mis.high);
+      if (mtOk && mis.low != null) w.regularMarketDayLow = num(mis.low);
       if (mis.vol != null) w.volume = String(mis.vol);
       const iso = misTimeIso(mis.date, mis.time);
       if (iso) w.regularMarketTime = iso;
