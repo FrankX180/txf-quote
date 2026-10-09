@@ -1004,8 +1004,16 @@
         const gas = twnData.gas || {};
         const mult = Number(gas.ratioUsed || gas.ratio) || 11.406323;
         const rateAdj = Number(gas.rateAdj) || 1;
-        const rtxNow = Number(gas.rtxNow || twnData.latestPrice) || 0;
-        const estOpen = Number(gas.bestEst || gas.estOpen) || Math.round(rtxNow * mult * rateAdj);
+        const hsLast = (function () {
+          const P = twnData.points || [];
+          for (let i = P.length - 1; i >= 0; i--) {
+            const v = Number(P[i] && P[i][1]);
+            if (Number.isFinite(v) && v > 0) return v;
+          }
+          return 0;
+        })();
+        const rtxNow = hsLast || Number(gas.rtxNow || twnData.latestPrice) || 0;
+        const estOpen = Math.round(rtxNow * mult * rateAdj);
         const dayClose = Number(gas.dayClose) || n(q() && q().CRefPrice) || estOpen;
         const diff = estOpen - dayClose;
         const rate = (diff / dayClose) * 100;
@@ -2854,13 +2862,13 @@
 
     function linePoints() {
       // 台灣休市期間且已有富台指資料時：走勢以富台指（SGX TWN）換算為台指點數
-      // 對齊法：以 GAS 的 bestEst 為頭部錨點；橘線以「富台最新點」為基準平移
+      // 對齊法：頭部與橘線同用 HiStock 末值（富台末值 × 倍數 × 匯率修正），不再用 GAS 的粗粒度 rtxNow/bestEst
       // → 預設（當前 session）時折線終點 == 頂部預估點數
       let twnAppend = null;
       if (isTaiwanHolidayNow() && twnData && Array.isArray(twnData.points) && twnData.points.length > 0) {
         const gas = twnData.gas || {};
         const ratio = Number(gas.ratioUsed || gas.ratio) || 11.4063;
-        const estOpen = Number(gas.bestEst || gas.estOpen) || 0;
+        const rateAdj = Number(gas.rateAdj) || 1;
         const raw = [];
         for (const p of twnData.points) {
           if (!Array.isArray(p) || p.length < 2) continue;
@@ -2886,13 +2894,12 @@
             cur.push(raw[i]);
           }
           if (cur.length) segs.push(cur);
-          // 錨點＝全資料最新一點（＝現在那點），確保頭尾一致
+          // 錨點＝全資料最新一點（＝現在那點）；頭部由同一 HiStock 末值換算 → 頭尾同源
           const anchorRaw = raw[raw.length - 1][1];
+          const anchorPts = Math.round(anchorRaw * ratio * rateAdj);
           const toPts = (seg) =>
             seg.map((p) => {
-              const px = estOpen
-                ? Math.round(estOpen + (Number(p[1]) - anchorRaw) * ratio)
-                : Math.round(Number(p[1]) * ratio);
+              const px = Math.round(anchorPts + (Number(p[1]) - anchorRaw) * ratio);
               return { time: p[0], px: px, rawPx: Number(p[1]), vol: 1, open: px, high: px, low: px, close: px, twn: true };
             });
           if (daySpan < 2) {
@@ -5981,7 +5988,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.61";
+        const VER = "2.62";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
