@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">2.64</div>
+      <div class="ver foot-right" id="verFoot">2.65</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -3092,7 +3092,10 @@
           const stepMs = 5 * 60000;
           const lastHistT = pts.length ? pts[pts.length - 1].time : 0;
           const tail = resampleTwnTail(twnAppend.filter((p) => p.time > lastHistT), stepMs);
-          if (tail.length >= 2) pts = pts.concat(tail);
+          if (tail.length >= 2) {
+            tail[0].brk = true; // 富台段與台指歷史不同源：強制斷開，不相連成假尖刺
+            pts = pts.concat(tail);
+          }
         }
       }
       return pts;
@@ -3182,8 +3185,11 @@
       let t1 = sorted[0].time;
       for (let i = 1; i < sorted.length; i++) {
         const t = sorted[i].time;
-        if (t - t1 > MULTI_RUN_BREAK_MS) {
-          wins.push({ t0: t0, t1: Math.max(t0 + 60000, t1), kind: "run", date: "" });
+        if (sorted[i].brk || t - t1 > MULTI_RUN_BREAK_MS) {
+          const win = { t0: t0, t1: Math.max(t0 + 60000, t1), kind: "run", date: "" };
+          // 富台段（brk）前留一段明顯斷口，避免與台指歷史讀成一條
+          if (sorted[i].brk) win.gapAfter = MULTI_SEG_GAP_MS * 8;
+          wins.push(win);
           t0 = t;
         }
         t1 = t;
@@ -3193,11 +3199,11 @@
     }
     function mapOnWindows(t, wins, padL, cw) {
       if (!wins.length) return padL;
-      const gapMs = MULTI_SEG_GAP_MS;
+      const gapOf = (i) => (wins[i] && wins[i].gapAfter) || MULTI_SEG_GAP_MS;
       let total = 0;
       for (let i = 0; i < wins.length; i++) {
         total += Math.max(1, wins[i].t1 - wins[i].t0);
-        if (i < wins.length - 1) total += gapMs;
+        if (i < wins.length - 1) total += gapOf(i);
       }
       let acc = 0;
       for (let i = 0; i < wins.length; i++) {
@@ -3208,9 +3214,9 @@
         acc += dur;
         // 落在段間縫：壓到縫的中點，避免跳到下一段起點造成大跳
         if (i < wins.length - 1 && t < wins[i + 1].t0) {
-          return padL + ((acc + gapMs * 0.5) / total) * cw;
+          return padL + ((acc + gapOf(i) * 0.5) / total) * cw;
         }
-        if (i < wins.length - 1) acc += gapMs;
+        if (i < wins.length - 1) acc += gapOf(i);
       }
       return padL + cw;
     }
@@ -3640,7 +3646,10 @@
       if (twnSim) {
         flat = (twnData.gas && twnData.gas.dayClose) || prices[0];
       } else {
-        const refPx = daySpan >= 2 ? null : n(qx0 && qx0.CRefPrice);
+        // 多日：平盤＝固定參考（前日結算 dayClose），不隨窗寬移動（原 prices[0] 會亂跑）
+        const refPx = daySpan >= 2
+          ? (Number(twnRatio && twnRatio.dayClose) || Number(twnData && twnData.gas && twnData.gas.dayClose) || n(qx0 && qx0.CRefPrice))
+          : n(qx0 && qx0.CRefPrice);
         flat = refPx != null ? refPx : open;
       }
       const lastPx = n(qx0 && qx0.CLastPrice);
@@ -3728,7 +3737,7 @@
       const runs = [];
       let run = [];
       for (let i = 0; i < pts.length; i++) {
-        if (i && pts[i].time && pts[i - 1].time && pts[i].time - pts[i - 1].time > gap) {
+        if (i && (pts[i].brk || (pts[i].time && pts[i - 1].time && pts[i].time - pts[i - 1].time > gap))) {
           if (run.length >= 2) runs.push(run);
           run = [];
         }
@@ -3869,7 +3878,7 @@
       if (hiV > -Infinity) markExt(hiI, hiV, true);
       if (loV < Infinity) markExt(loI, loV, false);
 
-      // 富台模擬走勢標註
+      // 富台標註：當日＝模擬走勢；多日＝在富台段上標「富台（估）」，別與台指歷史混讀
       if (twnSim) {
         ctx.save();
         ctx.fillStyle = TWN_COLOR;
@@ -3878,6 +3887,18 @@
         ctx.textBaseline = "alphabetic";
         ctx.fillText("富台模擬走勢（SGX TWN 換算）", w - padR, padT + 12);
         ctx.restore();
+      } else if (multi) {
+        const fi = pts.findIndex((p) => p.twn);
+        if (fi >= 0) {
+          ctx.save();
+          ctx.fillStyle = TWN_COLOR;
+          ctx.font = "bold 10px sans-serif";
+          ctx.textAlign = "left";
+          ctx.textBaseline = "alphabetic";
+          const lx = Math.min(padL + cw - 46, Math.max(padL + 2, xAtI(fi, pts[fi].time) + 3));
+          ctx.fillText("富台（估）", lx, padT + 11);
+          ctx.restore();
+        }
       }
 
       const qx = q();
@@ -5999,7 +6020,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.64";
+        const VER = "2.65";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
