@@ -5122,7 +5122,7 @@
           // 日收後～夜開前：五檔一律凍結，Worker／奇摩在此期間常送夜盤或退化檔位（例 14:47 夜盤 46,327）
           return;
         }
-        if (hasBook) {
+        if (hasBook && !hol) {
           for (let i = 1; i <= 5; i++) {
             ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach((k) => {
               const key = k + i;
