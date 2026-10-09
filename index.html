@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.55</div>
+      <div class="ver foot-right">2.56</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1028,6 +1028,23 @@
             `</div>`;
         }
         document.body.classList.add("twn-est");
+      }
+
+      // 休市富台模式但資料未到：不顯示舊快照（避免開頁閃上週收盤資料）
+      if (isHol && daySpan < 2 && (!twnData || !twnData.latestPrice)) {
+        document.body.classList.add("twn-est");
+        $("name").textContent = "台指期(估)";
+        $("last").className = "px flat";
+        $("last").textContent = "—";
+        $("chgline").textContent = "";
+        if ($("stamp")) $("stamp").style.display = "none";
+        if ($("live")) $("live").style.display = "none";
+        if ($("sumline")) {
+          $("sumline").style.display = "";
+          $("sumline").innerHTML =
+            `<span class="sessico">🌏</span><div class="sumtxt">載入富台走勢中…</div>`;
+        }
+        return;
       }
 
       const x = q();
@@ -1830,6 +1847,14 @@
 
     let twnData = null;
     let twnModeActive = false;
+    let twnLoaded = false;  // 富台資料是否已載入（防開頁閃舊夜盤）
+
+    // 依本機（台北）時鐘判定當前 SGX 富台盤別：日盤 08:45–14:00、其餘為夜盤
+    function twnSessNow() {
+      const d = new Date();
+      const hm = d.getHours() * 100 + d.getMinutes();
+      return hm >= 845 && hm <= 1400 ? "day" : "night";
+    }
 
     async function fetchTwnQuote() {
       try {
@@ -1838,6 +1863,7 @@
         const j = await res.json();
         if (j && j.ok) {
           twnData = j;
+          twnLoaded = true;
           return j;
         }
       } catch (_) {}
@@ -2833,56 +2859,63 @@
 
     function linePoints() {
       // 台灣休市期間且已有富台指資料時：走勢以富台指（SGX TWN）換算為台指點數
-      // 對齊法：以 GAS 的 bestEst（富台現價×校準倍數×匯率修正）為錨，其餘點按與現價的價差×倍數平移
-      // → 折線終點 == 頂部預估點數（與 optratw／康和同一套算法）
+      // 對齊法：以 GAS 的 bestEst 為頭部錨點；橘線以「富台最新點」為基準平移
+      // → 預設（當前 session）時折線終點 == 頂部預估點數
       if (isTaiwanHolidayNow() && twnData && Array.isArray(twnData.points) && twnData.points.length > 0) {
         const gas = twnData.gas || {};
         const ratio = Number(gas.ratioUsed || gas.ratio) || 11.4063;
-        const rtxNow = Number(gas.rtxNow || twnData.latestPrice) || 0;
-        const rateAdj = Number(gas.rateAdj) || 1;
-        const estOpen = Number(gas.bestEst || gas.estOpen) || (rtxNow ? Math.round(rtxNow * ratio * rateAdj) : 0);
-        // 先依 >30 分間隙切段，只取「最後一段」（最新 SESSION，避免跨夜長假斷線）
-        const rawSegs = [];
-        let _cur = [];
-        for (let i = 0; i < twnData.points.length; i++) {
-          const pt = twnData.points[i];
-          if (!Array.isArray(pt) || pt.length < 2) continue;
-          if (_cur.length && pt[0] - _cur[_cur.length - 1][0] > 30 * 60 * 1000) {
-            rawSegs.push(_cur);
-            _cur = [];
+        const estOpen = Number(gas.bestEst || gas.estOpen) || 0;
+        // HiStock 時間戳的小時是正確的 session 時刻（如夜盤 19..01）；日期偶有偏移，但單一 session 標小時無影響
+        const raw = [];
+        for (const p of twnData.points) {
+          if (!Array.isArray(p) || p.length < 2) continue;
+          const ts = Number(p[0]);
+          const px = Number(p[1]);
+          if (!Number.isFinite(ts) || !Number.isFinite(px)) continue;
+          raw.push([ts, px]);
+        }
+        if (raw.length >= 2) {
+          // 依 >30 分間隙切段（各為一個 SGX session）
+          const segs = [];
+          let cur = [];
+          for (let i = 0; i < raw.length; i++) {
+            if (cur.length && raw[i][0] - cur[cur.length - 1][0] > 30 * 60 * 1000) {
+              segs.push(cur);
+              cur = [];
+            }
+            cur.push(raw[i]);
           }
-          _cur.push(pt);
+          if (cur.length) segs.push(cur);
+          // session 判定（日盤 08:45–13:45，其餘為夜盤）
+          const sessOfTs = (ms) => {
+            const d = new Date(ms);
+            const hm = d.getHours() * 100 + d.getMinutes();
+            return hm >= 845 && hm <= 1345 ? "day" : "night";
+          };
+          // 目標 session：依當前 SGX 時鐘自動切換（日/夜）；同 session 取點數最多的一段
+          const wantSess = twnSessNow();
+          let seg = null;
+          for (const s of segs) {
+            if (sessOfTs(s[0][0]) !== wantSess) continue;
+            if (!seg || s.length > seg.length) seg = s;
+          }
+          if (!seg) {
+            for (const s of segs) { if (!seg || s.length > seg.length) seg = s; }
+          }
+          // 錨點＝全資料最新一點（＝現在那點），確保頭尾一致
+          const lastSeg = segs[segs.length - 1];
+          const anchorRaw = lastSeg[lastSeg.length - 1][1];
+          const pts = [];
+          for (let i = 0; i < seg.length; i++) {
+            const t = seg[i][0];
+            const rawPx = Number(seg[i][1]);
+            const px = estOpen
+              ? Math.round(estOpen + (rawPx - anchorRaw) * ratio)
+              : Math.round(rawPx * ratio);
+            pts.push({ time: t, px: px, rawPx: rawPx, vol: 1, open: px, high: px, low: px, close: px });
+          }
+          if (pts.length > 0) return pts;
         }
-        if (_cur.length) rawSegs.push(_cur);
-        // 取「最新一段」＝當前進行中的 SESSION（使用者要的新 session 走勢）
-        // 若最新段過短（<20 點）則回退到點數最多的一段，避免短暫斷點造成空圖
-        let seg = rawSegs.length ? rawSegs[rawSegs.length - 1] : [];
-        if (seg.length < 20) {
-          let best = [];
-          for (const s of rawSegs) { if (s.length > best.length) best = s; }
-          if (best.length) seg = best;
-        }
-        const pts = [];
-        for (let i = 0; i < seg.length; i++) {
-          const pt = seg[i];
-          const t = pt[0];
-          const rawPx = Number(pt[1]);
-          if (!Number.isFinite(rawPx)) continue;
-          const px = (estOpen && rtxNow)
-            ? Math.round(estOpen + (rawPx - rtxNow) * ratio)
-            : Math.round(rawPx * ratio);
-          pts.push({
-            time: t,
-            px: px,
-            rawPx: rawPx,
-            vol: 1,
-            open: px,
-            high: px,
-            low: px,
-            close: px
-          });
-        }
-        if (pts.length > 0) return pts;
       }
 
       const span = daySpan < 1 ? 1 : daySpan;
@@ -3495,6 +3528,13 @@
       const showImb = !multi0 && !twnSim;
       const { ctx, w, h } = fitCanvas(c, showImb ? 320 : 280);
       ctx.clearRect(0, 0, w, h);
+      // 休市富台模式：資料未到前不畫舊夜盤殘圖，避免開頁閃一下舊資料
+      if (isTaiwanHolidayNow() && daySpan < 2 && !twnSim) {
+        ctx.fillStyle = "#9ca3af";
+        ctx.font = "14px sans-serif";
+        ctx.fillText("載入富台走勢中…", 16, h / 2);
+        return;
+      }
       const pts = linePoints();
       if (pts.length < 2) {
         ctx.fillStyle = "#9ca3af";
@@ -3556,9 +3596,9 @@
         ctx.stroke();
         ctx.fillText(String(Math.round(pv)), 4, y + 4);
       }
-      // 僅當日畫小時刻度文字；多日不畫 X 軸文字（避免重疊），富台模擬不畫
+      // 僅當日畫小時刻度文字；多日不畫 X 軸文字（避免重疊）
       ctx.textAlign = "center";
-      if (!multi && !twnSim) {
+      if (!multi) {
         const hour0 = new Date(t0);
         hour0.setMinutes(0, 0, 0);
         if (hour0.getTime() < t0) hour0.setHours(hour0.getHours() + 1);
@@ -5860,7 +5900,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.55";
+        const VER = "2.56";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
