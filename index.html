@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.54</div>
+      <div class="ver foot-right">2.55</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1017,8 +1017,16 @@
         $("chgline").textContent =
           `${arrow(diff)} ${fmt(Math.abs(diff), 0)} (${diff >= 0 ? "+" : ""}${fmt(rate, 2)}%)`;
         if ($("stamp")) $("stamp").style.display = "none";
-        if ($("sumline")) $("sumline").style.display = "none";
         if ($("live")) $("live").style.display = "none";
+        if ($("sumline")) {
+          $("sumline").style.display = "";
+          $("sumline").innerHTML =
+            `<span class="sessico" title="休市中・富台指即時換算">🌏</span>` +
+            `<div class="sumtxt">` +
+            `預估台指 <b>${fmt(estOpen, 0)}</b> <span class="${cls(diff)}">${arrow(diff)} ${fmt(diff, 0)}(${fmt(rate, 2)}%)</span><br>` +
+            `SGX富台現價 <b>${fmt(rtxNow, 2)}</b>` +
+            `</div>`;
+        }
         document.body.classList.add("twn-est");
       }
 
@@ -5846,7 +5854,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.54";
+        const VER = "2.55";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
