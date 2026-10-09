@@ -618,7 +618,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.51</div>
+      <div class="ver foot-right">2.52</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1002,8 +1002,12 @@
       if (isHol && twnData && twnData.latestPrice) {
         const gas = twnData.gas || {};
         const mult = Number(gas.ratioUsed || gas.ratio) || 11.406323;
+        const baseRatio = Number(gas.ratio) || mult;
+        const baseRateVal = Number(gas.baseRate) || 0;
+        const liveRateVal = Number(gas.liveRate) || 0;
+        const rateAdj = Number(gas.rateAdj) || 1;
         const rtxNow = Number(gas.rtxNow || twnData.latestPrice) || 0;
-        const estOpen = Number(gas.bestEst || gas.estOpen) || Math.round(rtxNow * mult);
+        const estOpen = Number(gas.bestEst || gas.estOpen) || Math.round(rtxNow * mult * rateAdj);
         const dayClose = Number(gas.dayClose) || n(q() && q().CRefPrice) || estOpen;
         const diff = estOpen - dayClose;
         const rate = (diff / dayClose) * 100;
@@ -1014,12 +1018,13 @@
         $("chgline").className = "sub " + cls(diff);
         $("chgline").textContent =
           `${arrow(diff)} ${fmt(Math.abs(diff), 0)} (${diff >= 0 ? "+" : ""}${fmt(rate, 2)}%)`;
-        $("stamp").textContent = `富台 ${fmt(rtxNow, 2)} × ${mult.toFixed(4)} ｜ 基準 ${fmt(dayClose, 0)}`;
+        $("stamp").textContent = `富台 ${fmt(rtxNow, 2)} × ${mult.toFixed(4)} × 匯率修正 ${rateAdj.toFixed(4)} ｜ 基準 ${fmt(dayClose, 0)}`;
         $("sumline").innerHTML =
           `<span class="sessico" id="sessToggle" title="休市中・富台指即時換算">🌏</span>` +
           `<div class="sumtxt">` +
           `預估台指 <b>${fmt(estOpen, 0)}</b> <span class="${cls(diff)}">${arrow(diff)} ${fmt(diff, 0)}(${fmt(rate, 2)}%)</span><br>` +
-          `SGX富台現價 <b>${fmt(rtxNow, 2)}</b>　換算倍數 <b>${mult.toFixed(4)}</b>　前日結算 <b>${fmt(dayClose, 0)}</b>` +
+          `SGX富台現價 <b>${fmt(rtxNow, 2)}</b>　校準倍數 <b>${mult.toFixed(4)}</b>（基準 ${baseRatio.toFixed(4)}）　前日結算 <b>${fmt(dayClose, 0)}</b>` +
+          (baseRateVal && liveRateVal ? `　USD/TWD ${fmt(liveRateVal, 3)}(基準 ${fmt(baseRateVal, 3)})` : "") +
           `</div>`;
         if ($("live")) {
           $("live").className = "live holiday-twn";
@@ -2826,13 +2831,14 @@
 
     function linePoints() {
       // 台灣休市期間且已有富台指資料時：走勢以富台指（SGX TWN）換算為台指點數
-      // 對齊法：以 GAS 的 estOpen（富台現價×倍數）為錨，其餘點按與現價的價差×倍數平移
+      // 對齊法：以 GAS 的 bestEst（富台現價×校準倍數×匯率修正）為錨，其餘點按與現價的價差×倍數平移
       // → 折線終點 == 頂部預估點數（與 optratw／康和同一套算法）
       if (isTaiwanHolidayNow() && twnData && Array.isArray(twnData.points) && twnData.points.length > 0) {
         const gas = twnData.gas || {};
         const ratio = Number(gas.ratioUsed || gas.ratio) || 11.4063;
         const rtxNow = Number(gas.rtxNow || twnData.latestPrice) || 0;
-        const estOpen = Number(gas.bestEst || gas.estOpen) || (rtxNow ? Math.round(rtxNow * ratio) : 0);
+        const rateAdj = Number(gas.rateAdj) || 1;
+        const estOpen = Number(gas.bestEst || gas.estOpen) || (rtxNow ? Math.round(rtxNow * ratio * rateAdj) : 0);
         // 先依 >30 分間隙切段，只取「最後一段」（最新 SESSION，避免跨夜長假斷線）
         const rawSegs = [];
         let _cur = [];
@@ -5846,7 +5852,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.51";
+        const VER = "2.52";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
