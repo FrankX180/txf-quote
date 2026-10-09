@@ -618,7 +618,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right">2.49</div>
+      <div class="ver foot-right">2.50</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -998,9 +998,38 @@
     }
 
     function render() {
+      const isHol = isTaiwanHolidayNow();
+      if (isHol && twnData && twnData.latestPrice) {
+        const gas = twnData.gas || {};
+        const mult = Number(gas.ratioUsed || gas.ratio) || 11.406323;
+        const rtxNow = Number(gas.rtxNow || twnData.latestPrice) || 0;
+        const estOpen = Number(gas.bestEst || gas.estOpen) || Math.round(rtxNow * mult);
+        const dayClose = Number(gas.dayClose) || n(q() && q().CRefPrice) || estOpen;
+        const diff = estOpen - dayClose;
+        const rate = (diff / dayClose) * 100;
+
+        $("name").textContent = "台指期 (休市・富台連動)";
+        $("last").className = "px " + cls(diff);
+        $("last").textContent = fmt(estOpen, 0);
+        $("chgline").className = "sub " + cls(diff);
+        $("chgline").textContent =
+          `${arrow(diff)} ${fmt(Math.abs(diff), 0)} (${diff >= 0 ? "+" : ""}${fmt(rate, 2)}%)`;
+        $("stamp").textContent = `富台 ${fmt(rtxNow, 2)} × ${mult.toFixed(4)} ｜ 基準 ${fmt(dayClose, 0)}`;
+        $("sumline").innerHTML =
+          `<span class="sessico" id="sessToggle" title="休市中・富台指即時換算">🌏</span>` +
+          `<div class="sumtxt">` +
+          `預估台指 <b>${fmt(estOpen, 0)}</b> <span class="${cls(diff)}">${arrow(diff)} ${fmt(diff, 0)}(${fmt(rate, 2)}%)</span><br>` +
+          `SGX富台現價 <b>${fmt(rtxNow, 2)}</b>　換算倍數 <b>${mult.toFixed(4)}</b>　前日結算 <b>${fmt(dayClose, 0)}</b>` +
+          `</div>`;
+        if ($("live")) {
+          $("live").className = "live holiday-twn";
+          $("live").textContent = "休市・富台連動";
+        }
+      }
+
       const x = q();
       if (!x) {
-        $("stamp").textContent = "尚無資料";
+        if (!isHol) $("stamp").textContent = "尚無資料";
         return;
       }
       // 開/高/低：只用 sessOHLC（當盤 1 分+tick）；絕不 fallback 奇摩混盤（否則震幅會變夜盤 696 點）
@@ -1025,23 +1054,25 @@
         diff = n(x.CDiff);
         rate = n(x.CDiffRate);
       }
-      $("name").textContent = String(x.DispCName || "台指期")
-        .replace(/\s*WTX&\s*/g, "")
-        .replace(/近一/g, "")
-        .trim();
-      $("last").className = "px " + cls(diff);
-      $("last").textContent = last == null ? "—" : fmt(last, 0);
-      $("chgline").className = "sub " + cls(diff);
-      $("chgline").textContent =
-        last == null ? "" : `${arrow(diff)} ${fmt(Math.abs(diff), 0)} (${diff >= 0 ? "" : ""}${fmt(rate, 2)}%)`;
-      $("stamp").textContent = fmtTime(x.CDate, x.CTime) + tmfDateTag();
-      $("sumline").innerHTML =
-        `<span class="sessico" id="sessToggle" title="${session === "day" ? "日盤，點一下切夜盤" : "夜盤，點一下切日盤"}">${session === "day" ? "☀️" : "🌙"}</span>` +
-        `<div class="sumtxt">` +
-        `股價 <b>${fmt(last, 0)}</b> <span class="${cls(diff)}">${arrow(diff)} ${fmt(diff, 0)}(${fmt(rate, 2)}%)</span>` +
-        `　總口數 ${fmt(x.CTotalVolume)}<br>` +
-        `昨 ${fmtPlain(x.CRefPrice)}　開 ${fmtPlain(openPx)}　高 <span class="up">${fmtPlain(highPx)}</span>　低 <span class="dn">${fmtPlain(lowPx)}</span>` +
-        `</div>`;
+      if (!isHol || !twnData || !twnData.latestPrice) {
+        $("name").textContent = String(x.DispCName || "台指期")
+          .replace(/\s*WTX&\s*/g, "")
+          .replace(/近一/g, "")
+          .trim();
+        $("last").className = "px " + cls(diff);
+        $("last").textContent = last == null ? "—" : fmt(last, 0);
+        $("chgline").className = "sub " + cls(diff);
+        $("chgline").textContent =
+          last == null ? "" : `${arrow(diff)} ${fmt(Math.abs(diff), 0)} (${diff >= 0 ? "" : ""}${fmt(rate, 2)}%)`;
+        $("stamp").textContent = fmtTime(x.CDate, x.CTime) + tmfDateTag();
+        $("sumline").innerHTML =
+          `<span class="sessico" id="sessToggle" title="${session === "day" ? "日盤，點一下切夜盤" : "夜盤，點一下切日盤"}">${session === "day" ? "☀️" : "🌙"}</span>` +
+          `<div class="sumtxt">` +
+          `股價 <b>${fmt(last, 0)}</b> <span class="${cls(diff)}">${arrow(diff)} ${fmt(diff, 0)}(${fmt(rate, 2)}%)</span>` +
+          `　總口數 ${fmt(x.CTotalVolume)}<br>` +
+          `昨 ${fmtPlain(x.CRefPrice)}　開 ${fmtPlain(openPx)}　高 <span class="up">${fmtPlain(highPx)}</span>　低 <span class="dn">${fmtPlain(lowPx)}</span>` +
+          `</div>`;
+      }
 
       let bidTot = 0, askTot = 0;
       const levels = [1, 2, 3, 4, 5];
@@ -2794,23 +2825,24 @@
     }
 
     function linePoints() {
-      // 台灣休市期間且已有富台指資料時：自動切換為富台指走勢（以休市前最後台指換算倍數投影）
+      // 台灣休市期間且已有富台指資料時：走勢以富台指（SGX TWN）換算為台指點數
+      // 對齊法：以 GAS 的 estOpen（富台現價×倍數）為錨，其餘點按與現價的價差×倍數平移
+      // → 折線終點 == 頂部預估點數（與 optratw／康和同一套算法）
       if (isTaiwanHolidayNow() && twnData && Array.isArray(twnData.points) && twnData.points.length > 0) {
-        let ratio = 11.4063;
-        if (twnData.gas && (twnData.gas.ratioUsed || twnData.gas.ratio)) {
-          ratio = Number(twnData.gas.ratioUsed || twnData.gas.ratio);
-        } else {
-          const prevClose = n(q() && (q().CYesterdayClose || q().CPreviousClose)) || 48705;
-          const rtxPrice = Number(twnData.latestPrice) || 4271;
-          if (rtxPrice > 1000) ratio = prevClose / rtxPrice;
-        }
+        const gas = twnData.gas || {};
+        const ratio = Number(gas.ratioUsed || gas.ratio) || 11.4063;
+        const rtxNow = Number(gas.rtxNow || twnData.latestPrice) || 0;
+        const estOpen = Number(gas.bestEst || gas.estOpen) || (rtxNow ? Math.round(rtxNow * ratio) : 0);
         const pts = [];
         for (let i = 0; i < twnData.points.length; i++) {
           const pt = twnData.points[i];
           if (!Array.isArray(pt) || pt.length < 2) continue;
           const t = pt[0];
-          const rawPx = pt[1];
-          const px = Math.round(rawPx * ratio);
+          const rawPx = Number(pt[1]);
+          if (!Number.isFinite(rawPx)) continue;
+          const px = (estOpen && rtxNow)
+            ? Math.round(estOpen + (rawPx - rtxNow) * ratio)
+            : Math.round(rawPx * ratio);
           pts.push({
             time: t,
             px: px,
@@ -3429,7 +3461,10 @@
       }
       const c = $("chart");
       const multi0 = daySpan >= 2;
-      const showImb = !multi0;
+      // 富台模擬模式：休市且已有富台分時資料 → 當日走勢以橘色呈現、免切換 UI
+      const twnSim = isTaiwanHolidayNow() && daySpan < 2 && twnData && Array.isArray(twnData.points) && twnData.points.length > 1;
+      const TWN_COLOR = "#f97316";
+      const showImb = !multi0 && !twnSim;
       const { ctx, w, h } = fitCanvas(c, showImb ? 320 : 280);
       ctx.clearRect(0, 0, w, h);
       const pts = linePoints();
@@ -3443,21 +3478,28 @@
       const qx0 = q();
       const so0 = sessOHLC();
       // 開高低用當盤 1 分；平盤線／紅綠分界用該盤昨收（CRefPrice），不是開盤
-      const open = daySpan >= 2 ? prices[0] : (so0 && so0.o != null ? so0.o : prices[0]);
-      const refPx = daySpan >= 2 ? null : n(qx0 && qx0.CRefPrice);
-      const flat = refPx != null ? refPx : open;
+      const open = daySpan >= 2 ? prices[0] : (twnSim || !so0 || so0.o == null ? prices[0] : so0.o);
+      let flat;
+      if (twnSim) {
+        flat = (twnData.gas && twnData.gas.dayClose) || prices[0];
+      } else {
+        const refPx = daySpan >= 2 ? null : n(qx0 && qx0.CRefPrice);
+        flat = refPx != null ? refPx : open;
+      }
       const lastPx = n(qx0 && qx0.CLastPrice);
       let hiBase = so0 && so0.h != null ? so0.h : -Infinity;
       let loBase = so0 && so0.l != null ? so0.l : Infinity;
-      const hi = Math.max(...prices, open, flat, hiBase, lastPx != null ? lastPx : -Infinity);
-      const lo = Math.min(...prices, open, flat, loBase, lastPx != null ? lastPx : Infinity);
+      const hi = Math.max(...prices, open, flat, twnSim ? -Infinity : hiBase, (!twnSim && lastPx != null) ? lastPx : -Infinity);
+      const lo = Math.min(...prices, open, flat, twnSim ? Infinity : loBase, (!twnSim && lastPx != null) ? lastPx : Infinity);
       let yPad = daySpan >= 2 ? 50 : 100;
       let mx = Math.ceil((hi + yPad) / 100) * 100;
       let mn = Math.floor((lo - yPad) / 100) * 100;
       if (!(mx > mn)) { mx = mn + 200; }
       let yStep = 100;
       while ((mx - mn) / yStep > 5) yStep += 100;
-      const range = sessRange(pts);
+      const range = twnSim
+        ? { t0: pts[0].time, t1: pts[pts.length - 1].time, wins: [] }
+        : sessRange(pts);
       const { t0, t1 } = range;
       const wins = range.wins || [];
       const multi = daySpan >= 2;
@@ -3486,9 +3528,9 @@
         ctx.stroke();
         ctx.fillText(String(Math.round(pv)), 4, y + 4);
       }
-      // 僅當日畫小時刻度文字；多日不畫 X 軸文字（避免重疊）
+      // 僅當日畫小時刻度文字；多日不畫 X 軸文字（避免重疊），富台模擬不畫
       ctx.textAlign = "center";
-      if (!multi) {
+      if (!multi && !twnSim) {
         const hour0 = new Date(t0);
         hour0.setMinutes(0, 0, 0);
         if (hour0.getTime() < t0) hour0.setHours(hour0.getHours() + 1);
@@ -3552,6 +3594,7 @@
         ctx.closePath();
       }
       runs.forEach((seg) => {
+        if (twnSim) return;
         ctx.save();
         ctx.beginPath();
         ctx.rect(padL, padT, w - padL - padR, Math.max(0, yFlat - padT));
@@ -3574,6 +3617,13 @@
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
       runs.forEach((seg) => {
+        if (twnSim) {
+          ctx.beginPath();
+          seg.forEach((p, i) => { if (i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); });
+          ctx.strokeStyle = TWN_COLOR;
+          ctx.stroke();
+          return;
+        }
         for (let i = 1; i < seg.length; i++) {
           const a = seg[i - 1], b = seg[i];
           if ((a.px - flat) * (b.px - flat) < 0 && b.px !== a.px) {
@@ -3600,7 +3650,7 @@
       });
 
       // 當日走勢 36MA：暖機取「圖上第一點之前」的 1 分收（跨日／跨盤接前一 Session）
-      if (!multi && pts.length >= 1) {
+      if (!twnSim && !multi && pts.length >= 1) {
         const t0pt = pts[0].time;
         const seedBars = joinBars(minutePack.night_1m, minutePack.day_1m)
           .filter((b) => b && b.timestamp < t0pt && b.close != null)
@@ -3640,7 +3690,7 @@
       function markExt(i, val, up) {
         const x = xAtI(i, pts[i].time);
         const y = yAt(val);
-        ctx.fillStyle = up ? "#d32f2f" : "#1b8a3e";
+        ctx.fillStyle = twnSim ? TWN_COLOR : (up ? "#d32f2f" : "#1b8a3e");
         ctx.beginPath();
         ctx.arc(x, y, 3, 0, Math.PI * 2);
         ctx.fill();
@@ -3653,6 +3703,17 @@
       if (hiV > -Infinity) markExt(hiI, hiV, true);
       if (loV < Infinity) markExt(loI, loV, false);
 
+      // 富台模擬走勢標註
+      if (twnSim) {
+        ctx.save();
+        ctx.fillStyle = TWN_COLOR;
+        ctx.font = "bold 12px sans-serif";
+        ctx.textAlign = "right";
+        ctx.textBaseline = "alphabetic";
+        ctx.fillText("富台模擬走勢（SGX TWN 換算）", w - padR, padT + 12);
+        ctx.restore();
+      }
+
       const qx = q();
       const soBar = sessOHLC();
       // 右側當日 K 棒：只用 sessOHLC，禁 snap 奇摩混盤開高低
@@ -3660,7 +3721,7 @@
       const barH = soBar ? soBar.h : null;
       const barL = soBar ? soBar.l : null;
       const cl = soBar && soBar.c != null ? soBar.c : n(qx && qx.CLastPrice);
-      if ([o, barH, barL, cl].every((v) => v != null)) {
+      if (!twnSim && [o, barH, barL, cl].every((v) => v != null)) {
         const mid = Math.round(w - 14) + 0.5;
         const yH = yAt(barH), yL = yAt(barL);
         const yTop = yAt(Math.max(o, cl));
@@ -5118,6 +5179,14 @@
 
     async function load() {
       await loadHolidays(); // 先載入休市日 SSOT，再判定今日是否交易日
+
+      // 台灣休市日優先拉取富台指資料以供走勢圖與頂部開盤價估算
+      if (isTaiwanHolidayNow()) {
+        try {
+          await fetchTwnQuote();
+        } catch (_) {}
+      }
+
       // 分拆載入：任一來源失敗不擋整頁；Worker 成功就能更新五檔
       let s = null;
       let hn = [];
@@ -5752,7 +5821,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.49";
+        const VER = "2.50";
         if (localStorage.getItem("txfMinVer") !== VER) {
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
