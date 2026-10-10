@@ -1,7 +1,7 @@
 {
   "source": "TWSE holidaySchedule",
   "sourceUrl": "https://www.twse.com.tw/holidaySchedule/holidaySchedule?response=json",
-  "generatedAt": "2026-10-01T13:43:37+08:00",
+  "generatedAt": "2026-10-10T20:21:44+08:00",
   "note": "非週末之市場休市日（YYYYMMDD）；開紅盤／封關等交易日與週末已排除。前端／Actions／Worker 皆讀此檔。",
   "years": [
     "2026"
