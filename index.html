@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">2.71</div>
+      <div class="ver foot-right" id="verFoot">2.72</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2067,7 +2067,7 @@
         n++;
       }
       // 夜盤棒：開盤曆日必須是營業日（連假時 Yahoo 標到假期後，只退到「不晚於現在」會落在假日夜，
-      // 例：10/8 夜盤被放到 10/9 颱風假夜）→ 再退到開盤日為營業日為止（讀 holidays.json，有上限）
+      // 例：10/8 夜盤被放到 10/9 國定假日夜）→ 再退到開盤日為營業日為止（讀 holidays.json，有上限）
       if (HOLIDAY_SET.size) {
         const d = new Date(t);
         const hm = d.getHours() * 100 + d.getMinutes();
@@ -6137,7 +6137,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.71";
+        const VER = "2.72";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {

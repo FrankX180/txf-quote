@@ -140,7 +140,7 @@ let _holidaySet = null;
 let _holidayFetchedAt = 0;
 async function ensureHolidays() {
   const now = Date.now();
-  if (_holidaySet && now - _holidayFetchedAt < 12 * 3600 * 1000) return;
+  if (_holidaySet && now - _holidayFetchedAt < 1 * 3600 * 1000) return; // 1h：颱風假 adhoc 早上寫入後要能當天生效
   try {
     const r = await fetch(HOLIDAY_URL, { cf: { cacheTtl: 3600, cacheEverything: true } });
     if (!r.ok) return;

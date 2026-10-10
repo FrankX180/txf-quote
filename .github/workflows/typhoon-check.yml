@@ -1,0 +1,45 @@
+name: typhoon-check
+# 颱風假（臨時休市）偵測：營業日早盤用鴻海期貨／台積電期是否成交判斷，寫進 data/holidays.json（adhoc）
+# 國定假日由 refresh-holidays.yml 預先從證交所日曆取得，不靠這支
+on:
+  schedule:
+    - cron: "20 1 * * 1-5"   # 台北 09:20
+    - cron: "50 1 * * 1-5"   # 台北 09:50
+    - cron: "30 2 * * 1-5"   # 台北 10:30（誤判自動撤銷）
+  workflow_dispatch:
+concurrency:
+  group: typhoon-check
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Detect ad-hoc closure (WDHF& / WCDF&)
+        run: python scripts/typhoon_check.py
+      - name: Commit holidays
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/holidays.json
+          if git diff --cached --quiet; then
+            echo "no change"
+            exit 0
+          fi
+          git commit -m "臨時休市偵測 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          branch="${GITHUB_REF_NAME:-master}"
+          for i in 1 2 3 4 5 6; do
+            if git push origin "HEAD:refs/heads/${branch}"; then
+              exit 0
+            fi
+            git fetch origin "${branch}"
+            git rebase "origin/${branch}" || { git rebase --abort || true; git reset --hard "origin/${branch}"; python scripts/typhoon_check.py; git add data/holidays.json; git diff --cached --quiet && exit 0; git commit -m "臨時休市偵測 retry"; }
+            sleep $((i * 2))
+          done
+          exit 1

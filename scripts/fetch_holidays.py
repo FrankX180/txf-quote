@@ -80,6 +80,15 @@ def normalize(rows):
     return sorted(out)
 
 
+def load_adhoc():
+    """typhoon_check.py 寫入的臨時休市（颱風假）；證交所日曆沒有，年度覆蓋時必須保留。"""
+    try:
+        with open(OUT, encoding="utf-8") as fh:
+            return dict(json.load(fh).get("adhoc") or {})
+    except Exception:
+        return {}
+
+
 def load_existing():
     """回傳 {year: set(YYYYMMDD)}；舊格式（僅 holidays 扁平）也能吃。"""
     try:
@@ -112,7 +121,8 @@ def main():
         # 來源沒帶 queryYear：保守起見以聯集方式併入
         for d in fresh:
             by_year.setdefault(d[:4], set()).add(d)
-    merged = sorted({d for vals in by_year.values() for d in vals})
+    adhoc = load_adhoc()
+    merged = sorted({d for vals in by_year.values() for d in vals} | set(adhoc))
     merged_years = sorted(by_year)
     now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
     doc = {
@@ -123,6 +133,8 @@ def main():
         "years": merged_years,
         "holidays": merged,
     }
+    if adhoc:
+        doc["adhoc"] = dict(sorted(adhoc.items()))
     if "--print" in sys.argv:
         print(json.dumps(doc, ensure_ascii=False, indent=2))
         return
