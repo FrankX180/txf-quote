@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">2.69</div>
+      <div class="ver foot-right" id="verFoot">2.70</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2065,6 +2065,22 @@
         t -= 86400000;
         n++;
       }
+      // 夜盤棒：開盤曆日必須是營業日（連假時 Yahoo 標到假期後，只退到「不晚於現在」會落在假日夜，
+      // 例：10/8 夜盤被放到 10/9 颱風假夜）→ 再退到開盤日為營業日為止（讀 holidays.json，有上限）
+      if (HOLIDAY_SET.size) {
+        const d = new Date(t);
+        const hm = d.getHours() * 100 + d.getMinutes();
+        if (hm >= 1500 || hm < 510) {
+          let m = 0;
+          while (m < 10) {
+            const od = new Date(t);
+            if (hm < 510) od.setDate(od.getDate() - 1);
+            if (isBizDay(od)) break;
+            t -= 86400000;
+            m++;
+          }
+        }
+      }
       return t;
     }
     // 夜盤走勢千點垂直尖刺：Yahoo 未矯正完的未來棒、或日盤價被寫進夜盤根
@@ -2930,8 +2946,23 @@
             if (Math.abs(off) > 60 * 1000) for (const r of live) r[0] -= off;
             for (const r of live) if (r[0] > histLastMs) raw.push(r);
           } else {
-            const fin = live[live.length - 1][1];
-            if (Math.abs(fin - raw[raw.length - 1][1]) > 1e-9) raw.push([histLastMs + 60000, fin]);
+            // SGX 休盤：存檔約缺收盤前 15 分（TradingView 延遲）→ HiStock 尾巴以「最後一點＝該場收盤時刻」校正後補上
+            const hd = new Date(histLastMs);
+            const hhm = hd.getHours() * 100 + hd.getMinutes();
+            const cd = new Date(histLastMs);
+            if (hhm >= 845 && hhm <= 1345) cd.setHours(13, 45, 0, 0);
+            else {
+              if (hhm > 515) cd.setDate(cd.getDate() + 1);
+              cd.setHours(5, 15, 0, 0);
+            }
+            const closeMs = cd.getTime();
+            if (closeMs <= Date.now() && closeMs - histLastMs <= 60 * 60000) {
+              const off = live[live.length - 1][0] - closeMs;
+              for (const r of live) if (r[0] - off > histLastMs) raw.push([r[0] - off, r[1]]);
+            } else {
+              const fin = live[live.length - 1][1];
+              if (Math.abs(fin - raw[raw.length - 1][1]) > 1e-9) raw.push([histLastMs + 60000, fin]);
+            }
           }
         }
         if (raw.length >= 2) {
@@ -3137,6 +3168,7 @@
         // 注意：不可用「假日感知」過濾夜盤——Yahoo 把夜盤標到下一交易日，
         // 用假日判定會把合法夜盤（如週五夜→下週一）整段誤砍（見 01_Docs 日期慣例、DevLog 20260821）
         pts = sanitizeHistPts(pts);
+        pts = relocHolidayNight(pts);
         if (twnAppend && twnAppend.length) {
           const stepMs = 5 * 60000;
           // 富台補洞：只補台指無覆蓋的時段（連假整段如 10/09、以及夜盤尾端）；
@@ -3180,6 +3212,34 @@
         }
       }
       return pts;
+    }
+
+    // 台指夜盤落在「假日夜」必為錯放（Yahoo 連假標到假期後、回移只退到不晚於當時；D1／快取可能已存錯 ts）
+    // → 退回開盤日為營業日的那一夜；目標分鐘已有台指點則視為複本丟棄（讀 holidays.json）
+    function relocHolidayNight(pts) {
+      if (!HOLIDAY_SET.size) return pts;
+      const openDay = (t) => {
+        const d = new Date(t);
+        const hm = d.getHours() * 100 + d.getMinutes();
+        if (!(hm >= 1500 || hm < 510)) return null;
+        if (hm < 510) d.setDate(d.getDate() - 1);
+        return d;
+      };
+      const keep = [];
+      const moved = [];
+      for (const p of pts) {
+        const od = p.twn ? null : openDay(p.time);
+        if (!od || isBizDay(od)) { keep.push(p); continue; }
+        let t = p.time;
+        let m = 0;
+        while (m < 10 && !isBizDay(openDay(t))) { t -= 86400000; m++; }
+        if (m < 10) moved.push(Object.assign({}, p, { time: t }));
+      }
+      if (!moved.length) return pts;
+      const have = new Set(keep.map((p) => Math.floor(p.time / 60000)));
+      const out = keep.concat(moved.filter((p) => !have.has(Math.floor(p.time / 60000))));
+      out.sort((a, b) => a.time - b.time);
+      return out;
     }
 
     // 台指歷史點清洗：只剔除「真克隆殘值」——整段（同一 wall 日 15:00–15:45）
@@ -6101,7 +6161,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.69";
+        const VER = "2.70";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
