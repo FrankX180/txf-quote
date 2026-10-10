@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">2.68</div>
+      <div class="ver foot-right" id="verFoot">2.69</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2935,11 +2935,10 @@
           }
         }
         if (raw.length >= 2) {
-          // SGX 盤別（單一時鐘 SSOT）：日盤 08:45–14:00、其餘為夜盤（14:00–次日 05:15）
+          // 盤別一律走 twnSessOfHm（單一真相），不再自帶一份邊界
           const twnSessOfTs = (ts) => {
             const d = new Date(ts);
-            const hm = d.getHours() * 100 + d.getMinutes();
-            return hm >= 845 && hm < 1400 ? "day" : "night";
+            return twnSessOfHm(d.getHours() * 100 + d.getMinutes());
           };
           // 依「盤別」切段：日/夜只隔十餘分，用 >30 分間隙切不開，會把整日日夜併成一段
           const segs = [];
@@ -6102,7 +6101,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.68";
+        const VER = "2.69";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
