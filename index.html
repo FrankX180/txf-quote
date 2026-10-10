@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">2.67</div>
+      <div class="ver foot-right" id="verFoot">2.68</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -3143,6 +3143,13 @@
           // 富台補洞：只補台指無覆蓋的時段（連假整段如 10/09、以及夜盤尾端）；
           // 台指已覆蓋處不重疊，避免兩種源的位準差被讀成尖刺。
           const histT = pts.map((p) => p.time).sort((a, b) => a - b);
+          // 視窗＝最後 daySpan 天（右緣取台指與富台兩邊的最新點）；台指歷史在連假常只挑到
+          // 最新的夜盤複本（如 2日只剩 10 小時），故補洞範圍以「時間窗」界定，不用台指首點。
+          const rightMs = Math.max(
+            histT.length ? histT[histT.length - 1] : 0,
+            twnAppend.length ? twnAppend[twnAppend.length - 1].time : 0
+          );
+          const winStart = rightMs - daySpan * 86400000;
           const COVER = 45 * 60000;
           const covered = (t) => {
             let lo = 0, hi = histT.length - 1;
@@ -3156,7 +3163,7 @@
             }
             return best <= COVER;
           };
-          const inWin = (t) => histT.length > 0 && t >= histT[0];
+          const inWin = (t) => t >= winStart && t <= rightMs + 60000;
           const fill = resampleTwnTail(twnAppend.filter((p) => inWin(p.time) && !covered(p.time)), stepMs);
           if (fill.length >= 2) {
             // 依 >60 分間隙切段；各段首點標 brk，與台指歷史／他段斷開，不相連成假尖刺
@@ -6095,7 +6102,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.67";
+        const VER = "2.68";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
