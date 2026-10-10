@@ -797,6 +797,13 @@ function barsFromChartJson(chart, limitTail = 0) {
       shift++;
     }
     if (ts > nowLim) continue;
+    // 夜盤開盤日須為營業日：只退到「不晚於現在」在連假／週末會落在假日夜（例：10/8 夜盤 → 10/9 假日夜）
+    // 與前端 fixYahooFutureTs、scripts/fetch_minute.py 同規則
+    for (let k = 0; k < 10; k++) {
+      const hm = twParts(ts).hm;
+      if (!(hm >= 1500 || hm < 510) || nightLiveMs(ts)) break;
+      ts -= 86400000;
+    }
     const cNum = +c;
     if (!(cNum >= 10000 && cNum <= 80000)) continue;
     const sess = sessionOf(ts);

@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">2.70</div>
+      <div class="ver foot-right" id="verFoot">2.71</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2043,7 +2043,8 @@
     function nextTradingYmd(fromDate) {
       const d = new Date(fromDate.getTime());
       d.setDate(d.getDate() + 1);
-      while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+      // 跳過週末＋holidays.json 休市日（連假前一晚夜盤歸假期後首個營業日）
+      for (let k = 0; k < 15 && !isBizDay(d); k++) d.setDate(d.getDate() + 1);
       return ymdOf(d);
     }
     // 上一交易日曆日（跳過六日）
@@ -2051,7 +2052,7 @@
       const d0 = parseYmd(ymd);
       if (!d0) return null;
       d0.setDate(d0.getDate() - 1);
-      while (d0.getDay() === 0 || d0.getDay() === 6) d0.setDate(d0.getDate() - 1);
+      for (let k = 0; k < 15 && !isBizDay(d0); k++) d0.setDate(d0.getDate() - 1);
       return ymdOf(d0);
     }
     // Yahoo 夜盤標「下一交易日」牆鐘：平日 +1 天、週五夜 +2~3 天、連假/中秋 +4 天、春節至多 +10 天。
@@ -2170,35 +2171,9 @@
     // 判斷：date 落在週六/週日 → 週五夜盤 → 還原為實際開盤曆日 15:00～次日 05:00
     // 禁：用 prevTradingYmd 的 gapDays 判斷（週一會跳回上週五，誤判跨周末而平移 3 天）
     function barWallTs(b) {
+      // fixYahooFutureTs 已含「夜盤開盤日須為營業日」回移（v2.70）；此處不得再依 date 二次平移
       if (!b || b.timestamp == null) return b && b.timestamp;
-      let ts = fixYahooFutureTs(+b.timestamp);
-      const ymd = dateKey(b.date);
-      if (!ymd) return ts;
-      const d = new Date(ts);
-      const hm = d.getHours() * 100 + d.getMinutes();
-      const isNight = b.session === "night" || hm >= 1500 || hm < 500;
-      if (!isNight) return ts;
-      const tradeD = parseYmd(ymd);
-      if (!tradeD) return ts;
-      const dow = tradeD.getDay();
-      if (dow !== 0 && dow !== 6) return ts; // 週一～四夜盤：牆鐘，不平移
-      const openYmd = prevTradingYmd(ymd);
-      if (!openYmd || openYmd === ymd) return ts;
-      const openD = parseYmd(openYmd);
-      if (!openD) return ts;
-      // 開盤日有日盤、卻沒有「開盤日 date」的夜盤 → 此 ymd 夜盤實為開盤日夜
-      const nightDates = {};
-      (minutePack.night_1m || []).forEach((x) => {
-        const k = dateKey(x && x.date);
-        if (k) nightDates[k] = 1;
-      });
-      const dayDates = {};
-      (minutePack.day_1m || []).forEach((x) => {
-        const k = dateKey(x && x.date);
-        if (k) dayDates[k] = 1;
-      });
-      if (!dayDates[openYmd] || nightDates[openYmd]) return ts;
-      return ts + (atHm(openD, 15, 0) - atHm(tradeD, 15, 0));
+      return fixYahooFutureTs(+b.timestamp);
     }
     // 曆日交易日 key（僅凌晨夜盤歸前一曆日；周五夜盤不在此處理）
     function tradingDayKey(ts) {
@@ -2668,13 +2643,14 @@
       const primary = m5;
       const out = [];
       keep.slice().reverse().forEach((d) => {
-        let rows = primary.filter((b) => dateKey(b.date) === d);
-        const fine = m1.filter((b) => dateKey(b.date) === d);
+        // keep 是交易日鍵（夜盤歸下一營業日）→ 列也必須用 barTradingDay 比，不可用夜盤開盤曆日 date
+        let rows = primary.filter((b) => barTradingDay(b) === d);
+        const fine = m1.filter((b) => barTradingDay(b) === d);
         if (fine.length) {
           rows = mergeBarLists(rows, resampleBars(fine, stepMs));
         }
         if (rows.length < 2) {
-          rows = m15.filter((b) => dateKey(b.date) === d);
+          rows = m15.filter((b) => barTradingDay(b) === d);
         }
         rows.forEach((b) => out.push(b));
       });
@@ -3423,7 +3399,7 @@
           cur = {
             timestamp: slot,
             open: b.open, high: b.high, low: b.low, close: b.close,
-            volume: b.volume || 0, date: b.date,
+            volume: b.volume || 0, date: b.date, session: b.session,
           };
         } else {
           cur.high = Math.max(cur.high, b.high);
@@ -6161,7 +6137,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.70";
+        const VER = "2.71";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
