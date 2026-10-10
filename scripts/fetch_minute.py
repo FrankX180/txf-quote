@@ -5,6 +5,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from when import want_fubon, want_yahoo_minute
+from holiday_guard import load_holidays
+
+HOLIDAYS = load_holidays()
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data" / "kline-minute.json"
@@ -114,6 +117,19 @@ def fix_future_ts(rows):
             n += 1
         if ts > limit:
             continue
+        # 夜盤開盤日必須是營業日：連假時只退到「不晚於現在」會落在週末／假日夜（例：10/8 夜盤 → 10/9 假日夜）
+        # 舊檔已存錯者每輪也會被搬回，再由 collapse_minute 併掉重複
+        m = 0
+        while m < 10:
+            dt = datetime.fromtimestamp(ts, TZ)
+            h = dt.hour * 100 + dt.minute
+            if not (h >= 1500 or h < 510):
+                break
+            od = dt.date() - timedelta(days=1) if h < 510 else dt.date()
+            if od.weekday() < 5 and od.strftime("%Y%m%d") not in HOLIDAYS:
+                break
+            ts -= 86400
+            m += 1
         sess, sdate, _ = classify(ts)
         if not sess:
             continue

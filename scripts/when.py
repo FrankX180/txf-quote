@@ -53,7 +53,12 @@ def want_yahoo_quote(dt=None):
 
 
 def want_yahoo_minute(dt=None):
-    return forced() or in_session(dt)
+    from holiday_guard import is_closed
+    if forced():
+        return True
+    if is_closed(dt):
+        return False
+    return in_session(dt)
 
 
 def want_fubon(dt=None):
