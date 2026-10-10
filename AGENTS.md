@@ -30,7 +30,7 @@
 | `data/` | Actions 寫入的 JSON，進 Pages（見 `data/AGENTS.md`） |
 | `scripts/` | 抓檔／部署（見 `scripts/AGENTS.md`） |
 | `worker/` | Cloudflare Worker（見 `worker/AGENTS.md`） |
-| `.github/` | `update-quote.yml`（每 5 分抓檔，休市日由 guard job 跳過）＋ `refresh-holidays.yml`（每月更新休市日）＋ `deploy-worker.yml`（push worker 即雲端部署）＋ `fubon-imb.yml`（每 5 分用富邦逐筆補 D1 內外盤缺口；只補不覆寫 Yahoo；secrets 無交易密碼） |
+| `.github/` | `update-quote.yml`（每 5 分抓檔，休市日由 guard job 跳過）＋ `twn-hist.yml`（每 5 分存 SGX 富台 1 分 K 到 `data/twn-hist.json`，不套休市閘門）＋ `refresh-holidays.yml`（每月更新休市日）＋ `deploy-worker.yml`（push worker 即雲端部署）＋ `fubon-imb.yml`（每 5 分用富邦逐筆補 D1 內外盤缺口；只補不覆寫 Yahoo；secrets 無交易密碼） |
 | `90_Tools/` | 空殼 |
 | `98_Archive/` | 舊日誌 digest；`_local_deprecated/` 放已除役的本機專用腳本（daemon／relay） |
 | `99_TempScripts/` | 探測腳本，gitignore |

@@ -1,0 +1,56 @@
+name: twn-hist
+# 富台（SGX TWN）1 分 K 存檔：不套休市閘門（台灣連假 SGX 照常交易，缺了就是走勢缺口）
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - "scripts/fetch_twn_hist.py"
+      - ".github/workflows/twn-hist.yml"
+concurrency:
+  group: twn-hist
+  cancel-in-progress: true
+permissions:
+  contents: write
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install websocket-client
+        run: pip install websocket-client==1.8.0
+      - name: Fetch SGX TWN 1m history (TradingView)
+        run: python scripts/fetch_twn_hist.py
+      - name: Commit twn-hist
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/twn-hist.json
+          if git diff --cached --quiet; then
+            echo "no change"
+            exit 0
+          fi
+          git commit -m "富台歷史 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          branch="${GITHUB_REF_NAME:-master}"
+          for i in 1 2 3 4 5 6; do
+            if git push origin "HEAD:refs/heads/${branch}"; then
+              echo "push ok (attempt ${i})"
+              exit 0
+            fi
+            echo "push rejected; rebase retry ${i}"
+            git fetch origin "${branch}"
+            if ! git rebase "origin/${branch}"; then
+              git checkout --theirs -- data || true
+              git add data || true
+              GIT_EDITOR=true git rebase --continue || git rebase --abort || true
+            fi
+            sleep $((i * 2))
+          done
+          echo "push failed after retries" >&2
+          exit 1

@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">2.65</div>
+      <div class="ver foot-right" id="verFoot">2.66</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1863,6 +1863,23 @@
     }
 
     let twnData = null;
+    // 富台 1 分 K 存檔（scripts/fetch_twn_hist.py → data/twn-hist.json）：補 HiStock 只留約一個半盤的缺口
+    let twnHist = null;
+    async function loadTwnHist() {
+      try {
+        const j = await gh("data/twn-hist.json").then((r) => r.json());
+        if (j && Array.isArray(j.bars) && j.bars.length > 1) twnHist = j;
+      } catch (e) {}
+    }
+    // SGX 富台現在是否開盤（台北時間）：日盤 08:45–13:45、夜盤 14:15–次日 05:15；週六 05:15 後至週一 08:45 前休
+    function twnOpenNow() {
+      const d = new Date();
+      const dow = d.getDay();
+      const hm = d.getHours() * 100 + d.getMinutes();
+      if (dow >= 1 && dow <= 5 && ((hm >= 845 && hm <= 1345) || hm >= 1415)) return true;
+      if (dow >= 2 && dow <= 6 && hm <= 515) return true;
+      return false;
+    }
 
     // SGX 富台盤別（單一 SSOT）：日盤 08:45–13:45，其餘為夜盤（含 13:46–14:14 空窗，歸夜盤當 fallback）
     function twnSessOfHm(hm) {
@@ -1875,7 +1892,7 @@
 
     async function fetchTwnQuote() {
       try {
-        await loadTwnRatio();
+        await Promise.all([loadTwnRatio(), loadTwnHist()]);
         const res = await fetch(LIVE + "?kind=twn", { cache: "no-cache" });
         if (!res.ok) return null;
         const j = await res.json();
@@ -2875,23 +2892,47 @@
       // 對齊法：頭部與橘線同用 HiStock 末值（富台末值 × 倍數 × 匯率修正），不再用 GAS 的粗粒度 rtxNow/bestEst
       // → 預設（當前 session）時折線終點 == 頂部預估點數
       let twnAppend = null;
-      if (isTaiwanHolidayNow() && twnData && Array.isArray(twnData.points) && twnData.points.length > 0) {
-        const gas = twnData.gas || {};
+      const histBars = twnHist && Array.isArray(twnHist.bars) ? twnHist.bars : [];
+      if (isTaiwanHolidayNow() && ((twnData && Array.isArray(twnData.points) && twnData.points.length > 0) || histBars.length > 1)) {
+        const gas = (twnData && twnData.gas) || {};
         const tr = twnRatio || {};
         const ratio = Number(tr.ratio) || Number(gas.ratioUsed || gas.ratio) || 11.4063;
         const rateAdj = Number(tr.rateAdj) || Number(gas.rateAdj) || 1;
+        // ① 存檔段（TradingView 1 分 K，真實時間；休市期間由 twn-hist.yml 持續存，不再有斷口）
         const raw = [];
-        for (const p of twnData.points) {
+        for (const b of histBars) {
+          const ts = Number(b[0]) * 1000;
+          const px = Number(b[1]);
+          if (Number.isFinite(ts) && Number.isFinite(px) && px > 0) raw.push([ts, px]);
+        }
+        const histLastMs = raw.length ? raw[raw.length - 1][0] : 0;
+        // ② HiStock 即時尾巴：存檔延遲約 10 分，SGX 開盤中才用它補最新一小段；
+        //    SGX 休盤時其「最後一點＝現在」校正會把尾巴錯放到現在，改為只補「收盤最終價」一點（頭尾同源）
+        const live = [];
+        for (const p of (twnData && twnData.points) || []) {
           if (!Array.isArray(p) || p.length < 2) continue;
           const ts = Number(p[0]);
           const px = Number(p[1]);
-          if (!Number.isFinite(ts) || !Number.isFinite(px)) continue;
-          raw.push([ts, px]);
+          if (!Number.isFinite(ts) || !Number.isFinite(px) || px <= 0) continue;
+          live.push([ts, px]);
         }
-        // HiStock 時間戳比真實時間超前（時區＋日期位移）：以「最後一點＝現在」正規化回真實時刻
-        if (raw.length) {
-          const off = raw[raw.length - 1][0] - Date.now();
-          if (Math.abs(off) > 60 * 1000) for (const r of raw) r[0] -= off;
+        const sgxOpen = twnOpenNow();
+        if (!histLastMs) {
+          // 無存檔：沿用舊行為（HiStock 時間戳超前，以「最後一點＝現在」校正回真實時刻）
+          if (live.length) {
+            const off = live[live.length - 1][0] - Date.now();
+            if (Math.abs(off) > 60 * 1000) for (const r of live) r[0] -= off;
+          }
+          for (const r of live) raw.push(r);
+        } else if (live.length) {
+          if (sgxOpen) {
+            const off = live[live.length - 1][0] - Date.now();
+            if (Math.abs(off) > 60 * 1000) for (const r of live) r[0] -= off;
+            for (const r of live) if (r[0] > histLastMs) raw.push(r);
+          } else {
+            const fin = live[live.length - 1][1];
+            if (Math.abs(fin - raw[raw.length - 1][1]) > 1e-9) raw.push([histLastMs + 60000, fin]);
+          }
         }
         if (raw.length >= 2) {
           // 依 >30 分間隙切段（各為一個 SGX session）
@@ -6020,7 +6061,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.65";
+        const VER = "2.66";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {

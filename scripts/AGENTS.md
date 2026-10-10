@@ -18,6 +18,7 @@ GitHub Actions／本機抓行情與部署 Worker。台北時段閘門在 `when.p
 | `fetch_uncovered.py` | 法人未平倉 → `uncovered.json` |
 | `fetch_vix.py` | 期交所 VIXTWN → `data/vix.json`（自家 SSOT，一日一次累積） |
 | `fetch_tmf_retail.py` | 微型臺指散戶多空 |
+| `fetch_twn_hist.py` | 富台 SGX:TWN1! 1 分 K（TradingView WebSocket）→ `data/twn-hist.json`，與舊檔合併保留 14 天；由 `twn-hist.yml` 每 5 分跑、**不套休市閘門**（台灣連假 SGX 照常交易，不存就是走勢缺口） |
 | `fetch_imb.py` | Worker D1 內外盤差 → `imb-*.json` |
 | `deploy_worker.py` | 上傳 `yahoo-quote.js`、綁 D1／自訂網域／cron。金鑰優先讀環境變數 `CLOUDFLARE_API_KEY`（CI 用），fallback 本機 secrets 檔 |
 
