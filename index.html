@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">2.66</div>
+      <div class="ver foot-right" id="verFoot">2.67</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2935,15 +2935,24 @@
           }
         }
         if (raw.length >= 2) {
-          // 依 >30 分間隙切段（各為一個 SGX session）
+          // SGX 盤別（單一時鐘 SSOT）：日盤 08:45–14:00、其餘為夜盤（14:00–次日 05:15）
+          const twnSessOfTs = (ts) => {
+            const d = new Date(ts);
+            const hm = d.getHours() * 100 + d.getMinutes();
+            return hm >= 845 && hm < 1400 ? "day" : "night";
+          };
+          // 依「盤別」切段：日/夜只隔十餘分，用 >30 分間隙切不開，會把整日日夜併成一段
           const segs = [];
           let cur = [];
+          let curSess = "";
           for (let i = 0; i < raw.length; i++) {
-            if (cur.length && raw[i][0] - cur[cur.length - 1][0] > 30 * 60 * 1000) {
+            const s = twnSessOfTs(raw[i][0]);
+            if (cur.length && (s !== curSess || raw[i][0] - cur[cur.length - 1][0] > 30 * 60 * 1000)) {
               segs.push(cur);
               cur = [];
             }
             cur.push(raw[i]);
+            curSess = s;
           }
           if (cur.length) segs.push(cur);
           // 錨點＝全資料最新一點（＝現在那點）；頭部由同一 HiStock 末值換算 → 頭尾同源
@@ -2955,14 +2964,14 @@
               return { time: p[0], px: px, rawPx: Number(p[1]), vol: 1, open: px, high: px, low: px, close: px, twn: true };
             });
           if (daySpan < 2) {
-            // 當日：依當前 SGX 盤別自動選段（日/夜）；同盤取點數最多的一段
-            const wantSess = twnSessNow();
+            // 當日：顯示「最近一場」SGX 盤別——以最新資料點的盤別為準，
+            // 週末／假日休市時自然指向上一場（例：週六早上＝週五夜盤）；不再挑「最長」而誤選到好幾天前
+            const wantSess = twnSessOfTs(raw[raw.length - 1][0]);
             let seg = null;
             for (const s of segs) {
-              if (twnSessOfHm(new Date(s[0][0]).getHours() * 100 + new Date(s[0][0]).getMinutes()) !== wantSess) continue;
-              if (!seg || s.length > seg.length) seg = s;
+              if (twnSessOfTs(s[0][0]) === wantSess) seg = s; // 取最後（最近）一段
             }
-            if (!seg) for (const s of segs) { if (!seg || s.length > seg.length) seg = s; }
+            if (!seg) seg = segs[segs.length - 1];
             const tpts = toPts(seg);
             if (tpts.length > 0) return tpts;
           } else {
@@ -3124,18 +3133,43 @@
           pts = pts.filter((p) => p.time >= openMs - 60000 && barKindAt(p.time) === sk);
         }
       }
-      // 多日＋休市：台指歷史清掉真克隆殘值，再將富台（SGX 有盤）重採樣後接在尾巴
+      // 多日＋休市：台指歷史清掉真克隆殘值，再把富台（SGX 有盤）補進「台指沒覆蓋」的時段
       if (daySpan >= 2) {
         // 注意：不可用「假日感知」過濾夜盤——Yahoo 把夜盤標到下一交易日，
         // 用假日判定會把合法夜盤（如週五夜→下週一）整段誤砍（見 01_Docs 日期慣例、DevLog 20260821）
         pts = sanitizeHistPts(pts);
         if (twnAppend && twnAppend.length) {
           const stepMs = 5 * 60000;
-          const lastHistT = pts.length ? pts[pts.length - 1].time : 0;
-          const tail = resampleTwnTail(twnAppend.filter((p) => p.time > lastHistT), stepMs);
-          if (tail.length >= 2) {
-            tail[0].brk = true; // 富台段與台指歷史不同源：強制斷開，不相連成假尖刺
-            pts = pts.concat(tail);
+          // 富台補洞：只補台指無覆蓋的時段（連假整段如 10/09、以及夜盤尾端）；
+          // 台指已覆蓋處不重疊，避免兩種源的位準差被讀成尖刺。
+          const histT = pts.map((p) => p.time).sort((a, b) => a - b);
+          const COVER = 45 * 60000;
+          const covered = (t) => {
+            let lo = 0, hi = histT.length - 1;
+            while (lo < hi) {
+              const mid = (lo + hi) >> 1;
+              if (histT[mid] < t) lo = mid + 1; else hi = mid;
+            }
+            let best = Infinity;
+            for (let k = Math.max(0, lo - 1); k <= Math.min(histT.length - 1, lo); k++) {
+              best = Math.min(best, Math.abs(histT[k] - t));
+            }
+            return best <= COVER;
+          };
+          const inWin = (t) => histT.length > 0 && t >= histT[0];
+          const fill = resampleTwnTail(twnAppend.filter((p) => inWin(p.time) && !covered(p.time)), stepMs);
+          if (fill.length >= 2) {
+            // 依 >60 分間隙切段；各段首點標 brk，與台指歷史／他段斷開，不相連成假尖刺
+            const runs = [];
+            let run = [];
+            for (const p of fill) {
+              if (run.length && p.time - run[run.length - 1].time > 60 * 60000) { runs.push(run); run = []; }
+              run.push(p);
+            }
+            if (run.length) runs.push(run);
+            for (const r of runs) {
+              if (r.length >= 2) pts = pts.concat([Object.assign({}, r[0], { brk: true })].concat(r.slice(1)));
+            }
           }
         }
       }
@@ -6061,7 +6095,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.66";
+        const VER = "2.67";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
