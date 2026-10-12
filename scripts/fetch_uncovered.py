@@ -487,7 +487,8 @@ def fetch_taifex_tx_close_map(n: int = TAIFEX_WIN):
 
     策略：取當日「一般」時段、非週選中，**最近到期月份**（月份代碼最小）。
     結算換月日若用成交量／OI 最大會跳到次近月；玩股／看盤慣用近月。
-    結算價有效用結算，否則用收盤。區間固定 ≤30 日（官網更長常空頁）。
+    欄位語意＝「收盤」，取一般盤**收盤價**（最後成交）；收盤缺才退結算價。
+    區間固定 ≤30 日（官網更長常空頁）。
     """
     end = datetime.now(TZ).date()
     # 官網區間上限約 31 天；超過常回 HTML 空頁。30 日曆天足夠覆蓋 20 交易日。
@@ -525,8 +526,8 @@ def fetch_taifex_tx_close_map(n: int = TAIFEX_WIN):
             continue
         close = _taifex_num_cell(row[6])
         settle = _taifex_num_cell(row[10])
-        # 結算價 0 在轉倉／特殊日常見，改用收盤；否則優先結算價（官方日結）
-        use = settle if settle not in (None, 0.0) else close
+        # 欄位語意＝「收盤」：優先收盤價（最後成交）；收盤缺／0 才退結算價
+        use = close if close not in (None, 0.0) else settle
         if use is None:
             continue
         prev = best.get(d)

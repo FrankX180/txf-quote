@@ -99,9 +99,9 @@ def main():
     else:
         print("INFO ratio frozen (sess=%s holiday=%s)" % (sess or "-", holiday_closed(now)), flush=True)
 
-    # --- 台指前日結算（供頁面算漲跌）＝日盤收盤 ---
-    # 正確來源＝夜盤參考價 night.CRefPrice（＝日盤收盤；實測 49357，與期交所/GAS 一致）；
-    # 退回 day.CLastPrice（1 分收，可能差數點）。
+    # --- 台指前日結算價（供頁面算漲跌；期交所漲跌係以前日結算價為基準）---
+    # 正確來源＝夜盤參考價 night.CRefPrice（＝期交所當日結算價；實測 49357＝10/08 結算價，
+    # 非日盤收盤 49349）；退回 day.CLastPrice（1 分收，可能差數點）。
     try:
         snap = json.loads((DATA / "snapshot.json").read_text(encoding="utf-8"))
         dc = (snap.get("night") or {}).get("CRefPrice") or (snap.get("day") or {}).get("CLastPrice")
