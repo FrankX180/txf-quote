@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">2.72</div>
+      <div class="ver foot-right" id="verFoot">2.73</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2991,6 +2991,19 @@
 
       const span = daySpan < 1 ? 1 : daySpan;
       const keep = lastDates(span);
+      // 走勢折線起點＝本盤開盤價：折線原從第一根 1 分「收盤」起畫，
+      // 與右側當日 K 棒的開盤（sessOHLC 首根 open）會錯開一根振幅（10/12 夜盤實測差 50 點）。
+      function withOpenAnchor(arr) {
+        if (daySpan >= 2 || !arr || arr.length < 2) return arr;
+        const so = sessOHLC();
+        const op = so && so.o != null ? so.o : null;
+        const t0pt = arr[0].time;
+        if (op == null || !Number.isFinite(op) || t0pt == null) return arr;
+        if (Math.round(arr[0].px) === Math.round(op)) return arr; // 起點已是開盤價，免重複錨
+        const at = t0pt - 60000;
+        if (sessKindAt(at) !== sessKey()) return arr;
+        return [{ px: op, vol: 0, time: at, open: op, high: op, low: op, close: op }].concat(arr);
+      }
       // 主體＝minuteSeries（當日 1 分／多日 5 或 15 分）
       const livePx0 = n(q() && q().CLastPrice);
       // 收盤凍結＋看夜盤：minuteSeries() 已用「連續段」取出最完整的一場，
@@ -3014,7 +3027,7 @@
           }))
           .filter((p) => p.time != null && Number.isFinite(p.time) && pxLooksLikeTxf(p.px))
           .sort((a, b) => a.time - b.time);
-        if (fp.length >= 2) return dropPxSpikes(fp, (p) => p.px, (p) => p.time);
+        if (fp.length >= 2) return withOpenAnchor(dropPxSpikes(fp, (p) => p.px, (p) => p.time));
       }
       const rawBars = dropFutureBars(
         series.filter((b) => keep.indexOf(barTradingDay(b)) >= 0)
@@ -3187,7 +3200,7 @@
           }
         }
       }
-      return pts;
+      return withOpenAnchor(pts);
     }
 
     // 台指夜盤落在「假日夜」必為錯放（Yahoo 連假標到假期後、回移只退到不晚於當時；D1／快取可能已存錯 ts）
@@ -6137,7 +6150,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.72";
+        const VER = "2.73";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
