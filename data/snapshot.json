@@ -1,5 +1,5 @@
 {
-  "fetchedAt": "2026-10-12 12:48:39",
+  "fetchedAt": "2026-10-12 12:59:41",
   "source": "yahoo tw.stock StockServices.stockList WTX& WCDF& WCCF&",
   "session": "day",
   "night": {
@@ -86,9 +86,9 @@
     {
       "symbol": "WCDF&",
       "name": "台積電期貨近一",
-      "last": "2560",
-      "diff": "-5",
-      "rate": "-0.19"
+      "last": "2555",
+      "diff": "-10",
+      "rate": "-0.39"
     },
     {
       "symbol": "WCCF&",
