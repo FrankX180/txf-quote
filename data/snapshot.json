@@ -1,5 +1,5 @@
 {
-  "fetchedAt": "2026-10-13 09:31:37",
+  "fetchedAt": "2026-10-13 09:43:07",
   "source": "yahoo tw.stock StockServices.stockList WTX& WCDF& WCCF&",
   "session": "day",
   "night": {
@@ -95,7 +95,7 @@
       "name": "聯電期貨近一",
       "last": "140",
       "diff": "-6",
-      "rate": "-3.77"
+      "rate": "-4.11"
     }
   ]
 }
