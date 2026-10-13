@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">2.73</div>
+      <div class="ver foot-right" id="verFoot">2.74</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -826,6 +826,165 @@
     const IMB_KEY = "txfImbMin";
     const IMB_SIDE_KEY = "txfImbSide";
     const SID_KEY = "txfSid";
+    // ── MIS SockJS 直連：五檔與成交價同源（2026-10-13）──
+    // 期交所 MIS 推流具完整五檔（101..122）與成交價（125）；REST getQuoteList 僅買一賣一。
+    // 由瀏覽器直連（零雲端成本、免後端長連線）；連不上／斷線 → 自動退回 Yahoo 五檔。
+    const MIS_QNAME = {
+      "101": "CBidPrice1", "103": "CBidPrice2", "105": "CBidPrice3",
+      "107": "CBidPrice4", "109": "CBidPrice5",
+      "102": "CAskPrice1", "104": "CAskPrice2", "106": "CAskPrice3",
+      "108": "CAskPrice4", "110": "CAskPrice5",
+      "113": "CBidSize1", "115": "CBidSize2", "117": "CBidSize3",
+      "119": "CBidSize4", "121": "CBidSize5",
+      "114": "CAskSize1", "116": "CAskSize2", "118": "CAskSize3",
+      "120": "CAskSize4", "122": "CAskSize5",
+      "125": "CLastPrice",
+    };
+    const MIS_WS_BASE = "wss://mis.taifex.com.tw/futures/rt/";
+    let misWs = null;
+    let misWsSym = "";
+    let misWsRetry = 0;
+    let misWsTimer = null;
+    let misWsOpen = false;
+    let misBook = { day: null, night: null }; // { f:{欄位}, ts }
+    let misRenderAt = 0;
+    let misRenderTimer = null;
+    function misRand(n) {
+      const c = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+      let s = "";
+      for (let i = 0; i < n; i++) s += c[Math.floor(Math.random() * c.length)];
+      return s;
+    }
+    // 近月契約代號（MIS 字母：A=1月..L=12月；數字＝西元末年個位）例：2026/10 → TXFJ6-M
+    function misNearMonth() {
+      const now = new Date();
+      let y = now.getFullYear();
+      let m = now.getMonth() + 1;
+      // 第三個週三（結算日）過後 → 次月契約
+      const first = new Date(y, m - 1, 1);
+      const firstWd = first.getDay(); // 0=日
+      const firstWed = 1 + ((3 - firstWd + 7) % 7);
+      const thirdWed = firstWed + 14;
+      if (now.getDate() > thirdWed) {
+        m += 1;
+        if (m > 12) { m = 1; y += 1; }
+      }
+      return "TXF" + String.fromCharCode(64 + m) + (y % 10) + "-M";
+    }
+    async function resolveMisSymbol() {
+      try {
+        const j = await fetch(LIVE + "?kind=mis", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null));
+        if (j && j.mis && j.mis.sym) return String(j.mis.sym);
+      } catch (e) {}
+      return misNearMonth();
+    }
+    function misWsUrl() {
+      return MIS_WS_BASE + misRand(3) + "/" + misRand(8) + "/websocket";
+    }
+    function startMisWs() {
+      if (misWs || document.visibilityState !== "visible") return;
+      if (!marketOpen()) return;
+      resolveMisSymbol().then(function (sym) {
+        misWsSym = sym || misNearMonth();
+        openMisWs();
+      });
+    }
+    function openMisWs() {
+      if (misWs) return;
+      if (!marketOpen() || document.visibilityState !== "visible") return;
+      let ws;
+      try { ws = new WebSocket(misWsUrl()); } catch (e) { scheduleMisRetry(); return; }
+      misWs = ws;
+      ws.onopen = function () { misWsRetry = 0; };
+      ws.onmessage = function (ev) {
+        const d = ev.data;
+        if (d === "o") {
+          try {
+            ws.send(JSON.stringify([JSON.stringify({ type: "subscribe", symbols: [misWsSym] })]));
+            ws.send(JSON.stringify([JSON.stringify({ type: "refresh" })]));
+          } catch (e) {}
+          return;
+        }
+        if (typeof d !== "string" || d.charAt(0) !== "a") return;
+        let arr;
+        try { arr = JSON.parse(d.slice(1)); } catch (e) { return; }
+        (arr || []).forEach(function (it) {
+          let o;
+          try { o = typeof it === "string" ? JSON.parse(it) : it; } catch (e) { return; }
+          if (!o || o.type !== "quote") return;
+          const q = o.quote || {};
+          const vals = q.values || {};
+          const sym = q.symbol || vals["55"];
+          if (sym && misWsSym && sym !== misWsSym) return;
+          misOnQuote(vals);
+        });
+      };
+      ws.onclose = function () { misWsOpen = false; misWs = null; scheduleMisRetry(); };
+      ws.onerror = function () { misWsOpen = false; };
+    }
+    function scheduleMisRetry() {
+      if (misWsTimer) return;
+      const wait = Math.min(30000, 3000 * Math.pow(2, Math.min(misWsRetry, 4)));
+      misWsRetry++;
+      misWsTimer = setTimeout(function () {
+        misWsTimer = null;
+        if (document.visibilityState === "visible" && marketOpen()) openMisWs();
+      }, wait);
+    }
+    function stopMisWs() {
+      if (misWsTimer) { clearTimeout(misWsTimer); misWsTimer = null; }
+      if (misWs) {
+        misWs.onclose = null;
+        misWs.onerror = null;
+        misWs.onmessage = null;
+        try { misWs.close(); } catch (e) {}
+        misWs = null;
+      }
+      misWsOpen = false;
+    }
+    function misOnQuote(vals) {
+      const sk = sessKindAt(Date.now());
+      if (sk !== "day" && sk !== "night") return;
+      const f = {};
+      Object.keys(vals).forEach(function (k) {
+        const nm = MIS_QNAME[k];
+        if (nm && vals[k] != null && vals[k] !== "") f[nm] = vals[k];
+      });
+      if (f.CLastPrice == null) return;
+      misBook[sk] = { f: f, ts: Date.now() };
+      misWsOpen = true;
+      scheduleMisRender();
+    }
+    function scheduleMisRender() {
+      if (misRenderTimer) return;
+      const wait = Math.max(0, 800 - (Date.now() - misRenderAt));
+      misRenderTimer = setTimeout(function () {
+        misRenderTimer = null;
+        misRenderAt = Date.now();
+        render();
+        if (chartMode === "line") draw();
+      }, wait);
+    }
+    // render() 開頭呼叫：把最新 MIS 五檔／成交價覆疊進 snap（Yahoo 為主源，MIS 為即時覆蓋）
+    function applyMisOverlay() {
+      if (!snap) return;
+      const sk = sessKey();
+      if (sk !== "day" && sk !== "night") return;
+      const b = misBook[sk];
+      if (!b) return;
+      if (Date.now() - b.ts > 25000) return; // 斷線超過 25 秒 → 退回 Yahoo
+      if (!snap[sk]) snap[sk] = {};
+      const f = b.f;
+      ["CLastPrice", "CRefPrice", "CDiff", "CDiffRate", "CTotalVolume", "CTime", "CDate"].forEach(function (k) {
+        if (f[k] != null && f[k] !== "") snap[sk][k] = f[k];
+      });
+      for (let i = 1; i <= 5; i++) {
+        ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach(function (p) {
+          const key = p + i;
+          if (f[key] != null && f[key] !== "") snap[sk][key] = f[key];
+        });
+      }
+    }
     const TRAFFIC_MODES = ["online", "month", "total"];
     let trafficMode = 0;
     let lastTraffic = null;
@@ -999,6 +1158,7 @@
     }
 
     function render() {
+      applyMisOverlay(); // MIS 即時五檔／成交價覆疊（未接通則維持 Yahoo）
       const isHol = isTaiwanHolidayNow();
       if (isHol && twnData && twnData.latestPrice) {
         const gas = twnData.gas || {};
@@ -5436,6 +5596,7 @@
         }
         return;
       }
+      startMisWs(); // 開盤／分頁回到前景時自動接上 MIS 推流（已連上則內部早退）
       // 休市仍限速拉 Worker（GitHub snapshot 可能停很久；收盤價仍在奇摩）
       if (!marketOpen()) {
         live = false;
@@ -6103,12 +6264,14 @@
       } catch (e) {}
       pollLive();
       liveTimer = setInterval(pollLive, 15000);
+      startMisWs();
       if (!ghHealTimer) {
         checkGhSnapshotStale();
         ghHealTimer = setInterval(checkGhSnapshotStale, 15000);
       }
     }
     function stopPoll() {
+      stopMisWs();
       if (liveTimer) {
         clearInterval(liveTimer);
         liveTimer = null;
@@ -6150,7 +6313,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.73";
+        const VER = "2.74";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {

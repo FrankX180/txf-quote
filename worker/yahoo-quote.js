@@ -59,6 +59,7 @@ async function fetchMisQuote() {
       if (pick) {
         const num = (v) => (v == null || v === "" ? null : Number(v));
         return {
+          sym: pick.SymbolID,
           px: num(pick.CLastPrice), bid: num(pick.CBidPrice1), ask: num(pick.CAskPrice1),
           open: num(pick.COpenPrice), high: num(pick.CHighPrice), low: num(pick.CLowPrice),
           ref: num(pick.CRefPrice), diff: num(pick.CDiff), rate: num(pick.CDiffRate),
