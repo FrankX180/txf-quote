@@ -13,7 +13,7 @@ const MIS_REFERER =
 const MIS_MONTHS = "ABCDEFGHIJKL";  // MIS 月份字母 A=1月..L=12月（非期貨慣用碼）
 
 function misMonthScore(s) {
-  const m = /^TXF([A-Z])(\d)-M$/.exec(s || "");
+  const m = /^TXF([A-Z])(\d)-[MF]$/.exec(s || "");
   if (!m) return 9e9;
   const mi = MIS_MONTHS.indexOf(m[1]);
   return mi < 0 ? 9e9 : Number(m[2]) * 100 + mi;
@@ -52,10 +52,16 @@ async function fetchMisQuote() {
         _misDebug += " MT" + mt + ":notjson(" + txt.slice(0, 100) + ")"; continue;
       }
       const ql = (j && j.RtData && j.RtData.QuoteList) || [];
+      // 日盤契約 -F、夜盤 -M（2026-10-13 實測）；兩種後綴都接受，再依 MT 順序與月份排序取近月
+      const todayKey = twDateStr(Date.now());
       const cand = ql
-        .filter((x) => /^TXF[A-Z]\d-M$/.test(x.SymbolID || ""))
+        .filter((x) => /^TXF[A-Z]\d-[MF]$/.test(x.SymbolID || ""))
         .sort((a, b) => misMonthScore(a.SymbolID) - misMonthScore(b.SymbolID));
-      const pick = cand.find((x) => x.CLastPrice) || null;
+      // 優先取「今日交易日」且有成交價者，避免另一盤殘值；再退而求其次
+      const pick =
+        cand.find((x) => x.CLastPrice && String(x.CDate) === todayKey) ||
+        cand.find((x) => x.CLastPrice) ||
+        null;
       if (pick) {
         const num = (v) => (v == null || v === "" ? null : Number(v));
         return {

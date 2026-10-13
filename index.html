@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">2.74</div>
+      <div class="ver foot-right" id="verFoot">2.75</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -839,10 +839,11 @@
       "114": "CAskSize1", "116": "CAskSize2", "118": "CAskSize3",
       "120": "CAskSize4", "122": "CAskSize5",
       "125": "CLastPrice",
+      "143": "CTime", "144": "CDate", "404": "CTotalVolume",
     };
     const MIS_WS_BASE = "wss://mis.taifex.com.tw/futures/rt/";
     let misWs = null;
-    let misWsSym = "";
+    let misWsSyms = [];
     let misWsRetry = 0;
     let misWsTimer = null;
     let misWsOpen = false;
@@ -855,8 +856,9 @@
       for (let i = 0; i < n; i++) s += c[Math.floor(Math.random() * c.length)];
       return s;
     }
-    // 近月契約代號（MIS 字母：A=1月..L=12月；數字＝西元末年個位）例：2026/10 → TXFJ6-M
-    function misNearMonth() {
+    // 近月契約代號（MIS 字母：A=1月..L=12月；數字＝西元末年個位）
+    // 盤別後綴：日盤 -F、夜盤 -M（2026-10-13 實測：日盤 MT0 為 -F、夜盤 MT1 為 -M）
+    function misSymBase() {
       const now = new Date();
       let y = now.getFullYear();
       let m = now.getMonth() + 1;
@@ -869,14 +871,14 @@
         m += 1;
         if (m > 12) { m = 1; y += 1; }
       }
-      return "TXF" + String.fromCharCode(64 + m) + (y % 10) + "-M";
+      return "TXF" + String.fromCharCode(64 + m) + (y % 10);
     }
-    async function resolveMisSymbol() {
-      try {
-        const j = await fetch(LIVE + "?kind=mis", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null));
-        if (j && j.mis && j.mis.sym) return String(j.mis.sym);
-      } catch (e) {}
-      return misNearMonth();
+    function misSymFor(sk) {
+      return misSymBase() + (sk === "day" ? "-F" : "-M");
+    }
+    // 日＋夜契約都訂；後續只採「與當盤盤別相符」那一個，自動略掉殘值
+    function misSymbols() {
+      return [misSymFor("day"), misSymFor("night")];
     }
     function misWsUrl() {
       return MIS_WS_BASE + misRand(3) + "/" + misRand(8) + "/websocket";
@@ -884,10 +886,8 @@
     function startMisWs() {
       if (misWs || document.visibilityState !== "visible") return;
       if (!marketOpen()) return;
-      resolveMisSymbol().then(function (sym) {
-        misWsSym = sym || misNearMonth();
-        openMisWs();
-      });
+      misWsSyms = misSymbols();
+      openMisWs();
     }
     function openMisWs() {
       if (misWs) return;
@@ -900,7 +900,7 @@
         const d = ev.data;
         if (d === "o") {
           try {
-            ws.send(JSON.stringify([JSON.stringify({ type: "subscribe", symbols: [misWsSym] })]));
+            ws.send(JSON.stringify([JSON.stringify({ type: "subscribe", symbols: misWsSyms })]));
             ws.send(JSON.stringify([JSON.stringify({ type: "refresh" })]));
           } catch (e) {}
           return;
@@ -914,8 +914,12 @@
           if (!o || o.type !== "quote") return;
           const q = o.quote || {};
           const vals = q.values || {};
-          const sym = q.symbol || vals["55"];
-          if (sym && misWsSym && sym !== misWsSym) return;
+          const sym = String(q.symbol || vals["55"] || "");
+          if (misWsSyms.length && sym && misWsSyms.indexOf(sym) < 0) return;
+          // 只採與當盤盤別相符的契約（日 -F／夜 -M），自動略掉另一盤殘值
+          const sk = sessKindAt(Date.now());
+          const want = sk === "day" ? "-F" : sk === "night" ? "-M" : "";
+          if (!want || (sym && sym.slice(-2) !== want)) return;
           misOnQuote(vals);
         });
       };
@@ -953,11 +957,13 @@
       if (f.CLastPrice == null) return;
       misBook[sk] = { f: f, ts: Date.now() };
       misWsOpen = true;
+      bumpLiveBar(); // 當根 1 分 K 的收盤／高／低跟推流同步（不等 15 秒 REST）
+      touchSessTrack(sk, n(f.CLastPrice)); // 開高低隨時推流 tick 走，不等 15 秒 REST
       scheduleMisRender();
     }
     function scheduleMisRender() {
       if (misRenderTimer) return;
-      const wait = Math.max(0, 800 - (Date.now() - misRenderAt));
+      const wait = Math.max(0, 250 - (Date.now() - misRenderAt));
       misRenderTimer = setTimeout(function () {
         misRenderTimer = null;
         misRenderAt = Date.now();
@@ -6313,7 +6319,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.74";
+        const VER = "2.75";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {

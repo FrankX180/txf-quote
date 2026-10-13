@@ -93,18 +93,26 @@ def _mis_quote(sess):
                 j = json.loads(r.read().decode("utf-8", "replace"))
             ql = (j.get("RtData") or {}).get("QuoteList") or []
 
+            # 日盤契約 -F、夜盤 -M（2026-10-13 實測）；兩種後綴都接受，
+            # 再優先取「後綴與本盤相符」且非殘值（CDate 為當盤交易日）者。
+            want_suffix = "-F" if want == "0" else "-M"
+
             def score(sid):
-                mm = re.match(r"^TXF([A-Z])(\d)-M$", sid or "")
+                mm = re.match(r"^TXF([A-Z])(\d)-[MF]$", sid or "")
                 if not mm:
                     return 10 ** 9
                 mi = MIS_MONTHS.find(mm.group(1))
                 return 10 ** 9 if mi < 0 else int(mm.group(2)) * 100 + mi
 
             cand = sorted(
-                [x for x in ql if re.match(r"^TXF[A-Z]\d-M$", x.get("SymbolID") or "")],
+                [x for x in ql if re.match(r"^TXF[A-Z]\d-[MF]$", x.get("SymbolID") or "")],
                 key=lambda x: score(x.get("SymbolID")),
             )
-            best = next((x for x in cand if x.get("CLastPrice")), None)
+            live = [x for x in cand if x.get("CLastPrice")]
+            best = (
+                next((x for x in live if str(x.get("SymbolID") or "").endswith(want_suffix)), None)
+                or (live[0] if live else None)
+            )
             if best:
                 best["_mt"] = m
                 best["_want"] = want
