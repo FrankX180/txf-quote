@@ -180,6 +180,10 @@ def day_chips_ready(dt=None):
     chips_ok = {"TX", "MTX", "TMF"} <= prods or hm(d) >= 1500
     if not chips_ok:
         return False
+    # 大額／特法（官網獨立一條，常晚於三大法人上架）：兩欄都要有值才算定案。
+    # 缺任一欄＝未定案，持續重抓（正常日 15:00 前必到；缺＝異常，更該重抓而非當定案）。
+    if hist0.get("top10") is None or hist0.get("top10Spec") is None:
+        return False
     today_vix = (j.get("today") or {}).get("vix")
     if hist0.get("vix") is None and today_vix is None and hm(d) < 1700:
         return False
