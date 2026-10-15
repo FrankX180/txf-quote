@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">2.78</div>
+      <div class="ver foot-right" id="verFoot">2.79</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -5596,7 +5596,7 @@
         // 盤前（如周一 08:30–08:44）：更新五檔+最新價，不寫走勢／內外盤點
         liveK = bookSk;
         const prev = Object.assign({}, (snap && snap[bookSk]) || {});
-        ["CLastPrice", "CRefPrice", "CDiff", "CDiffRate", "CTotalVolume", "CDate", "CTime"].forEach((k) => {
+        ["CLastPrice", "CRefPrice", "CDiff", "CDiffRate", "CTotalVolume", "CDate", "CTime", "CLiveBid", "CLiveAsk"].forEach((k) => {
           if (q0[k] != null && q0[k] !== "") prev[k] = q0[k];
         });
         if (!hol) {
@@ -5630,6 +5630,9 @@
           if (q0.CTime != null && q0.CTime !== "") prev.CTime = q0.CTime;
           if (q0.CDate != null && q0.CDate !== "") prev.CDate = q0.CDate;
         }
+        // 官方買一／賣一（MIS）：五檔被剔除時的單檔備援來源
+        if (q0.CLiveBid != null) prev.CLiveBid = q0.CLiveBid;
+        if (q0.CLiveAsk != null) prev.CLiveAsk = q0.CLiveAsk;
         // 國定假日：Worker 可能仍吐上一交易日殘值；內外盤／五檔凍結，只許更新價量（且 volOk 已擋量倒退）
         if (!hol && n(q0.inMarket) > 0 && n(q0.outMarket) > 0) {
           prev.inMarket = q0.inMarket;
@@ -6380,7 +6383,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.78";
+        const VER = "2.79";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
