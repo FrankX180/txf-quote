@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">2.77</div>
+      <div class="ver foot-right" id="verFoot">2.78</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1301,11 +1301,21 @@
       });
       const tot = bidTot + askTot;
       const pinBid = tot ? (bidTot / tot) * 100 : 50;
-      let inn = n(x.inMarket), outv = n(x.outMarket);
-      const imbBase = dayImbBase();
-      if (imbBase && inn != null && outv != null) {
-        if (imbBase.in != null) inn = inn - imbBase.in;
-        if (imbBase.out != null) outv = outv - imbBase.out;
+      let inn = null, outv = null;
+      // 內外盤單一來源：與副圖同一條序列（imbSeries 末點；日盤已扣前夜 base）。
+      // 不再直接讀報價的 in/out——那會與副圖不同源，出現「一個 -4681、一個 -3797」。
+      const curImb = currentImbPoint();
+      if (curImb && curImb.in != null && curImb.out != null) {
+        inn = Number(curImb.in);
+        outv = Number(curImb.out);
+      } else {
+        inn = n(x.inMarket);
+        outv = n(x.outMarket);
+        const imbBase = dayImbBase();
+        if (imbBase && inn != null && outv != null) {
+          if (imbBase.in != null) inn = inn - imbBase.in;
+          if (imbBase.out != null) outv = outv - imbBase.out;
+        }
       }
       // 左右：預設外左／內右；點擊可切換，顏色跟著走
       function paintImbBar(leftVal, rightVal, leftIsOut) {
@@ -2646,6 +2656,12 @@
       return arr.map((b) =>
         b && b.t != null ? Object.assign({}, b, { t: alignImbChartT(b.t, sk) }) : b
       );
+    }
+    // 當下內外盤點＝與副圖同一條序列的末點。**內外盤唯一真相**：
+    // 下方橫條、賣超口數、副圖末點標示全部讀這裡，不再各自計算。
+    function currentImbPoint() {
+      const arr = imbSeries();
+      return arr.length ? arr[arr.length - 1] : null;
     }
     function mergeImbSide(localArr, cloudArr) {
       const map = {};
@@ -4249,6 +4265,12 @@
       if (showImb && !multi && imbH > 0) {
         const ibs = imbSeries().filter((b) => b && b.t >= t0 && b.t <= t1 && barKindAt(b.t) !== "closed")
           .slice().sort((a, b) => a.t - b.t);
+        // 與下方橫條同源：若最新點在軸內卻被濾掉，補進來，保證折線末端＝橫條數字
+        const curPt = currentImbPoint();
+        if (curPt && curPt.d != null && curPt.t >= t0 && curPt.t <= t1 &&
+            barKindAt(curPt.t) !== "closed" && (!ibs.length || curPt.t > ibs[ibs.length - 1].t)) {
+          ibs.push(curPt);
+        }
         const zeroY = Math.round(imbTop + imbH / 2) + 0.5;
         // 左緣說明
         ctx.save();
@@ -6358,7 +6380,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.77";
+        const VER = "2.78";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
