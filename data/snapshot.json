@@ -1,5 +1,5 @@
 {
-  "fetchedAt": "2026-10-15 14:31:09",
+  "fetchedAt": "2026-10-15 14:41:02",
   "source": "yahoo tw.stock StockServices.stockList WTX& WCDF& WCCF&",
   "session": "",
   "night": {
@@ -49,13 +49,13 @@
     "CLastPrice": "46979",
     "COpenPrice": "47716",
     "CHighPrice": "47720",
-    "CLowPrice": "46924",
+    "CLowPrice": "46883",
     "CCeilPrice": "",
     "CFloorPrice": "",
     "CRefPrice": "48798",
     "CDiff": "-1819",
     "CDiffRate": "-3.73",
-    "CTotalVolume": "81787",
+    "CTotalVolume": "120180",
     "CDate": "20261015",
     "CTime": "134500",
     "inMarket": "56918",
