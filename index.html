@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">2.76</div>
+      <div class="ver foot-right" id="verFoot">2.77</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1235,15 +1235,21 @@
       // 且與成交價相符，退化為單檔顯示（官方即時），否則整表留白。五檔凍結時段不檢。
       obStale = false;
       obDegraded = false;
-      if (!bookFrozenNow() && !bookStraddles(x, last)) {
-        stripBookFields(x);
-        const lb = n(x.CLiveBid), la = n(x.CLiveAsk);
-        if (lb != null && la != null && last != null && last >= lb - BOOK_PX_TOL && last <= la + BOOK_PX_TOL) {
-          x.CBidPrice1 = lb; x.CBidSize1 = "";
-          x.CAskPrice1 = la; x.CAskSize1 = "";
-          obDegraded = true;
+      if (!bookFrozenNow()) {
+        const noBook = x.CBidPrice1 == null && x.CAskPrice1 == null;
+        if (noBook || !bookStraddles(x, last)) {
+          if (!noBook) stripBookFields(x);
+          // Worker 帶了官方買一/賣一（MIS）且夾住成交價 → 退化為單檔顯示（官方即時、絕不脫節）
+          const lb = n(x.CLiveBid), la = n(x.CLiveAsk);
+          if (lb != null && la != null && last != null && last >= lb - BOOK_PX_TOL && last <= la + BOOK_PX_TOL) {
+            x.CBidPrice1 = lb; x.CBidSize1 = "";
+            x.CAskPrice1 = la; x.CAskSize1 = "";
+            obDegraded = true;
+            obStale = true;
+          } else if (!noBook) {
+            obStale = true;
+          }
         }
-        obStale = true;
       }
       const ref = n(x.CRefPrice);
       let openPx = so ? so.o : null;
@@ -6352,7 +6358,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.76";
+        const VER = "2.77";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
