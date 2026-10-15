@@ -290,6 +290,30 @@ def book_fresh(d, now=None):
     return bool(src) and src == trading_day_key(now)
 
 
+def book_consistent(q):
+    """真五檔必夾住成交價（買一 ≤ 成交 ≤ 賣一，容差 40 點）。
+    夜盤 Yahoo 常「總表（成交價）續動、五檔欄位停更」：來源日仍是今日（fresh=True），
+    但五檔已與 MIS 即時成交價脫節上百點。脫節一律不留（寧可留白，不寫錯價）。"""
+    def tof(x):
+        try:
+            if x is None or x == "":
+                return None
+            return float(x)
+        except (TypeError, ValueError):
+            return None
+
+    last = tof(q.get("CLastPrice"))
+    b = tof(q.get("CBidPrice1"))
+    a = tof(q.get("CAskPrice1"))
+    if last is None or (b is None and a is None):
+        return True
+    if b is not None and last < b - 40:
+        return False
+    if a is not None and last > a + 40:
+        return False
+    return True
+
+
 def slim(d):
     last = raw(d.get("price"))
     ref = raw(d.get("regularMarketPreviousClose"))
@@ -532,6 +556,12 @@ def main():
     d = pick(rows, "WTX&") or (rows[0] if rows else {})
     q = slim(d)
     fresh = book_fresh(d, now)
+    # 夜盤尾 Yahoo 常「成交價續動、五檔欄位停更」：來源日仍是今日（fresh=True），
+    # 但五檔已與 MIS 即時成交價脫節上百點。真書必夾住成交價，脫節一律不留。
+    if fresh and not book_consistent(q):
+        print("BOOK-OFF-LINE yahoo orderbook bid1=%s ask1=%s vs last=%s -> strip" % (
+            q.get("CBidPrice1"), q.get("CAskPrice1"), q.get("CLastPrice")), flush=True)
+        fresh = False
     if not fresh:
         print("STALE yahoo book/imb sourceDay=%s tradeKey=%s holiday=%s" % (
             yahoo_source_day_key(d) or "-",

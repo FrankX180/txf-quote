@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">2.75</div>
+      <div class="ver foot-right" id="verFoot">2.76</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1231,6 +1231,20 @@
       const so = sessOHLC();
       const lastLive = n(x.CLastPrice);
       const last = lastLive != null ? lastLive : so ? so.c : null;
+      // 五檔與成交價脫節（夜盤尾 Yahoo 書停更）→ 剔除舊書；若 Worker 帶了官方買一/賣一
+      // 且與成交價相符，退化為單檔顯示（官方即時），否則整表留白。五檔凍結時段不檢。
+      obStale = false;
+      obDegraded = false;
+      if (!bookFrozenNow() && !bookStraddles(x, last)) {
+        stripBookFields(x);
+        const lb = n(x.CLiveBid), la = n(x.CLiveAsk);
+        if (lb != null && la != null && last != null && last >= lb - BOOK_PX_TOL && last <= la + BOOK_PX_TOL) {
+          x.CBidPrice1 = lb; x.CBidSize1 = "";
+          x.CAskPrice1 = la; x.CAskSize1 = "";
+          obDegraded = true;
+        }
+        obStale = true;
+      }
       const ref = n(x.CRefPrice);
       let openPx = so ? so.o : null;
       let highPx = so ? so.h : null;
@@ -1355,7 +1369,8 @@
       const amp = (highPx != null && lowPx != null) ? Math.abs(highPx - lowPx) : null;
       const ampPct = (amp != null && openPx) ? (amp / openPx) * 100 : null;
       const ampTxt = amp == null ? "" : ("震幅" + Math.round(amp) + "點(" + (ampPct == null ? "—" : ampPct.toFixed(1) + "%") + ")");
-      ob += `<tr><td class="lab bid"></td><td></td><td class="pxb">買價</td><td class="pxa">賣價</td><td colspan="2" class="rng">${ampTxt}</td></tr>`;
+      const bookNote = obStale ? (obDegraded ? "・五檔僅官方買賣一" : "・五檔待即時源") : "";
+      ob += `<tr><td class="lab bid"></td><td></td><td class="pxb">買價</td><td class="pxa">賣價</td><td colspan="2" class="rng">${ampTxt}${bookNote}</td></tr>`;
       levels.forEach((i) => {
         const bs = n(x["CBidSize" + i]) || 0;
         const asz = n(x["CAskSize" + i]) || 0;
@@ -5406,6 +5421,9 @@
         inMarket: raw(d.inMarket) != null ? Math.round(raw(d.inMarket) * 1000) : "",
         outMarket: raw(d.outMarket) != null ? Math.round(raw(d.outMarket) * 1000) : "",
       };
+      // MIS 官方買一／賣一（Worker 以官方即時價覆蓋；Yahoo 夜盤書停更時的單檔備援）
+      q.CLiveBid = raw(d.bid);
+      q.CLiveAsk = raw(d.ask);
       const book = d.orderbook || [];
       for (let i = 0; i < 5; i++) {
         const lvl = book[i] || {};
@@ -5435,6 +5453,21 @@
       if (!(bids[0] < asks[0]) || asks[0] - bids[0] > 20) return false;
       for (let i = 1; i < bids.length; i++) if (bids[i - 1] - bids[i] > 10) return false;
       for (let i = 1; i < asks.length; i++) if (asks[i] - asks[i - 1] > 10) return false;
+      return true;
+    }
+    // 五檔一致性：真書必夾住最新成交價（買一 ≤ 成交 ≤ 賣一，允許少量容差）。
+    // 夜盤尾 Yahoo 常「成交價續動、五檔欄位停更」，舊書會離成交價上百點。
+    // 這種脫節書一律視為無效——寧可留白，也絕不顯示與成交價脫鉤的錯價。
+    const BOOK_PX_TOL = 40; // 點
+    let obStale = false;    // 本輪五檔因與成交價脫節被剔除
+    let obDegraded = false; // 退化為官方單檔（買一／賣一）
+    function bookStraddles(q, last) {
+      if (!q || last == null) return true;
+      const b = n(q.CBidPrice1);
+      const a = n(q.CAskPrice1);
+      if (b == null && a == null) return true;
+      if (b != null && last < b - BOOK_PX_TOL) return false;
+      if (a != null && last > a + BOOK_PX_TOL) return false;
       return true;
     }
     function stripBookFields(q) {
@@ -6319,7 +6352,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.75";
+        const VER = "2.76";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {

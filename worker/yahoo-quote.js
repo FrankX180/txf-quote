@@ -309,6 +309,20 @@ function yahooBookFresh(rawW, nowMs) {
   return !!src && src === tradingDayKey(nowMs);
 }
 
+/** 真五檔必夾住成交價（買一 ≤ 成交 ≤ 賣一，容差內）。
+ *  夜盤 Yahoo 常「總表（成交價）續動、五檔欄位停更」，與官方即時成交價脫節的書一律不採用
+ *  （寧可留白，也不把錯價送給前端 applyLive）。 */
+function bookStraddlesPx(bk, px, tol) {
+  if (!Array.isArray(bk) || !bk.length) return true;
+  if (!(px > 0)) return true;
+  const b = rawNum(bk[0] && bk[0].bid);
+  const a = rawNum(bk[0] && bk[0].ask);
+  if (b == null && a == null) return true;
+  if (b != null && px < b - tol) return false;
+  if (a != null && px > a + tol) return false;
+  return true;
+}
+
 /** 夜盤 Yahoo 常標 marketStatus=close，不可當颱風假。有內外盤或有量即視為在交易。
  *  來源日≠今日交易鍵（假日殘值）一律不當 live。 */
 function looksLikeLiveQuote(rawW, nowMs) {
@@ -1902,11 +1916,16 @@ export default {
     await ensureHolidays();
     if (Array.isArray(rows)) {
       const wtx = rows.find((x) => x && x.symbol === "WTX&") || rows[0];
-      if (wtx && !yahooBookFresh(wtx, nowMs)) {
-        // 假日／來源日≠交易鍵：不把殘值五檔與內外盤送給前端 applyLive。
-        delete wtx.orderbook;
-        wtx.inMarket = null;
-        wtx.outMarket = null;
+      if (wtx) {
+        if (!yahooBookFresh(wtx, nowMs)) {
+          // 假日／來源日≠交易鍵：不把殘值五檔與內外盤送給前端 applyLive。
+          delete wtx.orderbook;
+          wtx.inMarket = null;
+          wtx.outMarket = null;
+        } else if (!bookStraddlesPx(wtx.orderbook, rawNum(wtx.price), 40)) {
+          // 五檔與成交價脫節（夜盤尾 Yahoo 書停更）：只丟書，內外盤照常。
+          delete wtx.orderbook;
+        }
       }
     }
     if (!Array.isArray(rows)) {
