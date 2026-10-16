@@ -847,23 +847,58 @@
     let misWsRetry = 0;
     let misWsTimer = null;
     let misWsOpen = false;
-    let misBook = { day: null, night: null }; // { f:{欄位}, ts }
-    // 官方五檔續命：收盤後（如夜盤 05:00 起）到下一盤前，MIS 推流會停，
-    // 若只認「25 秒內推流」會把最後一筆官方五檔丟掉，顯示端就退回空白／單檔。
-    // 保留窗放寬到 12 小時以跨過整段休市；真的脫節（與成交價差 >40 點）仍由 bookStraddles() 剔除。
-    const MIS_BOOK_KEY = "txfMisBook";
-    const MIS_BOOK_KEEP_MS = 12 * 60 * 60 * 1000;
+    let misBook = { day: null, night: null }; // { f:{欄位}, ts, sym }
+    // 官方五檔續命：收盤後（如夜盤 05:00 起）到下一盤前，MIS 推流會停。
+    // 保留窗 12h 只作「Yahoo 無書時的最後備援」，絕不用舊書覆寫比它新的價（見 applyMisOverlay）。
+    const MIS_BOOK_KEY = "txfMisBook.v1"; // 版本化，避免舊格式污染
+    const MIS_BOOK_KEEP_MS = 12 * 60 * 60 * 1000; // 最後備援硬上限
+    const MIS_FRESH_MS = 25000; // 新鮮線：<=此值才允許覆寫價與書
     let misBookSaveAt = 0;
+    let misBookFlush = null;
+    // 還原時逐盤結構驗證；壞值不進記憶體（否則 render 會在 b.f 上拋例外）
+    function misBookValid(b, sk) {
+      if (!b || typeof b !== "object" || typeof b.ts !== "number") return false;
+      if (!b.f || typeof b.f !== "object" || b.f.CLastPrice == null) return false;
+      if (b.sym && misSymFor(sk) && b.sym !== misSymFor(sk)) return false; // 跨月／跨合約丟棄
+      return true;
+    }
     try {
       const _mb = JSON.parse(localStorage.getItem(MIS_BOOK_KEY) || "null");
-      if (_mb) misBook = { day: _mb.day || null, night: _mb.night || null };
+      if (_mb && typeof _mb === "object") {
+        misBook = {
+          day: misBookValid(_mb.day, "day") ? _mb.day : null,
+          night: misBookValid(_mb.night, "night") ? _mb.night : null,
+        };
+      }
     } catch (e) {}
-    function saveMisBook() {
+    function saveMisBook(force) {
       const t = Date.now();
-      if (t - misBookSaveAt < 3000) return; // 節流：推流密集時別每次寫 localStorage
+      if (!force && t - misBookSaveAt < 3000) {
+        // 節流：排一個尾端 flush，確保收盤前最後一筆也寫入
+        if (!misBookFlush) misBookFlush = setTimeout(function () { misBookFlush = null; saveMisBook(true); }, 3200);
+        return;
+      }
+      if (misBookFlush) { clearTimeout(misBookFlush); misBookFlush = null; }
       misBookSaveAt = t;
-      try { localStorage.setItem(MIS_BOOK_KEY, JSON.stringify(misBook)); } catch (e) {}
+      try {
+        // 多分頁：寫前讀回，逐盤取 ts 較新者，避免舊分頁把新書蓋回去
+        const cur = JSON.parse(localStorage.getItem(MIS_BOOK_KEY) || "null");
+        const pick = {};
+        ["day", "night"].forEach(function (k) {
+          const a = misBook[k], c = cur && cur[k];
+          if (!a) { pick[k] = c || null; return; }
+          if (!c) { pick[k] = a; return; }
+          pick[k] = (Number(a.ts) || 0) >= (Number(c.ts) || 0) ? a : c;
+        });
+        localStorage.setItem(MIS_BOOK_KEY, JSON.stringify(pick));
+      } catch (e) {}
     }
+    try { window.addEventListener("pagehide", function () { saveMisBook(true); }); } catch (e) {}
+    try {
+      document.addEventListener("visibilitychange", function () {
+        if (document.visibilityState === "hidden") saveMisBook(true);
+      });
+    } catch (e) {}
     let misRenderAt = 0;
     let misRenderTimer = null;
     function misRand(n) {
@@ -974,7 +1009,7 @@
         if (nm && vals[k] != null && vals[k] !== "") f[nm] = vals[k];
       });
       if (f.CLastPrice == null) return;
-      misBook[sk] = { f: f, ts: Date.now() };
+      misBook[sk] = { f: f, ts: Date.now(), sym: (typeof sym === "string" ? sym : "") };
       misWsOpen = true;
       saveMisBook();
       // 走勢／K 棒只讓「當下盤別」驅動，避免收盤後殘值污染
@@ -996,24 +1031,36 @@
     }
     // render() 開頭呼叫：把最新 MIS 五檔／成交價覆疊進 snap（Yahoo 為主源，MIS 為即時覆蓋）
     function applyMisOverlay() {
+      obAged = false;
       if (!snap) return;
       const sk = sessKey();
       if (sk !== "day" && sk !== "night") return;
       const b = misBook[sk];
-      if (!b) return;
-      // 25 秒內視為即時；否則只要連線仍開著，或未超過保留窗（MIS_BOOK_KEEP_MS）就沿用最後一筆官方五檔。
-      // 夜盤收盤（05:00）後推流停止，靠這段把最後官方五檔留在畫面上，不再變空白。
-      if (Date.now() - b.ts > MIS_BOOK_KEEP_MS && !misWsOpen) return;
+      if (!b || !b.f) return;
+      if (b.sym && misSymFor(sk) && b.sym !== misSymFor(sk)) return; // 跨月殘值不採用
+      const age = Date.now() - b.ts;
+      if (!(age >= 0) || age > MIS_BOOK_KEEP_MS) return; // 超過保留窗 → 不用
       if (!snap[sk]) snap[sk] = {};
       const f = b.f;
-      ["CLastPrice", "CRefPrice", "CDiff", "CDiffRate", "CTotalVolume", "CTime", "CDate"].forEach(function (k) {
-        if (f[k] != null && f[k] !== "") snap[sk][k] = f[k];
-      });
-      for (let i = 1; i <= 5; i++) {
-        ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach(function (p) {
-          const key = p + i;
-          if (f[key] != null && f[key] !== "") snap[sk][key] = f[key];
+      const fresh = age <= MIS_FRESH_MS;
+      // 價／時間：只在新鮮時覆寫。WS 斷線空窗期間絕不用舊 MIS 價蓋掉 Yahoo 的新價
+      // （否則價格與書一起變舊，bookStraddles 會因同源而攔不住）。
+      if (fresh) {
+        ["CLastPrice", "CRefPrice", "CDiff", "CDiffRate", "CTotalVolume", "CTime", "CDate"].forEach(function (k) {
+          if (f[k] != null && f[k] !== "") snap[sk][k] = f[k];
         });
+      }
+      // 書：新鮮 → 直接覆寫；舊書 → 只在 Yahoo 無書時當最後備援
+      // （此時價仍是 Yahoo 的，若舊書與之脫節，render 的 bookStraddles 會再剔除）。
+      const yahooHasBook = snap[sk].CBidPrice1 != null || snap[sk].CAskPrice1 != null;
+      if (fresh || !yahooHasBook) {
+        for (let i = 1; i <= 5; i++) {
+          ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach(function (p) {
+            const key = p + i;
+            if (f[key] != null && f[key] !== "") snap[sk][key] = f[key];
+          });
+        }
+        if (!fresh) obAged = true; // 顯示的是官方最後快照，非即時
       }
     }
     const TRAFFIC_MODES = ["online", "month", "total"];
@@ -1422,7 +1469,7 @@
       const amp = (highPx != null && lowPx != null) ? Math.abs(highPx - lowPx) : null;
       const ampPct = (amp != null && openPx) ? (amp / openPx) * 100 : null;
       const ampTxt = amp == null ? "" : ("震幅" + Math.round(amp) + "點(" + (ampPct == null ? "—" : ampPct.toFixed(1) + "%") + ")");
-      const bookNote = obStale ? (obDegraded ? "・五檔僅官方買賣一" : "・五檔待即時源") : "";
+      const bookNote = obStale ? (obDegraded ? "・五檔僅官方買賣一" : "・五檔待即時源") : (obAged ? "・官方五檔快照" : "");
       ob += `<tr><td class="lab bid"></td><td></td><td class="pxb">買價</td><td class="pxa">賣價</td><td colspan="2" class="rng">${ampTxt}${bookNote}</td></tr>`;
       levels.forEach((i) => {
         const bs = n(x["CBidSize" + i]) || 0;
@@ -5526,6 +5573,7 @@
     const BOOK_PX_TOL = 40; // 點
     let obStale = false;    // 本輪五檔因與成交價脫節被剔除
     let obDegraded = false; // 退化為官方單檔（買一／賣一）
+    let obAged = false;     // 本輪顯示的是官方五檔最後快照（非即時）
     function bookStraddles(q, last) {
       if (!q || last == null) return true;
       const b = n(q.CBidPrice1);
@@ -6420,7 +6468,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.81";
+        const VER = "2.82";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
