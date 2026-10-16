@@ -848,6 +848,22 @@
     let misWsTimer = null;
     let misWsOpen = false;
     let misBook = { day: null, night: null }; // { f:{欄位}, ts }
+    // 官方五檔續命：收盤後（如夜盤 05:00 起）到下一盤前，MIS 推流會停，
+    // 若只認「25 秒內推流」會把最後一筆官方五檔丟掉，顯示端就退回空白／單檔。
+    // 保留窗放寬到 12 小時以跨過整段休市；真的脫節（與成交價差 >40 點）仍由 bookStraddles() 剔除。
+    const MIS_BOOK_KEY = "txfMisBook";
+    const MIS_BOOK_KEEP_MS = 12 * 60 * 60 * 1000;
+    let misBookSaveAt = 0;
+    try {
+      const _mb = JSON.parse(localStorage.getItem(MIS_BOOK_KEY) || "null");
+      if (_mb) misBook = { day: _mb.day || null, night: _mb.night || null };
+    } catch (e) {}
+    function saveMisBook() {
+      const t = Date.now();
+      if (t - misBookSaveAt < 3000) return; // 節流：推流密集時別每次寫 localStorage
+      misBookSaveAt = t;
+      try { localStorage.setItem(MIS_BOOK_KEY, JSON.stringify(misBook)); } catch (e) {}
+    }
     let misRenderAt = 0;
     let misRenderTimer = null;
     function misRand(n) {
@@ -916,11 +932,9 @@
           const vals = q.values || {};
           const sym = String(q.symbol || vals["55"] || "");
           if (misWsSyms.length && sym && misWsSyms.indexOf(sym) < 0) return;
-          // 只採與當盤盤別相符的契約（日 -F／夜 -M），自動略掉另一盤殘值
-          const sk = sessKindAt(Date.now());
-          const want = sk === "day" ? "-F" : sk === "night" ? "-M" : "";
-          if (!want || (sym && sym.slice(-2) !== want)) return;
-          misOnQuote(vals);
+          // 依契約後綴（日 -F／夜 -M）歸盤儲存，不再用「當下盤別」過濾：
+          // 收盤瞬間盤別轉 closed 時，仍要留住官方最後五檔供顯示端使用。
+          misOnQuote(vals, sym);
         });
       };
       ws.onclose = function () { misWsOpen = false; misWs = null; scheduleMisRetry(); };
@@ -946,9 +960,14 @@
       }
       misWsOpen = false;
     }
-    function misOnQuote(vals) {
-      const sk = sessKindAt(Date.now());
-      if (sk !== "day" && sk !== "night") return;
+    function misOnQuote(vals, sym) {
+      const cur = sessKindAt(Date.now());
+      // 歸盤：優先看契約後綴（-F 日／-M 夜），後綴不明才用當下盤別
+      let sk = null;
+      if (sym && /-F$/.test(sym)) sk = "day";
+      else if (sym && /-M$/.test(sym)) sk = "night";
+      else if (cur === "day" || cur === "night") sk = cur;
+      if (!sk) return;
       const f = {};
       Object.keys(vals).forEach(function (k) {
         const nm = MIS_QNAME[k];
@@ -957,8 +976,12 @@
       if (f.CLastPrice == null) return;
       misBook[sk] = { f: f, ts: Date.now() };
       misWsOpen = true;
-      bumpLiveBar(); // 當根 1 分 K 的收盤／高／低跟推流同步（不等 15 秒 REST）
-      touchSessTrack(sk, n(f.CLastPrice)); // 開高低隨時推流 tick 走，不等 15 秒 REST
+      saveMisBook();
+      // 走勢／K 棒只讓「當下盤別」驅動，避免收盤後殘值污染
+      if (sk === cur) {
+        bumpLiveBar(); // 當根 1 分 K 的收盤／高／低跟推流同步（不等 15 秒 REST）
+        touchSessTrack(sk, n(f.CLastPrice)); // 開高低隨時推流 tick 走，不等 15 秒 REST
+      }
       scheduleMisRender();
     }
     function scheduleMisRender() {
@@ -978,7 +1001,9 @@
       if (sk !== "day" && sk !== "night") return;
       const b = misBook[sk];
       if (!b) return;
-      if (Date.now() - b.ts > 25000) return; // 斷線超過 25 秒 → 退回 Yahoo
+      // 25 秒內視為即時；否則只要連線仍開著，或未超過保留窗（MIS_BOOK_KEEP_MS）就沿用最後一筆官方五檔。
+      // 夜盤收盤（05:00）後推流停止，靠這段把最後官方五檔留在畫面上，不再變空白。
+      if (Date.now() - b.ts > MIS_BOOK_KEEP_MS && !misWsOpen) return;
       if (!snap[sk]) snap[sk] = {};
       const f = b.f;
       ["CLastPrice", "CRefPrice", "CDiff", "CDiffRate", "CTotalVolume", "CTime", "CDate"].forEach(function (k) {
@@ -6395,7 +6420,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.80";
+        const VER = "2.81";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
