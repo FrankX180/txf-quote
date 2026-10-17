@@ -5958,6 +5958,7 @@
         if (fixed[other]) snap[other] = fixed[other];
       }
       // 開頁必打 Worker：snapshot 可能停在中午；收盤後也要最新收／五檔
+      if (!(Array.isArray(liveRows) && liveRows.length)) window.__txfClosedPollAt = 0; // 空回應也讓 pollLive 接手重試
       if (Array.isArray(liveRows) && liveRows.length) {
         applyLive(liveRows);
         if (!marketOpen()) {
@@ -6581,7 +6582,8 @@
     startLive1mGuard();
     startPoll();
     startTraffic();
-    klineTimer = setInterval(loadKline, 300000);
+    // 休市時 K 線檔與散戶比不會變：只在開盤期間每 5 分鐘重載（開頁那次已載過）
+    klineTimer = setInterval(() => { if (marketOpen()) loadKline(); }, 300000);
   </script>
 </body>
 </html>
