@@ -934,8 +934,21 @@
     function misWsUrl() {
       return MIS_WS_BASE + misRand(3) + "/" + misRand(8) + "/websocket";
     }
+    // 休市時是否已有可用的官方最後五檔快取（靈空市後資料是靜態的，不需要連線）
+    function misHasClosedBook() {
+      const sk = sessKey();
+      const b = misBook[sk];
+      if (!b || !b.f || b.f.CBidPrice1 == null) return false;
+      return !(b.sym && misSymFor(sk) && b.sym !== misSymFor(sk));
+    }
     function startMisWs() {
-      if (misWs || document.visibilityState !== "visible") return;
+      if (document.visibilityState !== "visible") return;
+      // 休市：有快取就不連、已連的也關掉（先存最後一筆）；沒快取才連一次拿資料
+      if (!marketOpen() && misHasClosedBook()) {
+        if (misWs || misWsTimer) { saveMisBook(true); stopMisWs(); }
+        return;
+      }
+      if (misWs) return;
       misWsSyms = misSymbols();
       openMisWs();
     }
@@ -1028,6 +1041,8 @@
         touchSessTrack(sk, n(f.CLastPrice)); // 開高低隨時推流 tick 走，不等 15 秒 REST
       }
       scheduleMisRender();
+      // 休市且拿到官方五檔：立即存檔並關連線，不再乾跑
+      if (!marketOpen() && misHasClosedBook()) { saveMisBook(true); stopMisWs(); }
     }
     function scheduleMisRender() {
       if (misRenderTimer) return;
@@ -1049,7 +1064,7 @@
       if (!b || !b.f) return;
       if (b.sym && misSymFor(sk) && b.sym !== misSymFor(sk)) return; // 跨月殘值不採用
       const age = Date.now() - b.ts;
-      if (!(age >= 0) || age > MIS_BOOK_KEEP_MS) return; // 超過保留窗 → 不用
+      if (!(age >= 0) || (age > MIS_BOOK_KEEP_MS && marketOpen())) return; // 盤中超過保留窗 → 不用；休市快取不限時效
       if (!snap[sk]) snap[sk] = {};
       const f = b.f;
       const fresh = age <= MIS_FRESH_MS;
@@ -1081,7 +1096,8 @@
       if (b && b.f) {
         const symOk = !b.sym || !misSymFor(sk) || b.sym === misSymFor(sk);
         const age = Date.now() - b.ts;
-        if (symOk && age >= 0 && age <= MIS_BOOK_KEEP_MS) {
+        // 休市時快取不限時效（收盤歸檔的靈沒有「舊」），盤中才套 12h 上限
+        if (symOk && age >= 0 && (age <= MIS_BOOK_KEEP_MS || !marketOpen())) {
           const f = b.f;
           let any = false;
           for (let i = 1; i <= 5; i++) {
