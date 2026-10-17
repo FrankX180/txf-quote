@@ -4055,7 +4055,7 @@
       const { ctx, w, h } = fitCanvas(c, showImb ? 320 : 280);
       ctx.clearRect(0, 0, w, h);
       // 休市富台模式：資料未到前不畫舊夜盤殘圖，避免開頁閃一下舊資料
-      if (isTaiwanHolidayNow() && daySpan < 2 && !twnSim) {
+      if (isTwnSimWindow() && daySpan < 2 && !twnSim) {
         ctx.fillStyle = "#9ca3af";
         ctx.font = "14px sans-serif";
         ctx.fillText("載入富台走勢中…", 16, h / 2);
