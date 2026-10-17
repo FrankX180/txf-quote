@@ -4054,7 +4054,7 @@
         return;
       }
       const pts = linePoints();
-      if (pts.length < 2) {
+      if (pts.length < 1) {
         ctx.fillStyle = "#9ca3af";
         ctx.font = "14px sans-serif";
         ctx.fillText("走勢累積中…", 16, h / 2);
@@ -4466,12 +4466,14 @@
               }
             }
           } else if (segs.length === 1) {
-            // 僅 1 點：畫小圓
+            // 僅 1 點（開盤第 1 分）：畫零軸到該點的柱，紅綠依內外盤正負
             const p = segs[0];
+            const src = ibs[0];
+            const tot = src && (src.in + src.out) > 0 ? src.in + src.out : 0;
+            const frac = tot ? Math.max(-1, Math.min(1, p.d / tot)) : 0;
+            const barLen = Math.abs(frac) * (imbH - 4) / 2;
             ctx.fillStyle = p.d >= 0 ? "#d32f2f" : "#1b8a3e";
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.fillRect(p.x - 2, p.d >= 0 ? zeroY - Math.max(1, barLen) : zeroY, 4, Math.max(1, barLen));
           }
 
           imbHit = { segs, ibs, zeroY, half, maxAbs, imbTop, imbH };
