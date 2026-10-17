@@ -941,11 +941,35 @@
       if (!b || !b.f || b.f.CBidPrice1 == null) return false;
       return !(b.sym && misSymFor(sk) && b.sym !== misSymFor(sk));
     }
+    // 休市五檔＝伺服器端檔案 data/mis-book.json（排程用 MIS 抓好的最後官方五檔），前端不連 MIS
+    let misServerLoading = false;
+    function loadServerBook() {
+      if (misServerLoading) return;
+      misServerLoading = true;
+      gh("data/mis-book.json").then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+        misServerLoading = false;
+        if (!j) return;
+        let changed = false;
+        ["day", "night"].forEach(function (sk) {
+          const s = j[sk];
+          if (!s || !s.f || s.f.CBidPrice1 == null) return;
+          if (s.sym && misSymFor(sk) && s.sym !== misSymFor(sk)) return; // 跨月契約丟棄
+          const cur = misBook[sk];
+          const sStamp = String(s.f.CDate || "") + String(s.f.CTime || "").padStart(6, "0");
+          const cStamp = cur && cur.f ? String(cur.f.CDate || "") + String(cur.f.CTime || "").padStart(6, "0") : "";
+          if (cStamp && cStamp > sStamp) return; // 本機已有更新的就不倒退
+          misBook[sk] = { f: s.f, ts: s.ts || Date.now(), sym: s.sym || "" };
+          changed = true;
+        });
+        if (changed) { saveMisBook(true); scheduleMisRender(); }
+      }).catch(function () { misServerLoading = false; });
+    }
     function startMisWs() {
       if (document.visibilityState !== "visible") return;
-      // 休市：有快取就不連、已連的也關掉（先存最後一筆）；沒快取才連一次拿資料
-      if (!marketOpen() && misHasClosedBook()) {
+      // 休市：只讀伺服器快取、不連 MIS；已連的順手關掉
+      if (!marketOpen()) {
         if (misWs || misWsTimer) { saveMisBook(true); stopMisWs(); }
+        loadServerBook();
         return;
       }
       if (misWs) return;

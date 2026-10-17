@@ -19,6 +19,7 @@ on:
       - "scripts/fetch_vix.py"
       - "scripts/when.py"
       - "scripts/fetch_imb.py"
+      - "scripts/fetch_mis_book.py"
       - "scripts/fetch_holidays.py"
       - "scripts/holiday_guard.py"
       - "scripts/fetch_twn_ratio.py"
@@ -86,6 +87,11 @@ jobs:
       - name: Fetch cloud imb (R2 via Worker)
         run: python scripts/fetch_imb.py
         continue-on-error: true
+      - name: Fetch TAIFEX MIS official 5-level book (closed-market cache)
+        run: |
+          pip install --quiet websocket-client
+          python scripts/fetch_mis_book.py
+        continue-on-error: true
       - name: Commit snapshot
         run: |
           set -euo pipefail
@@ -93,7 +99,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/snapshot.json data/history-night.json data/history-day.json data/twn-ratio.json \
                   data/kline-minute.json data/uncovered.json data/tmf_retail.json \
-                  data/kline-daily.json data/vix.json data/imb-*.json data/imb-latest.json
+                  data/kline-daily.json data/vix.json data/imb-*.json data/imb-latest.json data/mis-book.json
           if git diff --cached --quiet; then
             echo "no change"
             exit 0
