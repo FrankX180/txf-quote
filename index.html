@@ -1296,7 +1296,7 @@
 
       const x = q();
       if (!x) {
-        if (!isHol) $("stamp").textContent = "尚無資料";
+        if (!isTaiwanHolidayNow()) $("stamp").textContent = "尚無資料";
         return;
       }
       // 開/高/低：只用 sessOHLC（當盤 1 分+tick）；絕不 fallback 奇摩混盤（否則震幅會變夜盤 696 點）
