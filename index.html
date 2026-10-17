@@ -953,7 +953,8 @@
         misWs = null; misWsOpen = false;
         scheduleMisRetry();
       }, 4000);
-      ws.onopen = function () { clearTimeout(connTimer); misWsRetry = 0; };
+      // 只清逾時；重試計數等收到第一筆報價才歸零，避免「連上即斷」被 300ms 狂重連
+      ws.onopen = function () { clearTimeout(connTimer); };
       ws.onmessage = function (ev) {
         const d = ev.data;
         if (d === "o") {
@@ -964,6 +965,7 @@
           return;
         }
         if (typeof d !== "string" || d.charAt(0) !== "a") return;
+        misWsRetry = 0;
         let arr;
         try { arr = JSON.parse(d.slice(1)); } catch (e) { return; }
         (arr || []).forEach(function (it) {
