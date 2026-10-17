@@ -936,13 +936,12 @@
     }
     function startMisWs() {
       if (misWs || document.visibilityState !== "visible") return;
-      if (!marketOpen()) return;
       misWsSyms = misSymbols();
       openMisWs();
     }
     function openMisWs() {
       if (misWs) return;
-      if (!marketOpen() || document.visibilityState !== "visible") return;
+      if (document.visibilityState !== "visible") return;
       let ws;
       try { ws = new WebSocket(misWsUrl()); } catch (e) { scheduleMisRetry(); return; }
       misWs = ws;
@@ -981,7 +980,7 @@
       misWsRetry++;
       misWsTimer = setTimeout(function () {
         misWsTimer = null;
-        if (document.visibilityState === "visible" && marketOpen()) openMisWs();
+        if (document.visibilityState === "visible") openMisWs();
       }, wait);
     }
     function stopMisWs() {
@@ -1050,18 +1049,51 @@
           if (f[k] != null && f[k] !== "") snap[sk][k] = f[k];
         });
       }
-      // 書：新鮮 → 直接覆寫；舊書 → 只在 Yahoo 無書時當最後備援
-      // （此時價仍是 Yahoo 的，若舊書與之脫節，render 的 bookStraddles 會再剔除）。
-      const yahooHasBook = snap[sk].CBidPrice1 != null || snap[sk].CAskPrice1 != null;
-      if (fresh || !yahooHasBook) {
+      // 五檔不在这里合并：由 resolveBook() 單一解析（MIS → Yahoo → 空白），
+      // 避免 A 寫一次、B 再蓋一次的多來源穿插（2026-10-17 一條龍重構）。
+    }
+
+    // ── 五檔單一解析（一條龍）：MIS 官方 → Yahoo/Worker 真書 → 空白 ──
+    // 回傳來源字串；x 上的 CBidPrice*/CAsk* 只由這裡改寫，其他地方不准動。
+    function resolveBook(x, sk, last) {
+      obAged = false;
+      obStale = false;
+      obDegraded = false;
+      const clearAll = function () {
         for (let i = 1; i <= 5; i++) {
-          ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach(function (p) {
-            const key = p + i;
-            if (f[key] != null && f[key] !== "") snap[sk][key] = f[key];
-          });
+          delete x["CBidPrice" + i]; delete x["CBidSize" + i];
+          delete x["CAskPrice" + i]; delete x["CAskSize" + i];
         }
-        if (!fresh) obAged = true; // 顯示的是官方最後快照，非即時
+      };
+      // ① MIS 官方推流（含休市最後快照，保留窗 MIS_BOOK_KEEP_MS）
+      const b = misBook[sk];
+      if (b && b.f) {
+        const symOk = !b.sym || !misSymFor(sk) || b.sym === misSymFor(sk);
+        const age = Date.now() - b.ts;
+        if (symOk && age >= 0 && age <= MIS_BOOK_KEEP_MS) {
+          const f = b.f;
+          let any = false;
+          for (let i = 1; i <= 5; i++) {
+            ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach(function (p) {
+              const k = p + i;
+              if (f[k] != null && f[k] !== "") { x[k] = f[k]; any = true; }
+              else delete x[k];
+            });
+          }
+          if (any) {
+            obAged = age > MIS_FRESH_MS; // 休市顯示的是官方最後快照
+            return "mis";
+          }
+        }
       }
+      // ② Yahoo/Worker：只收夾住成交價的真書
+      if (x.CBidPrice1 != null || x.CAskPrice1 != null) {
+        if (bookStraddles(x, last)) return "yahoo";
+        clearAll();
+      }
+      // ③ 無書
+      obStale = true;
+      return "none";
     }
     const TRAFFIC_MODES = ["online", "month", "total"];
     let trafficMode = 0;
@@ -1313,38 +1345,8 @@
       const last = lastLive != null ? lastLive : so ? so.c : null;
       // 五檔與成交價脫節（夜盤尾 Yahoo 書停更）→ 剔除舊書；若 Worker 帶了官方買一/賣一
       // 且與成交價相符，退化為單檔顯示（官方即時），否則整表留白。五檔凍結時段不檢。
-      obStale = false;
-      obDegraded = false;
-      // 休市凍結只保「夾住成交價」的收盤書；脫節舊書（例 46631 vs 46140 差 490 點）照樣剔除留白（2026-10-17）
-      const bookFrozenClosed = !marketOpen() && bookStraddles(x, last);
-      if (!bookFrozenNow() && !bookFrozenClosed) {
-        const noBook = x.CBidPrice1 == null && x.CAskPrice1 == null;
-        if (noBook || !bookStraddles(x, last)) {
-          if (!noBook) stripBookFields(x);
-          // Worker 帶了官方買一/賣一（MIS）且夾住成交價 → 退化為單檔顯示（官方即時、絕不脫節）
-          const lb = n(x.CLiveBid), la = n(x.CLiveAsk);
-          if (lb != null && la != null && last != null && last >= lb - BOOK_PX_TOL && last <= la + BOOK_PX_TOL) {
-            x.CBidPrice1 = lb; x.CBidSize1 = "";
-            x.CAskPrice1 = la; x.CAskSize1 = "";
-            obDegraded = true;
-            obStale = true;
-          } else if (!noBook) {
-            obStale = true;
-          }
-        }
-      }
-      // 退回單檔後已寫進 snap（暫態失真），下一輪 render 它看起來就像「真書」而把標示抹掉。
-      // 用形狀判定：只有買賣一、2~5 檔全空＝官方單檔備援。
-      if (
-        (x.CBidPrice1 != null || x.CAskPrice1 != null) &&
-        x.CBidPrice2 == null && x.CAskPrice2 == null &&
-        x.CBidPrice3 == null && x.CAskPrice3 == null &&
-        x.CBidPrice4 == null && x.CAskPrice4 == null &&
-        x.CBidPrice5 == null && x.CAskPrice5 == null
-      ) {
-        obStale = true;
-        obDegraded = true;
-      }
+      // 五檔單一解析（一條龍）：MIS 官方 → Yahoo 真書 → 空白。其他分支不准再改書（2026-10-17）
+      const bookSrc = resolveBook(x, sessKey(), last);
       const ref = n(x.CRefPrice);
       let openPx = so ? so.o : null;
       let highPx = so ? so.h : null;
@@ -1479,7 +1481,9 @@
       const amp = (highPx != null && lowPx != null) ? Math.abs(highPx - lowPx) : null;
       const ampPct = (amp != null && openPx) ? (amp / openPx) * 100 : null;
       const ampTxt = amp == null ? "" : ("震幅" + Math.round(amp) + "點(" + (ampPct == null ? "—" : ampPct.toFixed(1) + "%") + ")");
-      const bookNote = obStale ? (obDegraded ? "・五檔僅官方買賣一" : "・五檔待即時源") : (obAged ? "・官方五檔快照" : "");
+      // 五檔來源標示（單一真相）：MIS 官方快照／待即時源／正常
+      const bookNote = bookSrc === "mis" ? (obAged ? "・官方五檔（收盤快照）" : "") :
+        (bookSrc === "none" ? "・五檔待即時源" : "");
       ob += `<tr><td class="lab bid"></td><td></td><td class="pxb">買價</td><td class="pxa">賣價</td><td colspan="2" class="rng">${ampTxt}${bookNote}</td></tr>`;
       levels.forEach((i) => {
         const bs = n(x["CBidSize" + i]) || 0;
@@ -5756,22 +5760,8 @@
           // 日收後～夜開前：五檔一律凍結，Worker／奇摩在此期間常送夜盤或退化檔位（例 14:47 夜盤 46,327）
           return;
         }
-        // 休市凍結：只有「真書且夾住成交價」才覆寫，否則保留收盤書（2026-10-17）
-        // 不用 render 的 bookStraddles（它依賴 snap，會同源自證）；直接比 q0 新書 vs prev 舊成交
-        if (hasBook && !hol) {
-          const nb = n(q0.CBidPrice1), na = n(q0.CAskPrice1);
-          const plast = n(prev.CLastPrice != null ? prev.CLastPrice : px);
-          const straddles = plast == null || ((nb == null || plast >= nb - BOOK_PX_TOL) && (na == null || plast <= na + BOOK_PX_TOL));
-          const fullBook = [2, 3, 4, 5].some((i) => q0["CBidPrice" + i] != null || q0["CAskPrice" + i] != null);
-          if (straddles && (fullBook || prev.CBidPrice2 == null)) {
-            for (let i = 1; i <= 5; i++) {
-              ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach((k) => {
-                const key = k + i;
-                if (q0[key] != null && q0[key] !== "") prev[key] = q0[key];
-              });
-            }
-          }
-        }
+        // 五檔一律由 render 的 resolveBook() 解析（MIS 官方 → Yahoo 真書 → 空白），
+        // 這裡不再寫書，避免多來源穿插（2026-10-17 一條龍）。
         healRefPrice(prev);
         snap[freezeSk] = prev;
         saveLastBook(freezeSk, snap[freezeSk]);
