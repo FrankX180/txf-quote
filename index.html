@@ -6583,7 +6583,13 @@
     startPoll();
     startTraffic();
     // 休市時 K 線檔與散戶比不會變：只在開盤期間每 5 分鐘重載（開頁那次已載過）
-    klineTimer = setInterval(() => { if (marketOpen()) loadKline(); }, 300000);
+    // 跨過收盤的那一輪也要載一次（lastKOpen 上一輪還在開盤），把最後一批 K 線補齊
+    let lastKOpen = marketOpen();
+    klineTimer = setInterval(() => {
+      const o = marketOpen();
+      if (o || lastKOpen) loadKline();
+      lastKOpen = o;
+    }, 300000);
   </script>
 </body>
 </html>
