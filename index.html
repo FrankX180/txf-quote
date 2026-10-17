@@ -2143,6 +2143,14 @@
       return false;
     }
 
+    // 富台模擬窗口（老公 10-17）：只有國定假日（台指期休市、富台有開）才模擬；週末不算
+    function isTwnSimWindow(d) {
+      d = d || new Date();
+      const hm = d.getHours() * 100 + d.getMinutes();
+      if (hm < 510) return isHoliday(d) || isHoliday(_prevCalDay(d));
+      return isHoliday(d);
+    }
+
     let twnData = null;
     // 富台 1 分 K 存檔（scripts/fetch_twn_hist.py → data/twn-hist.json）：補 HiStock 只留約一個半盤的缺口
     let twnHist = null;
@@ -3172,7 +3180,7 @@
       // → 預設（當前 session）時折線終點 == 頂部預估點數
       let twnAppend = null;
       const histBars = twnHist && Array.isArray(twnHist.bars) ? twnHist.bars : [];
-      if (isTaiwanHolidayNow() && ((twnData && Array.isArray(twnData.points) && twnData.points.length > 0) || histBars.length > 1)) {
+      if (isTwnSimWindow() && ((twnData && Array.isArray(twnData.points) && twnData.points.length > 0) || histBars.length > 1)) {
         const gas = (twnData && twnData.gas) || {};
         const tr = twnRatio || {};
         const ratio = Number(tr.ratio) || Number(gas.ratioUsed || gas.ratio) || 11.4063;
@@ -4041,7 +4049,7 @@
       const c = $("chart");
       const multi0 = daySpan >= 2;
       // 富台模擬模式：休市且已有富台分時資料 → 當日走勢以橘色呈現、免切換 UI
-      const twnSim = isTaiwanHolidayNow() && daySpan < 2 && twnData && Array.isArray(twnData.points) && twnData.points.length > 1;
+      const twnSim = isTwnSimWindow() && daySpan < 2 && twnData && Array.isArray(twnData.points) && twnData.points.length > 1;
       const TWN_COLOR = "#f97316";
       const showImb = !multi0 && !twnSim;
       const { ctx, w, h } = fitCanvas(c, showImb ? 320 : 280);
