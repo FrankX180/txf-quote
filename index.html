@@ -1296,7 +1296,13 @@
 
       const x = q();
       if (!x) {
-        if (!isTaiwanHolidayNow()) $("stamp").textContent = "尚無資料";
+        // 休市無 q()：左上不再卡「載入中」，直接寫最後知道的時間（2026-10-17）
+        if (snap && (snap.night || snap.day)) {
+          const qq = snap.night || snap.day;
+          if ($("stamp") && qq && qq.CDate && qq.CTime) $("stamp").textContent = fmtTime(qq.CDate, qq.CTime) + tmfDateTag();
+        } else if (!isTaiwanHolidayNow()) {
+          $("stamp").textContent = "尚無資料";
+        }
         return;
       }
       // 開/高/低：只用 sessOHLC（當盤 1 分+tick）；絕不 fallback 奇摩混盤（否則震幅會變夜盤 696 點）
