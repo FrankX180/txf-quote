@@ -5847,7 +5847,8 @@
           $("live").textContent = closedLabel();
         }
         const mark = window.__txfClosedPollAt || 0;
-        if (Date.now() - mark < 15000) return;
+        // 休市資料是靜態的：5 分鐘才確認一次（原本每 15 秒），開盤瞬間由 marketOpen() 轉走盤中路徑
+        if (Date.now() - mark < 300000) return;
         window.__txfClosedPollAt = Date.now();
         try {
           const rows = await fetch(LIVE, { cache: "default" }).then((r) => r.json());
@@ -5897,6 +5898,8 @@
 
     async function load() {
       await loadHolidays(); // 先載入休市日 SSOT，再判定今日是否交易日
+      // 休市資料是靜態的：開頁這一次已經由 load() 拉 Worker，pollLive 不必同時再打一次
+      if (!marketOpen()) window.__txfClosedPollAt = Date.now();
 
       // 台灣休市日優先拉取富台指資料以供走勢圖與頂部開盤價估算
       if (isTwnSimWindow()) {
@@ -5930,6 +5933,7 @@
         liveRows = await fetch(LIVE).then((r) => r.json());
       } catch (e) {
         liveRows = null;
+        window.__txfClosedPollAt = 0; // 失敗就讓 pollLive 接手重試
       }
       if (!live) {
         if (s) {
