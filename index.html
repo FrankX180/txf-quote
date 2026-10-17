@@ -1237,7 +1237,7 @@
 
     function render() {
       applyMisOverlay(); // MIS 即時五檔／成交價覆疊（未接通則維持 Yahoo）
-      const isHol = isTaiwanHolidayNow();
+      const isHol = isTwnSimWindow();
       if (isHol && twnData && twnData.latestPrice) {
         const gas = twnData.gas || {};
         const tr = twnRatio || {};
@@ -2147,7 +2147,10 @@
     function isTwnSimWindow(d) {
       d = d || new Date();
       const hm = d.getHours() * 100 + d.getMinutes();
-      if (hm < 510) return isHoliday(d) || isHoliday(_prevCalDay(d));
+      if (hm < 510) {
+        if (isBizDay(_prevCalDay(d))) return false; // 前一營業日夜盤仍在走
+        return isHoliday(d) || isHoliday(_prevCalDay(d));
+      }
       return isHoliday(d);
     }
 
@@ -5772,7 +5775,7 @@
       if (!marketOpen()) {
         live = false;
         // 台灣休市時，主動拉取富台指（SGX TWN）即時走勢與預估開盤價
-        if (isTaiwanHolidayNow()) {
+        if (isTwnSimWindow()) {
           const twn = await fetchTwnQuote();
           if (twn && $("live")) {
             $("live").className = "live holiday-twn";
@@ -5780,7 +5783,7 @@
             if (chartMode === "line") draw();
           }
         }
-        if ($("live") && (!isTaiwanHolidayNow() || !twnData)) {
+        if ($("live") && (!isTwnSimWindow() || !twnData)) {
           $("live").className = "live";
           $("live").textContent = closedLabel();
         }
@@ -5793,7 +5796,7 @@
             applyLive(rows);
             live = false;
             if ($("live")) {
-              if (isTaiwanHolidayNow() && twnData) {
+              if (isTwnSimWindow() && twnData) {
                 $("live").className = "live holiday-twn";
                 $("live").textContent = "休市・富台連動";
               } else {
@@ -5837,7 +5840,7 @@
       await loadHolidays(); // 先載入休市日 SSOT，再判定今日是否交易日
 
       // 台灣休市日優先拉取富台指資料以供走勢圖與頂部開盤價估算
-      if (isTaiwanHolidayNow()) {
+      if (isTwnSimWindow()) {
         try {
           await fetchTwnQuote();
         } catch (_) {}
@@ -5897,7 +5900,7 @@
         if (!marketOpen()) {
           live = false;
           if ($("live")) {
-            if (isTaiwanHolidayNow() && twnData) {
+            if (isTwnSimWindow() && twnData) {
               $("live").className = "live holiday-twn";
               $("live").textContent = "休市・富台連動";
             } else {
