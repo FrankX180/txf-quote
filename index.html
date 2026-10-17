@@ -3228,6 +3228,12 @@
             }
           }
         }
+        // 富台夜盤尾段裁切（老公 10-17）：清晨夜盤收盤前最後幾分鐘不畫（收盤補點與換算尾點不穩，會造成尾端跳點）
+        for (let i = raw.length - 1; i >= 0; i--) {
+          const d = new Date(raw[i][0]);
+          const hm = d.getHours() * 100 + d.getMinutes();
+          if (hm >= 455 && hm <= 515) raw.splice(i, 1);
+        }
         if (raw.length >= 2) {
           // 盤別一律走 twnSessOfHm（單一真相），不再自帶一份邊界
           const twnSessOfTs = (ts) => {
