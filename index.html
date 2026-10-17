@@ -945,7 +945,15 @@
       let ws;
       try { ws = new WebSocket(misWsUrl()); } catch (e) { scheduleMisRetry(); return; }
       misWs = ws;
-      ws.onopen = function () { misWsRetry = 0; };
+      // 連線逾時 4 秒：MIS 前端偶回 522 會卡到十幾秒才失敗，與其乾等不如立刻換一條重連
+      const connTimer = setTimeout(function () {
+        if (misWs !== ws || ws.readyState === 1) return;
+        ws.onclose = null; ws.onerror = null; ws.onmessage = null;
+        try { ws.close(); } catch (e) {}
+        misWs = null; misWsOpen = false;
+        scheduleMisRetry();
+      }, 4000);
+      ws.onopen = function () { clearTimeout(connTimer); misWsRetry = 0; };
       ws.onmessage = function (ev) {
         const d = ev.data;
         if (d === "o") {
@@ -971,12 +979,13 @@
           misOnQuote(vals, sym);
         });
       };
-      ws.onclose = function () { misWsOpen = false; misWs = null; scheduleMisRetry(); };
+      ws.onclose = function () { clearTimeout(connTimer); misWsOpen = false; misWs = null; scheduleMisRetry(); };
       ws.onerror = function () { misWsOpen = false; };
     }
     function scheduleMisRetry() {
       if (misWsTimer) return;
-      const wait = Math.min(30000, 3000 * Math.pow(2, Math.min(misWsRetry, 4)));
+      // 前兩次快速重試（0.3s／1s），之後才拉長，上限 15s
+      const wait = misWsRetry === 0 ? 300 : Math.min(15000, 1000 * Math.pow(2, misWsRetry - 1));
       misWsRetry++;
       misWsTimer = setTimeout(function () {
         misWsTimer = null;
