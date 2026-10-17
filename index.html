@@ -1313,7 +1313,9 @@
       // 且與成交價相符，退化為單檔顯示（官方即時），否則整表留白。五檔凍結時段不檢。
       obStale = false;
       obDegraded = false;
-      if (!bookFrozenNow()) {
+      // 休市凍結：收盤書就是最後真相，不做脫節剔除（2026-10-17：週末舊書被清成單檔）
+      const bookFrozenClosed = !marketOpen();
+      if (!bookFrozenNow() && !bookFrozenClosed) {
         const noBook = x.CBidPrice1 == null && x.CAskPrice1 == null;
         if (noBook || !bookStraddles(x, last)) {
           if (!noBook) stripBookFields(x);
@@ -5752,12 +5754,20 @@
           // 日收後～夜開前：五檔一律凍結，Worker／奇摩在此期間常送夜盤或退化檔位（例 14:47 夜盤 46,327）
           return;
         }
+        // 休市凍結：只有「真書且夾住成交價」才覆寫，否則保留收盤書（2026-10-17）
+        // 不用 render 的 bookStraddles（它依賴 snap，會同源自證）；直接比 q0 新書 vs prev 舊成交
         if (hasBook && !hol) {
-          for (let i = 1; i <= 5; i++) {
-            ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach((k) => {
-              const key = k + i;
-              if (q0[key] != null && q0[key] !== "") prev[key] = q0[key];
-            });
+          const nb = n(q0.CBidPrice1), na = n(q0.CAskPrice1);
+          const plast = n(prev.CLastPrice != null ? prev.CLastPrice : px);
+          const straddles = plast == null || ((nb == null || plast >= nb - BOOK_PX_TOL) && (na == null || plast <= na + BOOK_PX_TOL));
+          const fullBook = [2, 3, 4, 5].some((i) => q0["CBidPrice" + i] != null || q0["CAskPrice" + i] != null);
+          if (straddles && (fullBook || prev.CBidPrice2 == null)) {
+            for (let i = 1; i <= 5; i++) {
+              ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach((k) => {
+                const key = k + i;
+                if (q0[key] != null && q0[key] !== "") prev[key] = q0[key];
+              });
+            }
           }
         }
         healRefPrice(prev);
