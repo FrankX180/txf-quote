@@ -108,17 +108,25 @@ function rawNum(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+// 模組層快取：Intl.DateTimeFormat 建構一次要數十 µs，而免費方案每次請求 CPU 上限只有 10ms，
+// 熱路徑（twParts／sessionOf／shouldRunCron／maybeHealChips）每次重建等於白燒 CPU。2026-10-20
+const TW_FMT = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Taipei",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+const TW_WD_FMT = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Taipei",
+  weekday: "short",
+});
+
 function twParts(ms) {
-  const fmt = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Taipei",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  });
+  const fmt = TW_FMT;
   const parts = {};
   for (const p of fmt.formatToParts(new Date(ms))) {
     if (p.type !== "literal") parts[p.type] = p.value;
@@ -173,10 +181,7 @@ function isHolidayMs(ms) {
 function nightLiveMs(ms) {
   const p = twParts(ms);
   const base = p.hm < 510 ? ms - 24 * 3600 * 1000 : ms;
-  const wd = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Taipei",
-    weekday: "short",
-  }).format(new Date(base));
+  const wd = TW_WD_FMT.format(new Date(base));
   if (wd === "Sun" || wd === "Sat") return false;
   return !isHolidayMs(base);
 }
@@ -210,8 +215,7 @@ function sessionEndMs(ms) {
 function shouldRunCron(ms) {
   const p = twParts(ms);
   const hm = p.hm;
-  const wdFmt = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Taipei", weekday: "short" });
-  const wd = wdFmt.format(new Date(ms));
+  const wd = TW_WD_FMT.format(new Date(ms));
 
   // 1. 週末整整兩天完全無盤，直接 0ms return (週六 05:10 ~ 週一 08:44)
   if (wd === "Sun") return false;
@@ -245,11 +249,7 @@ function sessionOf(ms) {
   const p = twParts(ms);
   const hm = p.hm;
   // 週六 05:10 後、週日：不寫
-  const wdFmt = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Taipei",
-    weekday: "short",
-  });
-  const wd = wdFmt.format(new Date(ms)); // Sun Mon ...
+  const wd = TW_WD_FMT.format(new Date(ms)); // Sun Mon ...
   if (wd === "Sun") return null;
   if (wd === "Sat" && hm >= 510) return null;
   // 凌晨（00:00–05:09）屬前一日夜盤；其餘時段看當日
@@ -496,8 +496,7 @@ async function maybeHealGithub(env, reason) {
 async function maybeHealChips(env) {
   const now = Date.now();
   const p = twParts(now);
-  const fmt = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Taipei", weekday: "short" });
-  const wd = fmt.format(new Date(now));
+  const wd = TW_WD_FMT.format(new Date(now));
   if (wd === "Sat" || wd === "Sun") return { ok: false, reason: "weekend", skipped: true };
   if (p.hm < 1430 || p.hm > 1530) return { ok: false, reason: "outside-chips-window", skipped: true };
 
@@ -1529,11 +1528,7 @@ async function refreshTmfRetail(env, days) {
 
 function wantTmfRefresh(ms) {
   const p = twParts(ms);
-  const fmt = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Taipei",
-    weekday: "short",
-  });
-  const wd = fmt.format(new Date(ms));
+  const wd = TW_WD_FMT.format(new Date(ms));
   if (wd === "Sat" || wd === "Sun") return false;
   const hm = p.hm;
   // 官方約兩點多公布；14:30 起抓，最慢 15:00 前要更新完
@@ -1549,10 +1544,7 @@ function twDateStr(ms) {
 
 // 上一個工作日（六日往前找；國定假日的近似——誤判頂多多打一次網站下載，無害且自癒）
 function lastWorkdayTw(ms) {
-  const fmt = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Taipei",
-    weekday: "short",
-  });
+  const fmt = TW_WD_FMT;
   for (let i = 1; i <= 4; i++) {
     const t = ms - i * 86400000;
     const wd = fmt.format(new Date(t));
