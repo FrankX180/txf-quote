@@ -7,7 +7,7 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
 TZ = timezone(timedelta(hours=8))
-LIVE = "https://wtx.19850926.xyz/?kind=imb"
+LIVE = "https://wtx.blok.trading/?kind=imb"
 
 
 def day_key(dt=None):

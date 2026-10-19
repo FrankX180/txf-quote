@@ -141,8 +141,8 @@ def main():
         {"enabled": True},
     )
     print("workers_dev", sub and sub.get("success"))
-    # 雙網域綁定：主網域 wtx.blok.trading + 舊別名 wtx.19850926.xyz
-    for hid, zid in [("wtx.blok.trading", ZID_BLOK), ("wtx.19850926.xyz", ZID_1985)]:
+    # 單網域綁定：主網域 wtx.blok.trading（舊別名 wtx.19850926.xyz 已於 2026-10-20 下線）
+    for hid, zid in [("wtx.blok.trading", ZID_BLOK)]:
         dom = call(
             "PUT",
             f"https://api.cloudflare.com/client/v4/accounts/{AID}/workers/domains",
