@@ -629,6 +629,7 @@
     let hist = { night: [], day: [] };
     let live = false;
     let daySpan = 0;
+    let lastVwap = null;
     let chartMode = "line";
     let kInt = "1";
     (function applyUrlBoot() {
@@ -1435,7 +1436,7 @@
           `<span class="sessico" id="sessToggle" title="${session === "day" ? "日盤，點一下切夜盤" : "夜盤，點一下切日盤"}">${session === "day" ? "☀️" : "🌙"}</span>` +
           `<div class="sumtxt">` +
           `股價 <b>${fmt(last, 0)}</b> <span class="${cls(diff)}">${arrow(diff)} ${fmt(diff, 0)}(${fmt(rate, 2)}%)</span>` +
-          `　總口數 ${fmt(x.CTotalVolume)}<br>` +
+          `　總口數 ${fmt(x.CTotalVolume)}　<span style="color:#7c3aed">均 ${lastVwap != null ? Math.round(lastVwap) : "—"}</span><br>` +
           `昨 ${fmtPlain(x.CRefPrice)}　開 ${fmtPlain(openPx)}　高 <span class="up">${fmtPlain(highPx)}</span>　低 <span class="dn">${fmtPlain(lowPx)}</span>` +
           `</div>`;
       }
@@ -4120,7 +4121,7 @@
       const twnSim = isTwnSimWindow() && daySpan < 2 && twnData && Array.isArray(twnData.points) && twnData.points.length > 1;
       const TWN_COLOR = "#f97316";
       const showImb = !multi0 && !twnSim;
-      const { ctx, w, h } = fitCanvas(c, showImb ? 320 : 280);
+      const { ctx, w, h } = fitCanvas(c, showImb ? 364 : 280);
       ctx.clearRect(0, 0, w, h);
       // 休市富台模式：資料未到前不畫舊夜盤殘圖，避免開頁閃一下舊資料
       if (isTwnSimWindow() && daySpan < 2 && !twnSim) {
@@ -4174,12 +4175,15 @@
       const imbGap = imbH ? 6 : 0;
       const cw = w - padL - padR;
       const ch = h - padT - padB - imbH - imbGap;
+      // 成交量帶：只在「當日單盤走勢」時佔用價格區底部 44px
+      const volH = (showImb && !multi && !twnSim) ? 44 : 0;
+      const chP = ch - volH;
       const imbTop = padT + ch + imbGap;
       // 多日：有資料段落連續拼接 + 段間小縫；不按日曆開整天空窗
       const xAtI = (i, t) => multi && wins.length
         ? mapOnWindows(t, wins, padL, cw)
         : padL + ((t - t0) / Math.max(1, t1 - t0)) * cw;
-      const yAt = (p) => padT + (1 - (p - mn) / (mx - mn)) * ch;
+      const yAt = (p) => padT + (1 - (p - mn) / (mx - mn)) * chP;
 
       ctx.strokeStyle = "#e5e7eb";
       ctx.lineWidth = 1;
@@ -4323,6 +4327,57 @@
         }
       });
 
+      // 成交量柱：價格區底部帶，紅漲綠跌，高度＝該點量／全場最大量
+      if (volH > 0 && pts.length > 1) {
+        const baseY = padT + chP;
+        let maxVol = 0;
+        for (let i = 0; i < pts.length; i++) maxVol = Math.max(maxVol, +pts[i].vol || 0);
+        ctx.save();
+        ctx.strokeStyle = "rgba(148,163,184,0.45)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(padL, baseY + 0.5);
+        ctx.lineTo(padL + cw, baseY + 0.5);
+        ctx.stroke();
+        if (maxVol > 0) {
+          const bw = Math.max(1, Math.min(5, cw / Math.max(1, pts.length) - 0.4));
+          for (let i = 0; i < pts.length; i++) {
+            const v = +pts[i].vol || 0;
+            if (!v) continue;
+            const x = xAtI(i, pts[i].time);
+            const up = pts[i].px >= (i > 0 ? pts[i - 1].px : pts[i].px);
+            const bh = Math.max(1, (v / maxVol) * (volH - 5));
+            ctx.fillStyle = up ? "rgba(226,60,60,0.45)" : "rgba(17,150,85,0.45)";
+            ctx.fillRect(x - bw / 2, baseY - bh, bw, bh);
+          }
+        }
+        ctx.restore();
+      }
+
+      // 分時均價線（VWAP）：Σ(價×量)／Σ量，自本盤開盤累積
+      let vwapLast = null;
+      if (!twnSim && !multi && pts.length > 1) {
+        let pv = 0, vv = 0, started = false;
+        ctx.save();
+        ctx.strokeStyle = "#7c3aed";
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        for (let i = 0; i < pts.length; i++) {
+          const v = +pts[i].vol || 0;
+          pv += pts[i].px * v;
+          vv += v;
+          if (!vv) continue;
+          const wp = pv / vv;
+          vwapLast = wp;
+          const x = xAtI(i, pts[i].time), y = yAt(wp);
+          if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
+      lastVwap = multi ? null : vwapLast;
+      if ($("vwapTag")) $("vwapTag").textContent = vwapLast != null ? fmt(Math.round(vwapLast)) : "—";
+
       // 當日走勢 36MA：暖機取「圖上第一點之前」的 1 分收（跨日／跨盤接前一 Session）
       if (!twnSim && !multi && pts.length >= 1) {
         const t0pt = pts[0].time;
@@ -4424,6 +4479,10 @@
         ctx.stroke();
         const bh = Math.max(2, yBot - yTop);
         ctx.fillRect(mid - 6.5, yTop, 13, bh);
+        ctx.font = "10px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        ctx.fillText("今", mid, Math.max(padT + 9, yH - 4));
       }
 
       imbHit = null;
@@ -6554,7 +6613,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.83";
+        const VER = "2.84";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
