@@ -4377,7 +4377,7 @@
         if (vwapLast != null) {
           const lx = xAtI(pts.length - 1, pts[pts.length - 1].time);
           const ly = yAt(vwapLast);
-          const txt = "均 " + fmt(Math.round(vwapLast));
+          const txt = "量權均 " + fmt(Math.round(vwapLast));
           ctx.save();
           ctx.font = "10px sans-serif";
           ctx.textAlign = "left";
@@ -4393,15 +4393,14 @@
       }
 
 
-      // 當日走勢 36 點滾動量權均價（量權均）：暖機取圖上第一點之前的 1 分收，權重用該根量
-      let vwmaLast = null;
+      // 當日走勢 36 點均價（簡單移動平均）：暖機取圖上第一點之前的 1 分收（跨日／跨盤接前一 Session）
+      let ma36Last = null;
       if (!twnSim && !multi && pts.length >= 1) {
         const t0pt = pts[0].time;
         const seedBars = joinBars(minutePack.night_1m, minutePack.day_1m)
           .filter((b) => b && b.timestamp < t0pt && b.close != null)
           .sort((a, b) => a.timestamp - b.timestamp);
-        const seed = seedBars.slice(-35).map((b) => [b.close, Math.max(1, +b.volume || 0)]);
-        const series = seed.concat(pts.map((p) => [p.px, Math.max(0, +p.vol || 0)]));
+        const seed = seedBars.map((b) => b.close).slice(-35);
         ctx.save();
         ctx.strokeStyle = "#f5a66a";
         ctx.lineWidth = 1.25;
@@ -4409,13 +4408,13 @@
         ctx.beginPath();
         let started = false;
         for (let i = 0; i < pts.length; i++) {
-          const end = seed.length + i + 1;
-          const take = series.slice(Math.max(0, end - 36), end);
+          const win = seed.concat(pts.slice(0, i + 1).map((p) => p.px));
+          const take = win.slice(-36);
           if (!take.length) continue;
-          let sw = 0, sp = 0;
-          for (let j = 0; j < take.length; j++) { sw += take[j][1]; sp += take[j][0] * take[j][1]; }
-          const ma = sw > 0 ? sp / sw : take[take.length - 1][0];
-          vwmaLast = ma;
+          let s = 0;
+          for (let j = 0; j < take.length; j++) s += take[j];
+          const ma = s / take.length;
+          ma36Last = ma;
           const x = xAtI(i, pts[i].time);
           const y = yAt(ma);
           if (!started) {
@@ -4426,10 +4425,10 @@
         if (started) ctx.stroke();
         ctx.restore();
       }
-      if (vwmaLast != null) {
+      if (ma36Last != null) {
         const lx2 = xAtI(pts.length - 1, pts[pts.length - 1].time);
-        const ly2 = yAt(vwmaLast);
-        const txt2 = "量權均 " + fmt(Math.round(vwmaLast));
+        const ly2 = yAt(ma36Last);
+        const txt2 = "均價 " + fmt(Math.round(ma36Last));
         ctx.save();
         ctx.font = "10px sans-serif";
         ctx.textAlign = "left";
@@ -4514,8 +4513,8 @@
         // 圖例：均價線與 36MA 的顏色說明（畫在最上層，不給線交叉）
         if (!multi && !twnSim && pts.length >= 8) {
           const legend = [];
-          if (vwapLast != null) legend.push(["#7c3aed", "均價 VWAP"]);
-          legend.push(["#f5a66a", "量權均 36 點"]);
+          if (vwapLast != null) legend.push(["#7c3aed", "量權均 VWAP"]);
+          legend.push(["#f5a66a", "均價 36 點"]);
           ctx.save();
           ctx.font = "10px sans-serif";
           ctx.textBaseline = "middle";
@@ -6671,7 +6670,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.87";
+        const VER = "2.88";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
