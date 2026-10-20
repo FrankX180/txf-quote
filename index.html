@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
   <meta charset="UTF-8" />
@@ -629,7 +629,6 @@
     let hist = { night: [], day: [] };
     let live = false;
     let daySpan = 0;
-    let lastVwap = null;
     let chartMode = "line";
     let kInt = "1";
     (function applyUrlBoot() {
@@ -3470,7 +3469,7 @@
             if (px == null || !pxLooksLikeTxf(px)) return;
             if (pts.length && Math.abs(px - pts[pts.length - 1].px) >= PX_SPIKE_PTS) return;
             pts.push({
-              px, vol: h.vol || 0, time: ts,
+              px, vol: 0, time: ts,
               open: px, high: px, low: px, close: px,
             });
           });
@@ -4209,7 +4208,7 @@
           const x = Math.round(xAtI(0, t)) + 0.5;
           ctx.beginPath();
           ctx.moveTo(x, padT);
-          ctx.lineTo(x, padT + ch);
+          ctx.lineTo(x, padT + chP);
           ctx.stroke();
           ctx.fillText(String(new Date(t).getHours()).padStart(2, "0"), x, h - 6);
         }
@@ -4251,7 +4250,7 @@
       const gUp = ctx.createLinearGradient(0, padT, 0, yFlat);
       gUp.addColorStop(0, "rgba(211,47,47,0.32)");
       gUp.addColorStop(1, "rgba(211,47,47,0.00)");
-      const gDn = ctx.createLinearGradient(0, yFlat, 0, padT + ch);
+      const gDn = ctx.createLinearGradient(0, yFlat, 0, padT + chP);
       gDn.addColorStop(0, "rgba(27,138,62,0.00)");
       gDn.addColorStop(1, "rgba(27,138,62,0.32)");
 
@@ -4274,7 +4273,7 @@
         ctx.restore();
         ctx.save();
         ctx.beginPath();
-        ctx.rect(padL, yFlat, w - padL - padR, Math.max(0, padT + ch - yFlat));
+        ctx.rect(padL, yFlat, w - padL - padR, Math.max(0, padT + chP - yFlat));
         ctx.clip();
         areaPath(seg);
         ctx.fillStyle = gDn;
@@ -4392,16 +4391,17 @@
           ctx.restore();
         }
       }
-      lastVwap = multi ? null : vwapLast;
-      if ($("vwapTag")) $("vwapTag").textContent = vwapLast != null ? fmt(Math.round(vwapLast)) : "—";
 
-      // 當日走勢 36MA：暖機取「圖上第一點之前」的 1 分收（跨日／跨盤接前一 Session）
+
+      // 當日走勢 36 點滾動量權均價（量權均）：暖機取圖上第一點之前的 1 分收，權重用該根量
+      let vwmaLast = null;
       if (!twnSim && !multi && pts.length >= 1) {
         const t0pt = pts[0].time;
         const seedBars = joinBars(minutePack.night_1m, minutePack.day_1m)
           .filter((b) => b && b.timestamp < t0pt && b.close != null)
           .sort((a, b) => a.timestamp - b.timestamp);
-        const seed = seedBars.map((b) => b.close).slice(-35);
+        const seed = seedBars.slice(-35).map((b) => [b.close, Math.max(1, +b.volume || 0)]);
+        const series = seed.concat(pts.map((p) => [p.px, Math.max(0, +p.vol || 0)]));
         ctx.save();
         ctx.strokeStyle = "#f5a66a";
         ctx.lineWidth = 1.25;
@@ -4409,12 +4409,13 @@
         ctx.beginPath();
         let started = false;
         for (let i = 0; i < pts.length; i++) {
-          const win = seed.concat(pts.slice(0, i + 1).map((p) => p.px));
-          const take = win.slice(-36);
+          const end = seed.length + i + 1;
+          const take = series.slice(Math.max(0, end - 36), end);
           if (!take.length) continue;
-          let s = 0;
-          for (let j = 0; j < take.length; j++) s += take[j];
-          const ma = s / take.length;
+          let sw = 0, sp = 0;
+          for (let j = 0; j < take.length; j++) { sw += take[j][1]; sp += take[j][0] * take[j][1]; }
+          const ma = sw > 0 ? sp / sw : take[take.length - 1][0];
+          vwmaLast = ma;
           const x = xAtI(i, pts[i].time);
           const y = yAt(ma);
           if (!started) {
@@ -4423,6 +4424,22 @@
           } else ctx.lineTo(x, y);
         }
         if (started) ctx.stroke();
+        ctx.restore();
+      }
+      if (vwmaLast != null) {
+        const lx2 = xAtI(pts.length - 1, pts[pts.length - 1].time);
+        const ly2 = yAt(vwmaLast);
+        const txt2 = "量權均 " + fmt(Math.round(vwmaLast));
+        ctx.save();
+        ctx.font = "10px sans-serif";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        const tw2 = ctx.measureText(txt2).width;
+        let tx2 = lx2 + 6;
+        if (tx2 + tw2 > padL + cw) tx2 = lx2 - 6 - tw2;
+        const ty2 = Math.max(padT + 7, Math.min(padT + chP - 7, ly2 + 9));
+        ctx.fillStyle = "#c2410c";
+        ctx.fillText(txt2, tx2, ty2);
         ctx.restore();
       }
 
@@ -4443,7 +4460,7 @@
         ctx.font = "11px sans-serif";
         ctx.textAlign = "center";
         const lab = String(Math.round(val));
-        const ty = up ? Math.max(padT + 11, y - 8) : Math.min(padT + ch - 2, y + 14);
+        const ty = up ? Math.max(padT + 11, y - 8) : Math.min(padT + chP - 2, y + 14);
         ctx.fillText(lab, Math.min(padL + cw - 20, Math.max(padL + 20, x)), ty);
       }
       if (hiV > -Infinity) markExt(hiI, hiV, true);
@@ -4498,7 +4515,7 @@
         if (!multi && !twnSim && pts.length >= 8) {
           const legend = [];
           if (vwapLast != null) legend.push(["#7c3aed", "均價 VWAP"]);
-          legend.push(["#f5a66a", "36 點 MA"]);
+          legend.push(["#f5a66a", "量權均 36 點"]);
           ctx.save();
           ctx.font = "10px sans-serif";
           ctx.textBaseline = "middle";
@@ -6654,7 +6671,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.86";
+        const VER = "2.87";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
