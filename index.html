@@ -4327,8 +4327,8 @@
         }
       });
 
-      // 成交量柱：價格區底部帶，紅漲綠跌，高度＝該點量／全場最大量
-      if (volH > 0 && pts.length > 1) {
+      // 成交量柱：價格區底部帶，紅漲綠跌，高度＝該點量／全場最大量（開根號縮放，避免開盤單根頂天）
+      if (volH > 0 && pts.length >= 8) {
         const baseY = padT + ch;
         let maxVol = 0;
         for (let i = 0; i < pts.length; i++) maxVol = Math.max(maxVol, +pts[i].vol || 0);
@@ -4340,13 +4340,14 @@
         ctx.lineTo(padL + cw, padT + chP + 0.5);
         ctx.stroke();
         if (maxVol > 0) {
-          const bw = Math.max(1, Math.min(5, cw / Math.max(1, pts.length) - 0.4));
+          const bw = 2;
+          const volBase = Math.max(maxVol, 1);
           for (let i = 0; i < pts.length; i++) {
             const v = +pts[i].vol || 0;
             if (!v) continue;
             const x = xAtI(i, pts[i].time);
             const up = pts[i].px >= (i > 0 ? pts[i - 1].px : pts[i].px);
-            const bh = Math.max(1, (v / maxVol) * (volH - 5));
+            const bh = Math.max(1, Math.sqrt(v / volBase) * (volH - 5));
             ctx.fillStyle = up ? "rgba(226,60,60,0.45)" : "rgba(17,150,85,0.45)";
             ctx.fillRect(x - bw / 2, baseY - bh, bw, bh);
           }
@@ -4493,6 +4494,30 @@
         ctx.moveTo(mid, yH);
         ctx.lineTo(mid, yL);
         ctx.stroke();
+        // 圖例：均價線與 36MA 的顏色說明（畫在最上層，不給線交叉）
+        if (!multi && !twnSim && pts.length >= 8) {
+          const legend = [];
+          if (vwapLast != null) legend.push(["#7c3aed", "均價 VWAP"]);
+          legend.push(["#f5a66a", "36 點 MA"]);
+          ctx.save();
+          ctx.font = "10px sans-serif";
+          ctx.textBaseline = "middle";
+          ctx.textAlign = "left";
+          let tw = 0;
+          for (const it of legend) tw += 11 + ctx.measureText(it[1]).width + 10;
+          const bx = padL + 4, by = padT + 4;
+          ctx.fillStyle = "rgba(255,255,255,0.86)";
+          ctx.fillRect(bx - 3, by - 2, tw + 4, 16);
+          let lx = bx;
+          for (const it of legend) {
+            ctx.fillStyle = it[0];
+            ctx.fillRect(lx, by + 5, 8, 3);
+            ctx.fillStyle = "#475569";
+            ctx.fillText(it[1], lx + 11, by + 6);
+            lx += 11 + ctx.measureText(it[1]).width + 10;
+          }
+          ctx.restore();
+        }
         const bh = Math.max(2, yBot - yTop);
         ctx.fillRect(mid - 6.5, yTop, 13, bh);
         ctx.font = "10px sans-serif";
@@ -6629,7 +6654,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.85";
+        const VER = "2.86";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
