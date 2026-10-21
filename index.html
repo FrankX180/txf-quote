@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">2.90</div>
+      <div class="ver foot-right" id="verFoot">2.91</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -4403,7 +4403,7 @@
       let ma36Last = null;
       let ma36Label = "均價 36MA(1分)";
       if (!twnSim && !multi && pts.length >= 1) {
-        const MA_WIN = 36 * 60 * 1000;
+        const MA_MIN = 36; // 36 個交易分鐘（夜盤 3 分節點＝12 根；日盤 1 分節點＝36 根）
         // 同一分鐘內的重複點（尾端 15 秒報價）併成一點，避免近端被 tick 加權
         const nodes = [];
         for (const p of pts) {
@@ -4416,14 +4416,18 @@
           }
           nodes.push({ bk, px: p.px, time: p.time });
         }
+        // 每節點佔用的「交易分鐘」：夜盤 3 分節點 = 3、日盤 1 分 = 1；
+        // 休市缺口（午休 75 分、夜→日 3.75 時）不佔窗，否則午休後 MA 會重新暖機貼價
+        const slots = new Array(nodes.length);
+        for (let i = 0; i < nodes.length; i++) {
+          if (!i) { slots[i] = 1; continue; }
+          const dm = (nodes[i].time - nodes[i - 1].time) / 60000;
+          slots[i] = dm > 10 ? 1 : Math.max(1, Math.min(3, Math.round(dm)));
+        }
         {
-          const gaps = [];
-          for (let i = 1; i < nodes.length && gaps.length < 40; i++) gaps.push(nodes[i].time - nodes[i - 1].time);
-          if (gaps.length) {
-            gaps.sort((a, b) => a - b);
-            const med = gaps[Math.floor(gaps.length / 2)];
-            if (med >= 150000) ma36Label = "均價 12MA(3分)";
-          }
+          let n3 = 0, n1 = 0;
+          for (let i = 0; i < slots.length; i++) (slots[i] >= 3 ? n3++ : n1++);
+          if (n3 > n1) ma36Label = "均價 12MA(3分)";
         }
         ctx.save();
         ctx.strokeStyle = "#f5a66a";
@@ -4433,11 +4437,12 @@
         let started = false;
         for (let i = 0; i < nodes.length; i++) {
           const tEnd = nodes[i].time;
-          let s = 0, cnt = 0;
+          let s = 0, cnt = 0, acc = 0;
           for (let j = i; j >= 0; j--) {
-            if (tEnd - nodes[j].time >= MA_WIN) break;
+            if (acc + slots[j] > MA_MIN) break;
             s += nodes[j].px;
             cnt++;
+            acc += slots[j];
           }
           if (!cnt) continue;
           const ma = s / cnt;
@@ -6697,7 +6702,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.90";
+        const VER = "2.91";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
