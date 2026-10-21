@@ -1,12 +1,12 @@
 {
-  "updatedAt": "2026-10-21 12:27:37",
-  "liveRate": 32.505,
+  "updatedAt": "2026-10-21 12:39:30",
+  "liveRate": 32.519,
   "baseRate": 31.932,
-  "rateAdj": 1.017944382,
+  "rateAdj": 1.018382813,
   "dayClose": 46341,
-  "ratio": 11.427559,
-  "txPx": 46753.0,
-  "twnPx": 4091.25,
+  "ratio": 11.424525,
+  "txPx": 46792.0,
+  "twnPx": 4095.75,
   "ratioSession": "day",
-  "ratioAt": "2026-10-21 12:27:37"
+  "ratioAt": "2026-10-21 12:39:30"
 }
