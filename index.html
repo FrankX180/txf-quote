@@ -813,6 +813,7 @@
       } catch (e) {}
     }
     let lastTot = null;
+    let lastTotAt = 0;
     let liveTimer = null;
     let klineTimer = null;
     let live1mTimer = null;
@@ -3233,12 +3234,16 @@
       if (lastSlot !== slot) return; // 當分尚無棒 → 等 Yahoo chart；禁用單價新建／填洞
       const lastClose = n(last.close);
       if (lastClose != null && Math.abs(px - lastClose) >= PX_SPIKE_PTS) return;
-      const dVol = tot != null && lastTot != null && tot >= lastTot ? tot - lastTot : 0;
+      const dVolRaw = tot != null && lastTot != null && tot >= lastTot ? tot - lastTot : 0;
+      // 防假巨量（VER 2.89）：斷線／休眠／跨盤後 tot 的累積差分會一次灌進同一根 K，
+      // 假巨量會把量柱畫成假柱、VWAP 被它主導而失真。只在間隔正常且增量合理時才累加。
+      const gapMs = lastTotAt ? Date.now() - lastTotAt : 0;
+      const dVol = (dVolRaw > 0 && gapMs <= 90000 && dVolRaw <= 2000) ? dVolRaw : 0;
       last.close = px;
       last.high = Math.max(last.high, px);
       last.low = Math.min(last.low, px);
       if (dVol) last.volume = (last.volume || 0) + dVol;
-      if (tot != null) lastTot = tot;
+      if (tot != null) { lastTot = tot; lastTotAt = Date.now(); }
       save1m();
     }
 
@@ -6670,7 +6675,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.88";
+        const VER = "2.89";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
