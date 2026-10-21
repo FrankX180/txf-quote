@@ -619,7 +619,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">2.80</div>
+      <div class="ver foot-right" id="verFoot">2.90</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -4398,29 +4398,51 @@
       }
 
 
-      // 當日走勢 36 點均價（簡單移動平均）：暖機取圖上第一點之前的 1 分收（跨日／跨盤接前一 Session）
+      // 當日走勢均價（36 分鐘移動平均）：夜盤節點＝3 分 K → 12 根；日盤節點＝1 分 K → 36 根
+      // 只用本盤節點計算，不跨盤取種子（舊版接前一 Session 1 分收，起點被前一日收盤拖到地板）
       let ma36Last = null;
+      let ma36Label = "均價 36MA(1分)";
       if (!twnSim && !multi && pts.length >= 1) {
-        const t0pt = pts[0].time;
-        const seedBars = joinBars(minutePack.night_1m, minutePack.day_1m)
-          .filter((b) => b && b.timestamp < t0pt && b.close != null)
-          .sort((a, b) => a.timestamp - b.timestamp);
-        const seed = seedBars.map((b) => b.close).slice(-35);
+        const MA_WIN = 36 * 60 * 1000;
+        // 同一分鐘內的重複點（尾端 15 秒報價）併成一點，避免近端被 tick 加權
+        const nodes = [];
+        for (const p of pts) {
+          const bk = Math.floor(p.time / 60000);
+          const prev = nodes[nodes.length - 1];
+          if (prev && prev.bk === bk) {
+            prev.px = p.px;
+            prev.time = p.time;
+            continue;
+          }
+          nodes.push({ bk, px: p.px, time: p.time });
+        }
+        {
+          const gaps = [];
+          for (let i = 1; i < nodes.length && gaps.length < 40; i++) gaps.push(nodes[i].time - nodes[i - 1].time);
+          if (gaps.length) {
+            gaps.sort((a, b) => a - b);
+            const med = gaps[Math.floor(gaps.length / 2)];
+            if (med >= 150000) ma36Label = "均價 12MA(3分)";
+          }
+        }
         ctx.save();
         ctx.strokeStyle = "#f5a66a";
         ctx.lineWidth = 1.25;
         ctx.setLineDash([]);
         ctx.beginPath();
         let started = false;
-        for (let i = 0; i < pts.length; i++) {
-          const win = seed.concat(pts.slice(0, i + 1).map((p) => p.px));
-          const take = win.slice(-36);
-          if (!take.length) continue;
-          let s = 0;
-          for (let j = 0; j < take.length; j++) s += take[j];
-          const ma = s / take.length;
+        for (let i = 0; i < nodes.length; i++) {
+          const tEnd = nodes[i].time;
+          let s = 0, cnt = 0;
+          for (let j = i; j >= 0; j--) {
+            if (tEnd - nodes[j].time >= MA_WIN) break;
+            s += nodes[j].px;
+            cnt++;
+          }
+          if (!cnt) continue;
+          const ma = s / cnt;
           ma36Last = ma;
-          const x = xAtI(i, pts[i].time);
+          const x = xAtI(0, tEnd);
           const y = yAt(ma);
           if (!started) {
             ctx.moveTo(x, y);
@@ -4519,7 +4541,7 @@
         if (!multi && !twnSim && pts.length >= 8) {
           const legend = [];
           if (vwapLast != null) legend.push(["#7c3aed", "量權均 VWAP"]);
-          legend.push(["#f5a66a", "均價 36 點"]);
+          legend.push(["#f5a66a", ma36Label]);
           ctx.save();
           ctx.font = "10px sans-serif";
           ctx.textBaseline = "middle";
@@ -6675,7 +6697,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.89";
+        const VER = "2.90";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
