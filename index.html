@@ -3236,7 +3236,7 @@
       if (lastClose != null && Math.abs(px - lastClose) >= PX_SPIKE_PTS) return;
       const dVolRaw = tot != null && lastTot != null && tot >= lastTot ? tot - lastTot : 0;
       // 防假巨量（VER 2.89）：斷線／休眠／跨盤後 tot 的累積差分會一次灌進同一根 K，
-      // 假巨量會把量柱畫成假柱、VWAP 被它主導而失真。只在間隔正常且增量合理時才累加。
+      // 假巨量會把量柱畫成假柱、量能統計失真。只在間隔正常且增量合理時才累加。
       const gapMs = lastTotAt ? Date.now() - lastTotAt : 0;
       const dVol = (dVolRaw > 0 && gapMs <= 90000 && dVolRaw <= 2000) ? dVolRaw : 0;
       last.close = px;
@@ -4359,45 +4359,6 @@
         ctx.restore();
       }
 
-      // 分時均價線（VWAP）：Σ(價×量)／Σ量，自本盤開盤累積
-      let vwapLast = null;
-      if (!twnSim && !multi && pts.length > 1) {
-        let pv = 0, vv = 0, started = false;
-        ctx.save();
-        ctx.strokeStyle = "#7c3aed";
-        ctx.lineWidth = 1.4;
-        ctx.beginPath();
-        for (let i = 0; i < pts.length; i++) {
-          const v = +pts[i].vol || 0;
-          pv += pts[i].px * v;
-          vv += v;
-          if (!vv) continue;
-          const wp = pv / vv;
-          vwapLast = wp;
-          const x = xAtI(i, pts[i].time), y = yAt(wp);
-          if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
-        }
-        ctx.stroke();
-        ctx.restore();
-        if (vwapLast != null) {
-          const lx = xAtI(pts.length - 1, pts[pts.length - 1].time);
-          const ly = yAt(vwapLast);
-          const txt = "量權均 " + fmt(Math.round(vwapLast));
-          ctx.save();
-          ctx.font = "10px sans-serif";
-          ctx.textAlign = "left";
-          ctx.textBaseline = "middle";
-          const tw = ctx.measureText(txt).width;
-          let tx = lx + 6;
-          if (tx + tw > padL + cw) tx = lx - 6 - tw;
-          const ty = Math.max(padT + 7, Math.min(padT + chP - 7, ly - 9));
-          ctx.fillStyle = "#7c3aed";
-          ctx.fillText(txt, tx, ty);
-          ctx.restore();
-        }
-      }
-
-
       // 當日走勢均價（節點移動平均）：夜盤節點 3 分 → 12MA；日盤節點 1 分 → 36MA
       // 窗＝「節點數」，不是根數也不是點數；只用本盤節點，不跨盤取種子
       let ma36Last = null;
@@ -4539,10 +4500,9 @@
         ctx.moveTo(mid, yH);
         ctx.lineTo(mid, yL);
         ctx.stroke();
-        // 圖例：均價線與 36MA 的顏色說明（畫在最上層，不給線交叉）
+      // 均價線的顏色說明
         if (!multi && !twnSim && pts.length >= 8) {
           const legend = [];
-          if (vwapLast != null) legend.push(["#7c3aed", "量權均 VWAP"]);
           legend.push(["#f5a66a", ma36Label]);
           ctx.save();
           ctx.font = "10px sans-serif";
@@ -6699,7 +6659,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.92";
+        const VER = "2.93";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
