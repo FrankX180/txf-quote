@@ -681,15 +681,6 @@
       renderOi();
     }
     let mtxRetailByDate = {};
-    let mtxRetailDate = "";
-    // 微台散戶多空比資料日期標籤（worker 停更時一眼可見）
-    function tmfDateTag() {
-      if (!mtxRetailDate) return "";
-      const d = String(mtxRetailDate);
-      return d.length === 8
-        ? " · 微台" + d.slice(4, 6) + "/" + d.slice(6, 8)
-        : " · 微台" + d;
-    }
     let kMtxPane = null;
     let mtxIndReady = false;
     let oiTab = "oi";
@@ -1385,7 +1376,7 @@
         // 休市無 q()：左上不再卡「載入中」，直接寫最後知道的時間（2026-10-17）
         if (snap && (snap.night || snap.day)) {
           const qq = snap.night || snap.day;
-          if ($("stamp") && qq && qq.CDate && qq.CTime) $("stamp").textContent = fmtTime(qq.CDate, qq.CTime) + tmfDateTag();
+          if ($("stamp") && qq && qq.CDate && qq.CTime) $("stamp").textContent = fmtTime(qq.CDate, qq.CTime);
         } else if (!isTaiwanHolidayNow()) {
           $("stamp").textContent = "尚無資料";
         }
@@ -1431,7 +1422,7 @@
         $("chgline").className = "sub " + cls(diff);
         $("chgline").textContent =
           last == null ? "" : `${arrow(diff)} ${fmt(Math.abs(diff), 0)} (${diff >= 0 ? "" : ""}${fmt(rate, 2)}%)`;
-        $("stamp").textContent = fmtTime(x.CDate, x.CTime) + tmfDateTag();
+        $("stamp").textContent = fmtTime(x.CDate, x.CTime);
         $("sumline").innerHTML =
           `<span class="sessico" id="sessToggle" title="${session === "day" ? "日盤，點一下切夜盤" : "夜盤，點一下切日盤"}">${session === "day" ? "☀️" : "🌙"}</span>` +
           `<div class="sumtxt">` +
@@ -6507,9 +6498,6 @@
         eat(mxGh);
         eat(mx);
         mtxRetailByDate = map;
-        mtxRetailDate = mx && mx.date
-          ? String(mx.date)
-          : mxGh && mxGh.date ? String(mxGh.date) : "";
       } catch (e) {
         mtxRetailByDate = {};
       }
@@ -6659,7 +6647,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.93";
+        const VER = "2.94";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
