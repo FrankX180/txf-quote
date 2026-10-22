@@ -1,5 +1,5 @@
 {
- "fetchedAt": "2026-10-23 00:34:42",
+ "fetchedAt": "2026-10-23 00:45:22",
  "source": "TAIFEX MIS ws",
  "day": {
   "sym": "TXFK6-F",
@@ -29,7 +29,7 @@
    "CAskPrice4": "46286.00",
    "CBidPrice5": "46261.00"
   },
-  "ts": 1792686882059
+  "ts": 1792687522319
  },
  "night": {
   "sym": "TXFK6-M",
