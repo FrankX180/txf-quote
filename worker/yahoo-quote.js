@@ -375,20 +375,27 @@ const HEAL_CHIPS_INTERVAL_MS = 2 * 60 * 1000; // 盤後籌碼定案視窗（14:3
 const HEAL_TWN_WORKFLOW = "twn-hist.yml";
 const HEAL_GH_TWNHIST = "https://frankx180.github.io/txf-quote/data/twn-hist.json";
 const HEAL_GH_TWNMETA = "https://frankx180.github.io/txf-quote/data/twn-hist-meta.json";
-// 來源（TradingView 1 分 K）本身就延遲約 10 分，門檻必须遠高於它，
+// 來源（TradingView 1 分 K）本身就延遲約 10 分，門檻必須遠高於它，
 // 否則健康狀態下也會一直觸發（Rumi 審查 BLOCKER）。45 分＝確定是 Action 沒跑。
 const HEAL_TWN_STALE_MS = 45 * 60 * 1000;
 const HEAL_TWN_CHECK_MS = 10 * 60 * 1000;
 // 同一根 bar 最多每小時重送一次，避免來源延遲造成穩態自我觸發
 const HEAL_TWN_RETRY_MS = 60 * 60 * 1000;
+// D1 故障時的保險（同一 isolate 內不重送）；主節流仍靠 D1
+let _twnLastDispatchMs = 0;
 
+// 回傳 null＝查無資料；回傳 { err: true }＝讀取失敗。
+// 兩者必須分開，否則三道節流（檢查／重試／dispatch）在 D1 故障時全部變成放行，
+// 會退回每分鐘 dispatch 的正回饋（Rumi 審查第二輪 MAJOR）。
 async function getHealState(env, k) {
-  if (!env.IMB_DB) return null;
+  if (!env.IMB_DB) return { err: true };
   try {
     await ensureSchema(env.IMB_DB);
     const row = await env.IMB_DB.prepare("SELECT ts, v FROM heal_state WHERE k = ?").bind(k).first();
     return row || null;
-  } catch (_) { return null; }
+  } catch (_) {
+    return { err: true };
+  }
 }
 async function setHealState(env, k, ts, v) {
   if (!env.IMB_DB) return;
@@ -484,7 +491,7 @@ async function triggerGithubWorkflow(env, reason, opts) {
   }
 }
 // SGX 富台是否開盤（台北時間；不依賴伺服器時區）
-// 日盤 08:45–13:45、夜盤 15:00–次日 05:15；週六 05:15 後至週一 08:45 前休
+// 日盤 08:45–13:45、夜盤 15:00–次日 05:05；週六 05:05 後至週一 08:45 前休
 function twnSgxOpen(ms) {
   const d = new Date(ms + 8 * 3600000);
   const dow = d.getUTCDay(); // 0=週日
@@ -495,7 +502,7 @@ function twnSgxOpen(ms) {
   if (hm >= 1500) return true; // 夜盤
   return false; // 13:45–15:00 休
 }
-// 富台 1 分 K 缺口修復：檔案內容的尾端 bar 超過 12 分鐘沒動就 dispatch twn-hist.yml。
+// 富台 1 分 K 缺口修復：檔案內容的尾端 bar 超過 45 分沒動就 dispatch twn-hist.yml。
 // 不用 Last-Modified／ETag：Pages 任何一次部署（例如行情快照）都會把它們刷新，
 // 檔案內容其實沒變，會被誤判成「很新」。只看內容裡最後一根的 timestamp。
 // 台指休市（含颱風假）也要跑，因為 SGX 照常交易；
@@ -524,6 +531,8 @@ async function maybeHealTwn(env) {
   const now = Date.now();
   if (!twnSgxOpen(now)) return { ok: false, reason: "sgx-closed", skipped: true };
   const lastCheck = await getHealState(env, "last_twn_check");
+  // D1 讀不到就不動手（fail-closed），寧可缺一次也不要繞過節流狂打
+  if (lastCheck && lastCheck.err) return { ok: false, reason: "db-unreadable", skipped: true };
   if (lastCheck && now - Number(lastCheck.ts) < HEAL_TWN_CHECK_MS) {
     return { ok: false, reason: "check-throttled", skipped: true };
   }
@@ -535,14 +544,23 @@ async function maybeHealTwn(env) {
     if (age < HEAL_TWN_STALE_MS) return { ok: true, fresh: true, ageMs: age, skipped: true };
     // 同一根 bar 已送過且未超過重試間隔 → 不再打（防穩態自我觸發）
     const prev = await getHealState(env, "last_twn_dispatch");
+    if (prev && prev.err) return { ok: false, reason: "db-unreadable", skipped: true };
     if (prev && String(prev.v) === String(tailMs) && now - Number(prev.ts) < HEAL_TWN_RETRY_MS) {
       return { ok: false, reason: "no-advance", ageMs: age, skipped: true };
+    }
+    // D1 故障時的保險：同一 isolate 內一小時只送一次
+    if (_twnLastDispatchMs && now - _twnLastDispatchMs < HEAL_TWN_RETRY_MS) {
+      return { ok: false, reason: "local-throttle", ageMs: age, skipped: true };
     }
     const res = await triggerGithubWorkflow(env, `twn-hist age=${Math.round(age / 60000)}m`, {
       workflow: HEAL_TWN_WORKFLOW,
       stateKey: "last_dispatch_twn",
     });
-    await setHealState(env, "last_twn_dispatch", now, String(tailMs));
+    // 只有真的送出去才記；rate-limited／no-token 不算已送（Rumi 審查 MINOR）
+    if (res && res.ok) {
+      _twnLastDispatchMs = now;
+      await setHealState(env, "last_twn_dispatch", now, String(tailMs));
+    }
     return Object.assign({ ageMs: age, tailMs }, res);
   } catch (e) {
     return { ok: false, reason: String((e && e.message) || e).slice(0, 200) };
