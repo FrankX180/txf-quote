@@ -1900,15 +1900,39 @@ export default {
         const ageRes = await fetchGhAgeMs();
         const lastDispatch = await getHealState(env, "last_dispatch");
         const lastCheck = await getHealState(env, "last_gh_check");
+        // 富台巡檢的可觀測性（2026-10-23）：沒這個就無法證明 maybeHealTwn 真的在跑
+        const twnCheck = await getHealState(env, "last_twn_check");
+        const twnDispatch = await getHealState(env, "last_twn_dispatch");
+        let twnTail = 0;
+        try {
+          twnTail = await twnTailMs();
+        } catch (_) {}
         let logs = [];
         try {
           await ensureSchema(env.IMB_DB);
           const { results } = await env.IMB_DB.prepare("SELECT ts, reason, ok, detail FROM heal_log ORDER BY id DESC LIMIT 10").all();
           logs = results || [];
         } catch (_) {}
-        return jsonResp({ ok: true, ghAge: ageRes, lastDispatch, lastCheck, logs, at: new Date().toISOString() }, 200, {
-          "Cache-Control": "no-store",
-        });
+        return jsonResp(
+          {
+            ok: true,
+            ghAge: ageRes,
+            lastDispatch,
+            lastCheck,
+            twn: {
+              open: twnSgxOpen(Date.now()),
+              lastCheck: twnCheck,
+              lastDispatch: twnDispatch,
+              tailMs: twnTail || 0,
+              tailAgeMs: twnTail ? Date.now() - twnTail : null,
+              staleMs: HEAL_TWN_STALE_MS,
+            },
+            logs,
+            at: new Date().toISOString(),
+          },
+          200,
+          { "Cache-Control": "no-store" }
+        );
       } catch (e) {
         return jsonResp({ ok: false, error: String((e && e.message) || e) }, 500, { "Cache-Control": "no-store" });
       }
