@@ -2280,9 +2280,29 @@
     let twnHist = null;
     async function loadTwnHist() {
       try {
-        const j = await gh("data/twn-hist.json").then((r) => r.json());
+        // 帶時間戳繞過 CDN／瀏覽器快取（老公 10-23）：
+        // Pages 部署有數分鐘延遲，頁面剛好在部署窗口載入會拿到前一版，走勢尾端就出現缺口。
+        const j = await gh("data/twn-hist.json?t=" + Date.now()).then((r) => r.json());
         if (j && Array.isArray(j.bars) && j.bars.length > 1) twnHist = j;
       } catch (e) {}
+    }
+    // 富台 1 分 K 定期重抓：GitHub Actions 排程會被節流（實測 3~5 小時才跑一次），
+    // 頁面開整天也不會自己更新，尾端就會破洞。每 5 分鐘看一次，有新版才重繪。
+    let twnHistTimer = null;
+    async function refreshTwnHist() {
+      if (document.visibilityState !== "visible") return;
+      const tail = () =>
+        twnHist && Array.isArray(twnHist.bars) && twnHist.bars.length
+          ? Number(twnHist.bars[twnHist.bars.length - 1][0])
+          : 0;
+      const before = tail();
+      await loadTwnHist();
+      if (tail() && tail() !== before) {
+        try {
+          render();
+          if (chartMode === "line") draw();
+        } catch (_) {}
+      }
     }
     // SGX 富台現在是否開盤（台北時間）：日盤 08:45–13:45、夜盤 14:15–次日 05:15；週六 05:15 後至週一 08:45 前休
     function twnOpenNow() {
@@ -6671,6 +6691,7 @@
       } catch (e) {}
       pollLive();
       liveTimer = setInterval(pollLive, 15000);
+      if (!twnHistTimer) twnHistTimer = setInterval(refreshTwnHist, 5 * 60000);
       startMisWs();
       if (!ghHealTimer) {
         checkGhSnapshotStale();
@@ -6721,7 +6742,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.02";
+        const VER = "3.03";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
