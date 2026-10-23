@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# 自建富台換算係數：ratio = 台指 ÷ 富台（兩市同時刻）；rateAdj = wise 即時匯率 ÷ 基準（僅留存參考，前端不再乘：ratio 取樣當下已含匯率）。
+# 自建富台換算係數：ratio = 台指 ÷ 富台（同一次執行、同一瞬間）。不使用匯率：兩邊都是當下報價，比值本身就是換算關係。
 # ratioDay／ratioNight 依取樣盤別分開存，前端換算依富台點所屬盤別取值。
 # 目的：擺脫對第三方 GAS 的依賴（GAS 降為備援）。→ data/twn-ratio.json
 #
@@ -19,8 +19,6 @@ DATA = ROOT / "data"
 TZ = timezone(timedelta(hours=8))
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"
 WORKER_TWN = "https://wtx.blok.trading/?kind=twn"
-WISE = "https://wise.com/rates/live?source=USD&target=TWD"
-BASE_RATE = 31.932  # 匯率基準常數（沿用康和基準，定義 rateAdj=即時/基準）
 
 
 def _get_json(url, headers, timeout=25):
@@ -53,11 +51,6 @@ def tx_last(session):
         return None
 
 
-def wise_usd_twd():
-    j = _get_json(WISE, {"User-Agent": UA})
-    return float(j.get("value"))
-
-
 def main():
     DATA.mkdir(exist_ok=True)
     now = datetime.now(TZ)
@@ -73,14 +66,9 @@ def main():
     out = dict(prev)
     out["updatedAt"] = now_iso
 
-    # --- 匯率修正（每次執行都更新 live）---
-    try:
-        live = wise_usd_twd()
-        out["liveRate"] = live
-        out["baseRate"] = BASE_RATE
-        out["rateAdj"] = round(live / BASE_RATE, 9)
-    except Exception as e:  # noqa: BLE001
-        print("WARN wise failed: %s" % e, flush=True)
+    # 舊版寫入的匯率欄位一併清掉（已不使用）
+    for k in ("liveRate", "baseRate", "rateAdj"):
+        out.pop(k, None)
 
     # --- ratio（只在兩市同時開盤時更新；休市沿用上一筆）---
     sess = sess_now(now)

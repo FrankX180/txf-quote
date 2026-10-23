@@ -1318,15 +1318,18 @@
       if (isHol && twnData && twnData.latestPrice) {
         const gas = twnData.gas || {};
         const tr = twnRatio || {};
-        const mult = twnRatioFor(twnSessNow()) || Number(gas.ratioUsed || gas.ratio) || 11.406323;
-        const hsLast = (function () {
+        const hsLastPt = (function () {
           const P = twnData.points || [];
           for (let i = P.length - 1; i >= 0; i--) {
             const v = Number(P[i] && P[i][1]);
-            if (Number.isFinite(v) && v > 0) return v;
+            if (Number.isFinite(v) && v > 0) return { v: v, ts: Number(P[i][0]) };
           }
-          return 0;
+          return null;
         })();
+        const hsLast = hsLastPt ? hsLastPt.v : 0;
+        // 倍數依「最後富台點」的盤別取值（與折線錨點同源），不用牆上時鐘
+        const lastHm = hsLastPt ? new Date(hsLastPt.ts).getHours() * 100 + new Date(hsLastPt.ts).getMinutes() : null;
+        const mult = twnRatioFor(lastHm == null ? twnSessNow() : twnSessOfHm(lastHm)) || Number(gas.ratioUsed || gas.ratio) || 11.406323;
         const rtxNow = hsLast || Number(gas.rtxNow || twnData.latestPrice) || 0;
         const estOpen = Math.round(rtxNow * mult);
         const dayClose = Number(tr.dayClose) || Number(gas.dayClose) || n(q() && q().CRefPrice) || estOpen;
@@ -2140,7 +2143,7 @@
     // 自建富台換算係數（scripts/fetch_twn_ratio.py → data/twn-ratio.json）；GAS 降為備援
     let twnRatio = null;
     // 富台換算倍數依盤別取值（老公 10-23 定）：日盤／夜盤各自一筆；舊檔沒分盤時退回 ratio
-    // 倍數＝台指÷富台（同一瞬間），已含當時匯率，換算不再乘 rateAdj（否則匯率被計兩次）
+    // 倍數＝台指÷富台（同一瞬間），換算不使用匯率
     function twnRatioFor(sess) {
       const tr = twnRatio || {};
       return Number(sess === "day" ? tr.ratioDay : tr.ratioNight) || Number(tr.ratio) || 0;
@@ -2148,7 +2151,7 @@
     async function loadTwnRatio() {
       try {
         const j = await gh("data/twn-ratio.json").then((r) => r.json());
-        if (j && (j.ratio || j.rateAdj)) twnRatio = j;
+        if (j && (j.ratio || j.ratioDay || j.ratioNight)) twnRatio = j;
       } catch (e) {}
     }
     async function loadHolidays() {
@@ -3332,11 +3335,11 @@
           if (cur.length) segs.push(cur);
           // 錨點＝全資料最新一點（＝現在那點）；頭部由同一 HiStock 末值換算 → 頭尾同源
           const anchorRaw = raw[raw.length - 1][1];
-          const ratio = ratioOf(twnSessOfTs(raw[raw.length - 1][0])); // 錨點所屬盤別的倍數
-          const anchorPts = Math.round(anchorRaw * ratio);
+          const anchorPts = Math.round(anchorRaw * ratioOf(twnSessOfTs(raw[raw.length - 1][0])));
           const toPts = (seg) =>
             seg.map((p) => {
-              const px = Math.round(anchorPts + (Number(p[1]) - anchorRaw) * ratio);
+              // 每點依自己的盤別倍數換算差距（日盤、夜盤各用各的倍數）
+              const px = Math.round(anchorPts + (Number(p[1]) - anchorRaw) * ratioOf(twnSessOfTs(p[0])));
               return { time: p[0], px: px, rawPx: Number(p[1]), vol: 1, open: px, high: px, low: px, close: px, twn: true };
             });
           if (daySpan < 2) {
@@ -6652,7 +6655,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.95";
+        const VER = "2.96";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
