@@ -3754,8 +3754,10 @@
         const t = sorted[i].time;
         if (sorted[i].brk || t - t1 > MULTI_RUN_BREAK_MS) {
           const win = { t0: t0, t1: Math.max(t0 + 60000, t1), kind: "run", date: "" };
-          // 富台段（brk）前留一段明顯斷口，避免與台指歷史讀成一條
-          if (sorted[i].brk) win.gapAfter = MULTI_SEG_GAP_MS * 8;
+          // 富台段（brk）與台指歷史之間已經斷線（不連成假尖刺），
+          // 斷口寬度沿用其他盤間休息的 30 分即可。
+          // 原本用 8 倍（240 分）會讓同一段休市看起來比昨晚那一段大很多，
+          // 被讀成「資料不见」（老公 10-23 紅框指出）。
           wins.push(win);
           t0 = t;
         }
@@ -6728,7 +6730,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.04";
+        const VER = "3.05";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
