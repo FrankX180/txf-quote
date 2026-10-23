@@ -1328,8 +1328,8 @@
         })();
         const hsLast = hsLastPt ? hsLastPt.v : 0;
         // 倍數依「最後富台點」的盤別取值（與折線錨點同源），不用牆上時鐘
-        const lastHm = hsLastPt ? new Date(hsLastPt.ts).getHours() * 100 + new Date(hsLastPt.ts).getMinutes() : null;
-        const mult = twnRatioFor(lastHm == null ? twnSessNow() : twnSessOfHm(lastHm)) || Number(gas.ratioUsed || gas.ratio) || 11.406323;
+        // 富台點時間戳實測帶 +8h 位移，不能拿來判盤；盤別一律用牆上時間
+        const mult = twnRatioFor(twnSessNow()) || Number(gas.ratioUsed || gas.ratio) || 11.406323;
         const rtxNow = hsLast || Number(gas.rtxNow || twnData.latestPrice) || 0;
         const estOpen = Math.round(rtxNow * mult);
         const dayClose = Number(tr.dayClose) || Number(gas.dayClose) || n(q() && q().CRefPrice) || estOpen;
@@ -6655,7 +6655,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.96";
+        const VER = "2.97";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
