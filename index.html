@@ -478,6 +478,7 @@
     .live { font-size: 11px; margin-left: 8px; color: #9ca3af; }
     .live.on { color: #16a34a; }
     .live.holiday-twn { color: #d97706; font-weight: 600; }
+    .twnbasis { display: inline-block; margin-top: 2px; font-size: 11px; color: #9ca3af; font-weight: 400; letter-spacing: 0; }
     .szbar { display: block; height: 14px; background: var(--dn); max-width: 100%; }
     .szbar.r { background: var(--up); margin-left: auto; }
     .foot {
@@ -1351,6 +1352,9 @@
             `<div class="sumtxt">` +
             `預估台指 <b>${fmt(estOpen, 0)}</b> <span class="${cls(diff)}">${arrow(diff)} ${fmt(diff, 0)}(${fmt(rate, 2)}%)</span><br>` +
             `SGX富台現價 <b>${fmt(rtxNow, 2)}</b>` +
+            (twnRatioInfo
+              ? `<br><span class="twnbasis">換算倍數 ${twnRatioInfo.ratio.toFixed(4)}（${twnRatioInfo.n} 組同刻配對，最後 ${(() => { const d = new Date(twnRatioInfo.at); return String(d.getMonth() + 1).padStart(2, "0") + "/" + String(d.getDate()).padStart(2, "0") + " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); })()}）</span>`
+              : "") +
             `</div>`;
         }
         document.body.classList.add("twn-est");
@@ -2144,6 +2148,8 @@
     // 比值＝台指÷富台，只在「休市需要換算」時，用兩份已載入的 1 分 K 取同時刻配對當場算。
     // 原本排程取樣拿「台指已收盤的舊 1 分 K」除「富台即時價」，兩者不同刻，比值被灌水（10/23 實測 +2.2%）。
     let twnRatio = null;
+    // 最近一次換算基準（供畫面顯示「這個估值怎麼來的」，老公 10-23）
+    let twnRatioInfo = null;
     function computeTwnRatio(sess) {
       const twnBars = twnHist && Array.isArray(twnHist.bars) ? twnHist.bars : [];
       if (!twnBars.length) return 0;
@@ -2178,7 +2184,10 @@
       const rs = cands[0].rs.slice().sort((a, b) => a - b);
       const med = rs[Math.floor(rs.length / 2)];
       // 離群保護：同時刻配對若因資料錯位偏離常識範圍，視為無效（寧可退回舊值也不亂畫）
-      return med > 8 && med < 16 ? Math.round(med * 1000000) / 1000000 : 0;
+      if (!(med > 8 && med < 16)) return 0;
+      const r = Math.round(med * 1000000) / 1000000;
+      twnRatioInfo = { ratio: r, n: cands[0].rs.length, at: cands[0].newest };
+      return r;
     }
     // 倍數：先用同時刻配對算出的真值；資料不足才退回上次寫入的 ratio
     function twnRatioFor(sess) {
@@ -6704,7 +6713,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.00";
+        const VER = "3.01";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
