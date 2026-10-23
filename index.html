@@ -2145,28 +2145,33 @@
     // 原本排程取樣拿「台指已收盤的舊 1 分 K」除「富台即時價」，兩者不同刻，比值被灌水（10/23 實測 +2.2%）。
     let twnRatio = null;
     function computeTwnRatio(sess) {
-      const sk = sess === "night" ? "night" : "day";
-      const tx = minutePack[sk + "_1m"] || [];
       const twnBars = twnHist && Array.isArray(twnHist.bars) ? twnHist.bars : [];
-      if (!tx.length || !twnBars.length) return 0;
+      if (!twnBars.length) return 0;
       const twnMap = new Map();
       for (const b of twnBars) {
         const ts = Number(b[0]);
         const px = Number(b[1]);
         if (Number.isFinite(ts) && Number.isFinite(px) && px > 0) twnMap.set(Math.floor(ts / 60), px);
       }
-      const rs = [];
-      for (let i = tx.length - 1; i >= 0 && rs.length < 60; i--) {
-        const t = Math.floor(Number(tx[i].timestamp) / 60000);
-        const tw = twnMap.get(t);
-        const p = Number(tx[i].close);
-        if (tw && p > 0) rs.push(p / tw);
+      // 錨點優先序（老公 10-23）：夜盤最後同時刻 → 日盤最後同時刻。
+      // 夜盤最接近今早，休市換算用它最準（10/23 實測夜盤 11.5495 vs 日盤 11.5019）。
+      const order = sess === "day" ? ["day_1m", "night_1m"] : ["night_1m", "day_1m"];
+      for (const key of order) {
+        const tx = minutePack[key] || [];
+        const rs = [];
+        for (let i = tx.length - 1; i >= 0 && rs.length < 60; i--) {
+          const t = Math.floor(Number(tx[i].timestamp) / 60000);
+          const tw = twnMap.get(t);
+          const p = Number(tx[i].close);
+          if (tw && p > 0) rs.push(p / tw);
+        }
+        if (!rs.length) continue;
+        rs.sort((a, b) => a - b);
+        const med = rs[Math.floor(rs.length / 2)];
+        // 離群保護：同時刻配對若因資料錯位偏離常識範圍，視為無效（寧可退回舊值也不亂畫）
+        if (med > 8 && med < 16) return Math.round(med * 1000000) / 1000000;
       }
-      if (!rs.length) return 0;
-      rs.sort((a, b) => a - b);
-      const med = rs[Math.floor(rs.length / 2)];
-      // 離群保護：同時刻配對若因資料錯位偏離常識範圍，視為無效（寧可退回舊值也不亂畫）
-      return med > 8 && med < 16 ? Math.round(med * 1000000) / 1000000 : 0;
+      return 0;
     }
     // 倍數：先用同時刻配對算出的真值；資料不足才退回上次寫入的 ratio
     function twnRatioFor(sess) {
@@ -6365,20 +6370,28 @@
     }
 
     // 後端權威 1 分價（D1）→ 奇摩 chart 補洞；不依賴何時開頁
+    // 休市日（如颱風假）imbDayKey() 會跳到「下一個交易日」，那天根本沒資料；
+    // 此時往最近有資料的交易日回試，否則比值算不出來（老公 10-23）。
     async function pullCloudPx1m() {
       try {
-        const day = imbDayKey();
-        const y = await fetch(LIVE + "?kind=px1m&day=" + day, { cache: "default" }).then((r) =>
-          r.ok ? r.json() : null
-        );
-        if (!y) return false;
-        const n0 = (y.night || []).length;
-        const d0 = (y.day || []).length;
-        if (!n0 && !d0) return false;
-        minutePack.night_1m = mergeBarLists(minutePack.night_1m, y.night || []);
-        minutePack.day_1m = mergeBarLists(minutePack.day_1m, y.day || []);
-        save1m();
-        return true;
+        const tried = [];
+        let day = imbDayKey();
+        for (let i = 0; i < 6; i++) {
+          tried.push(day);
+          const y = await fetch(LIVE + "?kind=px1m&day=" + day, { cache: "default" }).then((r) =>
+            r.ok ? r.json() : null
+          );
+          const n0 = y && ((y.night || []).length + (y.day || []).length);
+          if (n0) {
+            minutePack.night_1m = mergeBarLists(minutePack.night_1m, y.night || []);
+            minutePack.day_1m = mergeBarLists(minutePack.day_1m, y.day || []);
+            save1m();
+            return true;
+          }
+          day = prevTradingYmd(day);
+          if (!day) break;
+        }
+        return false;
       } catch (e) {
         return false;
       }
@@ -6684,7 +6697,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.98";
+        const VER = "2.99";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
