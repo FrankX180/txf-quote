@@ -1352,7 +1352,7 @@
             `預估台指 <b>${fmt(estOpen, 0)}</b> <span class="${cls(diff)}">${arrow(diff)} ${fmt(diff, 0)}(${fmt(rate, 2)}%)</span><br>` +
             `SGX富台現價 <b>${fmt(rtxNow, 2)}</b>` +
             (twnRatioInfo
-              ? `<br><span class="twnbasis">換算倍數 ${twnRatioInfo.ratio.toFixed(4)}（${twnRatioInfo.n} 組同刻配對，最後 ${(() => { const d = new Date(twnRatioInfo.at); return String(d.getMonth() + 1).padStart(2, "0") + "/" + String(d.getDate()).padStart(2, "0") + " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); })()}）</span>`
+              ? `<br><span class="twnbasis">換算倍數 ${twnRatioInfo.ratio.toFixed(4)}</span>`
               : "") +
             `</div>`;
         }
@@ -4576,7 +4576,7 @@
         ctx.font = "bold 12px sans-serif";
         ctx.textAlign = "right";
         ctx.textBaseline = "alphabetic";
-        ctx.fillText("富台模擬走勢（SGX TWN 換算）", w - padR, padT + 12);
+        ctx.fillText("富台模擬走勢", w - padR, padT + 12);
         ctx.restore();
       } else if (multi) {
         const fi = pts.findIndex((p) => p.twn);
@@ -6779,7 +6779,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.08";
+        const VER = "3.09";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
