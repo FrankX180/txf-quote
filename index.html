@@ -2327,6 +2327,23 @@
       }
       return out.getTime();
     }
+    // 本場開盤時刻（毫秒）：日盤當日 08:45；夜盤當日 14:15（00:00–05:15 的點屬前一日夜盤 → 前一日 14:15）
+    function twnSessStartTs(t) {
+      const d = new Date(t);
+      const hm = d.getHours() * 100 + d.getMinutes();
+      const out = new Date(t);
+      if (twnSessOfHm(hm) === "day") {
+        out.setHours(8, 45, 0, 0);
+      } else if (hm <= 515) {
+        out.setDate(out.getDate() - 1);
+        out.setHours(14, 15, 0, 0);
+      } else if (hm < 845) {
+        out.setHours(8, 45, 0, 0); // 05:16–08:44 空窗：下一場是當日日盤
+      } else {
+        out.setHours(14, 15, 0, 0);
+      }
+      return out.getTime();
+    }
 
     async function fetchTwnQuote() {
       try {
@@ -4217,7 +4234,14 @@
         ctx.fillText("載入富台走勢中…", 16, h / 2);
         return;
       }
-      const pts = linePoints();
+      let pts = linePoints();
+      // 富台模擬（Rumi 審查 2026-10-23）：13:46–14:14 等空窗殘點屬上一場尾，裁掉只留本場開盤後。
+      // 實測原始首點是 13:50，不裁會讓左界提前 25 分、剩餘時間比例偏約 1.5%。
+      if (twnSim && pts.length > 1) {
+        const s0 = twnSessStartTs(pts[0].time);
+        const cut = pts.filter((p) => p.time >= s0);
+        if (cut.length > 1) pts = cut;
+      }
       if (pts.length < 1) {
         ctx.fillStyle = "#9ca3af";
         ctx.font = "14px sans-serif";
@@ -4250,11 +4274,11 @@
       if (!(mx > mn)) { mx = mn + 200; }
       let yStep = 100;
       while ((mx - mn) / yStep > 5) yStep += 100;
-      // 富台模擬：X 軸右界＝本場收盤（日盤 13:45／夜盤次日 05:15），不是最後一筆資料。
-      // 否則盤中線永遠貼在最右邊，看不出這一場還剩多少時間（老公 2026-10-23）
+      // 富台模擬：X 軸左右界＝本場開盤／收盤（日盤 08:45–13:45、夜盤 14:15–次日 05:15），
+      // 不是資料首尾。否則盤中線永遠貼在最右邊，看不出這一場還剩多少時間（老公 2026-10-23）
       const range = twnSim
         ? {
-            t0: pts[0].time,
+            t0: Math.min(twnSessStartTs(pts[0].time), pts[0].time),
             t1: Math.max(twnSessEndTs(pts[0].time), pts[pts.length - 1].time),
             wins: [],
           }
@@ -4297,8 +4321,8 @@
         hour0.setMinutes(0, 0, 0);
         if (hour0.getTime() < t0) hour0.setHours(hour0.getHours() + 1);
         const spanMs = t1 - t0;
-        // 富台夜盤一場 14.5 小時：步長 1 會擠出 15 個標籤，> 12 小時改 2 小時間隔
-        const hourStep = spanMs > 72 * 3600000 ? 12 : spanMs > 20 * 3600000 ? 4 : spanMs > 12 * 3600000 ? 2 : 1;
+        // 富台夜盤一場約 15 小時：步長 1 會擠出 15 個標籤，> 12 小時改 2 小時間隔（只限 twnSim，台指本盤維持原步長）
+        const hourStep = spanMs > 72 * 3600000 ? 12 : spanMs > 20 * 3600000 ? 4 : twnSim && spanMs > 12 * 3600000 ? 2 : 1;
         for (let t = hour0.getTime(); t <= t1; t += 3600000 * hourStep) {
           const x = Math.round(xAtI(0, t)) + 0.5;
           ctx.beginPath();
@@ -6755,7 +6779,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.07";
+        const VER = "3.08";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
