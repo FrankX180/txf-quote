@@ -18,6 +18,7 @@ import websocket  # pip install websocket-client
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data" / "twn-hist.json"
+META = ROOT / "data" / "twn-hist-meta.json"
 TZ = timezone(timedelta(hours=8))
 SYMBOL = "SGX:TWN1!"
 N_BARS = 4000
@@ -85,6 +86,12 @@ def main():
     }
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    # 小檔：只給 Worker 的缺口巡檢讀（幾十 bytes），避免每次抓 235KB 完整檔（2026-10-23）
+    META.write_text(
+        json.dumps({"lastTs": merged[-1][0], "count": len(merged), "updatedAt": out["updatedAt"]},
+                   ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
     f = lambda t: datetime.fromtimestamp(t, TZ).strftime("%m-%d %H:%M")
     print("OK bars=%d new=%d range=%s..%s last=%.2f" % (len(merged), len(bars), f(merged[0][0]), f(merged[-1][0]), merged[-1][1]), flush=True)
 

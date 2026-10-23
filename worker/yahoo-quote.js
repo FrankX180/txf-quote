@@ -370,6 +370,17 @@ const HEAL_GH_SNAPSHOT = "https://frankx180.github.io/txf-quote/data/snapshot.js
 const HEAL_GH_KLINE = "https://frankx180.github.io/txf-quote/data/kline-minute.json";
 const HEAL_GH_UNCOVERED = "https://frankx180.github.io/txf-quote/data/uncovered.json";
 const HEAL_CHIPS_INTERVAL_MS = 2 * 60 * 1000; // 盤後籌碼定案視窗（14:30–15:30）每 2 分鐘刷一次直到齊備
+// 富台（SGX TWN）1 分 K：GitHub 的 */5 cron 實測被節流成 3~5 小時一次，
+// 前端只能拿到檔案裡已有的 bar，缺口補不回來 → 由 Worker cron 偵測並 dispatch（2026-10-23）
+const HEAL_TWN_WORKFLOW = "twn-hist.yml";
+const HEAL_GH_TWNHIST = "https://frankx180.github.io/txf-quote/data/twn-hist.json";
+const HEAL_GH_TWNMETA = "https://frankx180.github.io/txf-quote/data/twn-hist-meta.json";
+// 來源（TradingView 1 分 K）本身就延遲約 10 分，門檻必须遠高於它，
+// 否則健康狀態下也會一直觸發（Rumi 審查 BLOCKER）。45 分＝確定是 Action 沒跑。
+const HEAL_TWN_STALE_MS = 45 * 60 * 1000;
+const HEAL_TWN_CHECK_MS = 10 * 60 * 1000;
+// 同一根 bar 最多每小時重送一次，避免來源延遲造成穩態自我觸發
+const HEAL_TWN_RETRY_MS = 60 * 60 * 1000;
 
 async function getHealState(env, k) {
   if (!env.IMB_DB) return null;
@@ -418,15 +429,18 @@ async function fetchGhAgeMs() {
     return { ok: false, reason: String((e && e.message) || e).slice(0, 120) };
   }
 }
-async function triggerGithubWorkflow(env, reason) {
+async function triggerGithubWorkflow(env, reason, opts) {
+  const o = opts || {};
+  const workflow = o.workflow || HEAL_WORKFLOW;
+  const stateKey = o.stateKey || "last_dispatch";
   const token = (env.GH_TOKEN || env.GITHUB_TOKEN || env.GITHUB_FINE_PAT || "").trim();
   if (!token) return { ok: false, reason: "no-token", skipped: true };
   const now = Date.now();
-  const last = await getHealState(env, "last_dispatch");
+  const last = await getHealState(env, stateKey);
   if (last && now - Number(last.ts) < HEAL_MIN_INTERVAL_MS) {
     return { ok: false, reason: "rate-limited", lastTs: last.ts, skipped: true };
   }
-  const api = `https://api.github.com/repos/${HEAL_GITHUB_OWNER}/${HEAL_GITHUB_REPO}/actions/workflows/${HEAL_WORKFLOW}/dispatches`;
+  const api = `https://api.github.com/repos/${HEAL_GITHUB_OWNER}/${HEAL_GITHUB_REPO}/actions/workflows/${workflow}/dispatches`;
   try {
     const r = await fetch(api, {
       method: "POST",
@@ -441,7 +455,7 @@ async function triggerGithubWorkflow(env, reason) {
     // GH returns 204 on success; 401/404/422 etc are errors
     const detail = `status ${r.status} ${await r.text().catch(()=>"")}`.slice(0, 400);
     const ok = r.status === 204 || r.status === 201 || r.status === 200;
-    await setHealState(env, "last_dispatch", now, reason || "");
+    await setHealState(env, stateKey, now, reason || "");
     await logHeal(env, reason || "manual", ok, detail);
     if (!ok) {
       // Fallback: try main branch
@@ -467,6 +481,71 @@ async function triggerGithubWorkflow(env, reason) {
     const msg = String((e && e.message) || e).slice(0, 300);
     await logHeal(env, reason || "", false, msg);
     return { ok: false, reason: msg };
+  }
+}
+// SGX 富台是否開盤（台北時間；不依賴伺服器時區）
+// 日盤 08:45–13:45、夜盤 15:00–次日 05:15；週六 05:15 後至週一 08:45 前休
+function twnSgxOpen(ms) {
+  const d = new Date(ms + 8 * 3600000);
+  const dow = d.getUTCDay(); // 0=週日
+  const hm = d.getUTCHours() * 100 + d.getUTCMinutes();
+  if (hm < 505) return dow >= 2 && dow <= 6; // 凌晨屬前一日夜盤（週一凌晨無盤）
+  if (dow === 0 || dow === 6) return false;
+  if (hm >= 845 && hm <= 1345) return true; // 日盤
+  if (hm >= 1500) return true; // 夜盤
+  return false; // 13:45–15:00 休
+}
+// 富台 1 分 K 缺口修復：檔案內容的尾端 bar 超過 12 分鐘沒動就 dispatch twn-hist.yml。
+// 不用 Last-Modified／ETag：Pages 任何一次部署（例如行情快照）都會把它們刷新，
+// 檔案內容其實沒變，會被誤判成「很新」。只看內容裡最後一根的 timestamp。
+// 台指休市（含颱風假）也要跑，因為 SGX 照常交易；
+// 因此這個檢查必須放在 scheduled() 的 shouldRunCron 早退之前。
+// 讀富台檔案的尾端時間：先讀小檔（幾十 bytes），沒有才退回完整檔（罕見）
+async function twnTailMs() {
+  const opt = {
+    headers: { "Cache-Control": "no-cache" },
+    cf: { cacheTtl: 0, cacheEverything: false },
+  };
+  try {
+    const m = await fetch(HEAL_GH_TWNMETA, opt);
+    if (m.ok) {
+      const j = await m.json();
+      const t = Number(j && j.lastTs);
+      if (Number.isFinite(t) && t > 0) return t * 1000;
+    }
+  } catch (_) {}
+  const r = await fetch(HEAL_GH_TWNHIST, opt);
+  if (!r.ok) return 0;
+  const j = await r.json();
+  const bars = (j && j.bars) || [];
+  return bars.length ? Number(bars[bars.length - 1][0]) * 1000 : 0;
+}
+async function maybeHealTwn(env) {
+  const now = Date.now();
+  if (!twnSgxOpen(now)) return { ok: false, reason: "sgx-closed", skipped: true };
+  const lastCheck = await getHealState(env, "last_twn_check");
+  if (lastCheck && now - Number(lastCheck.ts) < HEAL_TWN_CHECK_MS) {
+    return { ok: false, reason: "check-throttled", skipped: true };
+  }
+  await setHealState(env, "last_twn_check", now, "twn");
+  try {
+    const tailMs = await twnTailMs();
+    if (!tailMs) return { ok: false, reason: "no-tail", skipped: true };
+    const age = now - tailMs;
+    if (age < HEAL_TWN_STALE_MS) return { ok: true, fresh: true, ageMs: age, skipped: true };
+    // 同一根 bar 已送過且未超過重試間隔 → 不再打（防穩態自我觸發）
+    const prev = await getHealState(env, "last_twn_dispatch");
+    if (prev && String(prev.v) === String(tailMs) && now - Number(prev.ts) < HEAL_TWN_RETRY_MS) {
+      return { ok: false, reason: "no-advance", ageMs: age, skipped: true };
+    }
+    const res = await triggerGithubWorkflow(env, `twn-hist age=${Math.round(age / 60000)}m`, {
+      workflow: HEAL_TWN_WORKFLOW,
+      stateKey: "last_dispatch_twn",
+    });
+    await setHealState(env, "last_twn_dispatch", now, String(tailMs));
+    return Object.assign({ ageMs: age, tailMs }, res);
+  } catch (e) {
+    return { ok: false, reason: String((e && e.message) || e).slice(0, 200) };
   }
 }
 async function maybeHealGithub(env, reason) {
@@ -1947,6 +2026,12 @@ export default {
 
   async scheduled(event, env, ctx) {
     const nowMs = Date.now();
+    // 富台 1 分 K 修復：SGX 有盤就要檢查，不受台指休市熔斷影響（颱風假照樣要跑）
+    ctx.waitUntil(
+      maybeHealTwn(env).catch((e) =>
+        console.error("twn heal failed", String((e && e.message) || e))
+      )
+    );
     await ensureHolidays(); // 休市日 SSOT（模組快取 12h）
     // 0 毫秒極速跳脫：週末、休市大空窗、颱風假熔斷中，完全不啟動任何非同步工作，CPU 耗時 0ms
     if (!shouldRunCron(nowMs)) return;
