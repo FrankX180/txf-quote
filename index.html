@@ -2140,18 +2140,45 @@
       "20261225",
     ];
     let HOLIDAY_SET = new Set(MARKET_HOLIDAYS_BOOTSTRAP);
-    // 自建富台換算係數（scripts/fetch_twn_ratio.py → data/twn-ratio.json）；GAS 降為備援
+    // 自建富台換算係數：不再靠排程取樣（老公 10-23 定）。
+    // 比值＝台指÷富台，只在「休市需要換算」時，用兩份已載入的 1 分 K 取同時刻配對當場算。
+    // 原本排程取樣拿「台指已收盤的舊 1 分 K」除「富台即時價」，兩者不同刻，比值被灌水（10/23 實測 +2.2%）。
     let twnRatio = null;
-    // 富台換算倍數依盤別取值（老公 10-23 定）：日盤／夜盤各自一筆；舊檔沒分盤時退回 ratio
-    // 倍數＝台指÷富台（同一瞬間），換算不使用匯率
+    function computeTwnRatio(sess) {
+      const sk = sess === "night" ? "night" : "day";
+      const tx = minutePack[sk + "_1m"] || [];
+      const twnBars = twnHist && Array.isArray(twnHist.bars) ? twnHist.bars : [];
+      if (!tx.length || !twnBars.length) return 0;
+      const twnMap = new Map();
+      for (const b of twnBars) {
+        const ts = Number(b[0]);
+        const px = Number(b[1]);
+        if (Number.isFinite(ts) && Number.isFinite(px) && px > 0) twnMap.set(Math.floor(ts / 60), px);
+      }
+      const rs = [];
+      for (let i = tx.length - 1; i >= 0 && rs.length < 60; i--) {
+        const t = Math.floor(Number(tx[i].timestamp) / 60000);
+        const tw = twnMap.get(t);
+        const p = Number(tx[i].close);
+        if (tw && p > 0) rs.push(p / tw);
+      }
+      if (!rs.length) return 0;
+      rs.sort((a, b) => a - b);
+      const med = rs[Math.floor(rs.length / 2)];
+      // 離群保護：同時刻配對若因資料錯位偏離常識範圍，視為無效（寧可退回舊值也不亂畫）
+      return med > 8 && med < 16 ? Math.round(med * 1000000) / 1000000 : 0;
+    }
+    // 倍數：先用同時刻配對算出的真值；資料不足才退回上次寫入的 ratio
     function twnRatioFor(sess) {
+      const live = computeTwnRatio(sess);
+      if (live) return live;
       const tr = twnRatio || {};
-      return Number(sess === "day" ? tr.ratioDay : tr.ratioNight) || Number(tr.ratio) || 0;
+      return Number(tr.ratio) || 0;
     }
     async function loadTwnRatio() {
       try {
         const j = await gh("data/twn-ratio.json").then((r) => r.json());
-        if (j && (j.ratio || j.ratioDay || j.ratioNight)) twnRatio = j;
+        if (j && j.ratio) twnRatio = j;
       } catch (e) {}
     }
     async function loadHolidays() {
@@ -6478,6 +6505,8 @@
           minutePack.day_1m = m.day || [];
         }
         await pullLive1m();
+        // 台指 1 分 K 到位後，富台換算比值才算得出來（休市時走同時刻配對）→ 補一次重繪
+        if (isTwnSimWindow() && twnHist) draw();
       } catch (e) {}
       try {
         let mx = null;
@@ -6655,7 +6684,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.97";
+        const VER = "2.98";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {

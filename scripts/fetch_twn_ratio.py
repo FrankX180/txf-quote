@@ -1,14 +1,23 @@
 # -*- coding: utf-8 -*-
-# 自建富台換算係數：ratio = 台指 ÷ 富台（同一次執行、同一瞬間）。不使用匯率：兩邊都是當下報價，比值本身就是換算關係。
-# ratioDay／ratioNight 依取樣盤別分開存，前端換算依富台點所屬盤別取值。
-# 目的：擺脫對第三方 GAS 的依賴（GAS 降為備援）。→ data/twn-ratio.json
-#
-# 取樣原則（最重要）：ratio 只取「兩市同時有報價」的那一刻，且台指與富台在**同一次執行**內抓，
-# 時間差僅秒級；嚴禁拿不同日的日 K 收盤硬比（會踩「錯配時刻」，誤差可達數百點）。
+"""富台換算係數：ratio = 台指 ÷ 富台（同一時刻）。
+
+修正（2026-10-23，老公指出的颱風假估值錯誤）：
+  舊版休市時仍拿 MIS 的 CLastPrice 去除富台即時價。休市日台指已收盤，
+  CLastPrice 是「上一交易日收盤價」，富台卻還在跑 → 拿舊價除新價，
+  比值被灌水（10/23 實測 11.7546 vs 同時刻真值 11.5019，+2.2%，估值多約 1,000 點）。
+  現在：台指報價日期必須是今天才取樣，否則沿用舊值。寧可舊，不可錯。
+
+設計原則（老公 10-23）：
+  - 不用匯率：兩邊都是當下報價，比值本身就是換算關係。
+  - 不分日盤／夜盤：只留一個比值，減少分支與維護。
+  - 休市日不取樣：休市時台指本來就沒有新報價，取樣必然錯刻。
+
+輸出 → data/twn-ratio.json：ratio、txPx、twnPx、ratioAt、dayClose
+"""
 import json
+import sys
 import urllib.request
-import urllib.error
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from holiday_guard import is_closed as holiday_closed
@@ -19,6 +28,7 @@ DATA = ROOT / "data"
 TZ = timezone(timedelta(hours=8))
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"
 WORKER_TWN = "https://wtx.blok.trading/?kind=twn"
+RATIO_MIN, RATIO_MAX = 8.0, 16.0  # 常識範圍；超出視為資料錯刻，不寫入
 
 
 def _get_json(url, headers, timeout=25):
@@ -41,21 +51,23 @@ def twn_last():
     return None
 
 
-def tx_last(session):
-    """台指期近月即時價（期交所 MIS，Actions/本機皆可打）。"""
+def tx_quote(session):
+    """台指期近月報價（期交所 MIS）。回傳 (價格, 報價日期字串)。"""
     q = _mis_quote(session) or {}
     try:
         v = float(q.get("CLastPrice"))
-        return v if v > 0 else None
     except (TypeError, ValueError):
-        return None
+        return None, ""
+    return (v if v > 0 else None), str(q.get("CDate") or "")
 
 
 def main():
     DATA.mkdir(exist_ok=True)
     now = datetime.now(TZ)
     now_iso = now.strftime("%Y-%m-%d %H:%M:%S")
+    today = now.strftime("%Y%m%d")
     p = DATA / "twn-ratio.json"
+
     prev = {}
     if p.exists():
         try:
@@ -65,33 +77,37 @@ def main():
 
     out = dict(prev)
     out["updatedAt"] = now_iso
-
-    # 舊版寫入的匯率欄位一併清掉（已不使用）
-    for k in ("liveRate", "baseRate", "rateAdj"):
+    # 舊版欄位一律清掉（匯率、分盤倍數都已廢除）
+    for k in ("liveRate", "baseRate", "rateAdj", "ratioDay", "ratioNight", "seed"):
         out.pop(k, None)
 
-    # --- ratio（只在兩市同時開盤時更新；休市沿用上一筆）---
+    # --- ratio：只有「台指今天真的有報價」且「非休市」才取樣 ---
     sess = sess_now(now)
-    if sess in ("day", "night") and not holiday_closed(now):
-        tx = tx_last(sess)
-        twn = twn_last()
-        if tx and twn:
-            out["ratio"] = round(tx / twn, 6)
-            out["ratioDay" if sess == "day" else "ratioNight"] = out["ratio"]
-            out["txPx"] = tx
-            out["twnPx"] = twn
-            out["ratioSession"] = sess
-            out["ratioAt"] = now_iso
-            out.pop("seed", None)  # 真值落地後清掉接續標記
-            print("OK ratio=%.6f tx=%.2f twn=%.2f sess=%s" % (out["ratio"], tx, twn, sess), flush=True)
-        else:
-            print("WARN ratio skip (tx=%s twn=%s)" % (tx, twn), flush=True)
+    if sess not in ("day", "night"):
+        print("SKIP outside session (%s)" % (sess or "-"), flush=True)
+    elif holiday_closed(now):
+        print("SKIP holiday: 台指無今日報價，取樣必然錯刻", flush=True)
     else:
-        print("INFO ratio frozen (sess=%s holiday=%s)" % (sess or "-", holiday_closed(now)), flush=True)
+        tx, qdate = tx_quote(sess)
+        twn = twn_last()
+        if tx is None or not twn:
+            print("WARN skip (tx=%s twn=%s)" % (tx, twn), flush=True)
+        elif qdate != today:
+            print("WARN skip: TX 報價日 %s != 今天 %s（休市或延遲，避免錯刻）" % (qdate or "-", today), flush=True)
+        else:
+            r = tx / twn
+            if RATIO_MIN < r < RATIO_MAX:
+                out["ratio"] = round(r, 6)
+                out["txPx"] = tx
+                out["twnPx"] = twn
+                out["ratioSession"] = sess
+                out["ratioAt"] = now_iso
+                print("OK ratio=%.6f tx=%.2f twn=%.2f sess=%s" % (r, tx, twn, sess), flush=True)
+            else:
+                print("WARN ratio out of range %.6f (tx=%.2f twn=%.2f)" % (r, tx, twn), flush=True)
 
     # --- 台指前日結算價（供頁面算漲跌；期交所漲跌係以前日結算價為基準）---
-    # 正確來源＝夜盤參考價 night.CRefPrice（＝期交所當日結算價；實測 49357＝10/08 結算價，
-    # 非日盤收盤 49349）；退回 day.CLastPrice（1 分收，可能差數點）。
+    # 正確來源＝夜盤參考價 night.CRefPrice（＝期交所當日結算價）
     try:
         snap = json.loads((DATA / "snapshot.json").read_text(encoding="utf-8"))
         dc = (snap.get("night") or {}).get("CRefPrice") or (snap.get("day") or {}).get("CLastPrice")
@@ -105,4 +121,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print("FAIL %s" % str(e).encode("ascii", "replace").decode())
+        sys.exit(1)
