@@ -2153,25 +2153,32 @@
         const px = Number(b[1]);
         if (Number.isFinite(ts) && Number.isFinite(px) && px > 0) twnMap.set(Math.floor(ts / 60), px);
       }
-      // 錨點優先序（老公 10-23）：夜盤最後同時刻 → 日盤最後同時刻。
-      // 夜盤最接近今早，休市換算用它最準（10/23 實測夜盤 11.5495 vs 日盤 11.5019）。
-      const order = sess === "day" ? ["day_1m", "night_1m"] : ["night_1m", "day_1m"];
-      for (const key of order) {
+      // 錨點＝「兩邊都有報價的最近那一分鐘」所屬的盤別，不看牆上時鐘（老公 10-23）。
+      // 休市時（如颱風假）台指當日沒開，最近配對自然落在昨晚夜盤，那才是今早前的最後真值。
+      // 10/23 實測：夜盤 11.5319（04:59 收）比日盤 11.4963（前一日 13:44）更接近今早。
+      const pick = (key) => {
         const tx = minutePack[key] || [];
+        let newest = 0;
         const rs = [];
         for (let i = tx.length - 1; i >= 0 && rs.length < 60; i--) {
           const t = Math.floor(Number(tx[i].timestamp) / 60000);
           const tw = twnMap.get(t);
           const p = Number(tx[i].close);
-          if (tw && p > 0) rs.push(p / tw);
+          if (tw && p > 0) {
+            rs.push(p / tw);
+            if (!newest) newest = Number(tx[i].timestamp);
+          }
         }
-        if (!rs.length) continue;
-        rs.sort((a, b) => a - b);
-        const med = rs[Math.floor(rs.length / 2)];
-        // 離群保護：同時刻配對若因資料錯位偏離常識範圍，視為無效（寧可退回舊值也不亂畫）
-        if (med > 8 && med < 16) return Math.round(med * 1000000) / 1000000;
-      }
-      return 0;
+        return rs.length ? { rs, newest } : null;
+      };
+      const cands = [pick("night_1m"), pick("day_1m")].filter(Boolean);
+      if (!cands.length) return 0;
+      // 取「最新配對時間」較晚的那一組
+      cands.sort((a, b) => b.newest - a.newest);
+      const rs = cands[0].rs.slice().sort((a, b) => a - b);
+      const med = rs[Math.floor(rs.length / 2)];
+      // 離群保護：同時刻配對若因資料錯位偏離常識範圍，視為無效（寧可退回舊值也不亂畫）
+      return med > 8 && med < 16 ? Math.round(med * 1000000) / 1000000 : 0;
     }
     // 倍數：先用同時刻配對算出的真值；資料不足才退回上次寫入的 ratio
     function twnRatioFor(sess) {
@@ -6697,7 +6704,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.99";
+        const VER = "3.00";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
