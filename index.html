@@ -2310,18 +2310,20 @@
       return twnSessOfHm(d.getHours() * 100 + d.getMinutes());
     }
     // 本場收盤時刻（毫秒）：日盤當日 13:45；夜盤 14:15 開 → 次日 05:15
-    // （00:00–05:15 的點屬前一日夜盤，收盤仍是「當日 05:15」）
+    // （00:00–05:15 的點屬前一日夜盤，收盤仍是「當日 05:15」；05:16–08:44 休市空窗的下一個收盤是當日日盤 13:45）
     function twnSessEndTs(t) {
       const d = new Date(t);
       const hm = d.getHours() * 100 + d.getMinutes();
       const out = new Date(t);
       if (twnSessOfHm(hm) === "day") {
-        out.setHours(13, 45, 0, 0);
+        out.setHours(13, 45, 0, 0); // 日盤：當日 13:45
       } else if (hm <= 515) {
-        out.setHours(5, 15, 0, 0);
+        out.setHours(5, 15, 0, 0); // 凌晨：前一日夜盤收在當日 05:15
+      } else if (hm < 845) {
+        out.setHours(13, 45, 0, 0); // 05:16–08:44 空窗：下一場收盤是當日日盤 13:45
       } else {
         out.setDate(out.getDate() + 1);
-        out.setHours(5, 15, 0, 0);
+        out.setHours(5, 15, 0, 0); // 14:15 之後：次日 05:15
       }
       return out.getTime();
     }
@@ -6753,7 +6755,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.06";
+        const VER = "3.07";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
