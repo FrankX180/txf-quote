@@ -1318,8 +1318,7 @@
       if (isHol && twnData && twnData.latestPrice) {
         const gas = twnData.gas || {};
         const tr = twnRatio || {};
-        const mult = Number(tr.ratio) || Number(gas.ratioUsed || gas.ratio) || 11.406323;
-        const rateAdj = Number(tr.rateAdj) || Number(gas.rateAdj) || 1;
+        const mult = twnRatioFor(twnSessNow()) || Number(gas.ratioUsed || gas.ratio) || 11.406323;
         const hsLast = (function () {
           const P = twnData.points || [];
           for (let i = P.length - 1; i >= 0; i--) {
@@ -1329,7 +1328,7 @@
           return 0;
         })();
         const rtxNow = hsLast || Number(gas.rtxNow || twnData.latestPrice) || 0;
-        const estOpen = Math.round(rtxNow * mult * rateAdj);
+        const estOpen = Math.round(rtxNow * mult);
         const dayClose = Number(tr.dayClose) || Number(gas.dayClose) || n(q() && q().CRefPrice) || estOpen;
         const diff = estOpen - dayClose;
         const rate = (diff / dayClose) * 100;
@@ -2140,6 +2139,12 @@
     let HOLIDAY_SET = new Set(MARKET_HOLIDAYS_BOOTSTRAP);
     // 自建富台換算係數（scripts/fetch_twn_ratio.py → data/twn-ratio.json）；GAS 降為備援
     let twnRatio = null;
+    // 富台換算倍數依盤別取值（老公 10-23 定）：日盤／夜盤各自一筆；舊檔沒分盤時退回 ratio
+    // 倍數＝台指÷富台（同一瞬間），已含當時匯率，換算不再乘 rateAdj（否則匯率被計兩次）
+    function twnRatioFor(sess) {
+      const tr = twnRatio || {};
+      return Number(sess === "day" ? tr.ratioDay : tr.ratioNight) || Number(tr.ratio) || 0;
+    }
     async function loadTwnRatio() {
       try {
         const j = await gh("data/twn-ratio.json").then((r) => r.json());
@@ -3247,8 +3252,7 @@
       if (isTwnSimWindow() && ((twnData && Array.isArray(twnData.points) && twnData.points.length > 0) || histBars.length > 1)) {
         const gas = (twnData && twnData.gas) || {};
         const tr = twnRatio || {};
-        const ratio = Number(tr.ratio) || Number(gas.ratioUsed || gas.ratio) || 11.4063;
-        const rateAdj = Number(tr.rateAdj) || Number(gas.rateAdj) || 1;
+        const ratioOf = (sess) => twnRatioFor(sess) || Number(gas.ratioUsed || gas.ratio) || 11.4063;
         // ① 存檔段（TradingView 1 分 K，真實時間；休市期間由 twn-hist.yml 持續存，不再有斷口）
         const raw = [];
         for (const b of histBars) {
@@ -3328,7 +3332,8 @@
           if (cur.length) segs.push(cur);
           // 錨點＝全資料最新一點（＝現在那點）；頭部由同一 HiStock 末值換算 → 頭尾同源
           const anchorRaw = raw[raw.length - 1][1];
-          const anchorPts = Math.round(anchorRaw * ratio * rateAdj);
+          const ratio = ratioOf(twnSessOfTs(raw[raw.length - 1][0])); // 錨點所屬盤別的倍數
+          const anchorPts = Math.round(anchorRaw * ratio);
           const toPts = (seg) =>
             seg.map((p) => {
               const px = Math.round(anchorPts + (Number(p[1]) - anchorRaw) * ratio);
@@ -6647,7 +6652,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "2.94";
+        const VER = "2.95";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-# 自建富台換算係數：ratio = 台指 ÷ 富台（兩市同時刻）；rateAdj = wise 即時匯率 ÷ 基準。
+# 自建富台換算係數：ratio = 台指 ÷ 富台（兩市同時刻）；rateAdj = wise 即時匯率 ÷ 基準（僅留存參考，前端不再乘：ratio 取樣當下已含匯率）。
+# ratioDay／ratioNight 依取樣盤別分開存，前端換算依富台點所屬盤別取值。
 # 目的：擺脫對第三方 GAS 的依賴（GAS 降為備援）。→ data/twn-ratio.json
 #
 # 取樣原則（最重要）：ratio 只取「兩市同時有報價」的那一刻，且台指與富台在**同一次執行**內抓，
@@ -88,6 +89,7 @@ def main():
         twn = twn_last()
         if tx and twn:
             out["ratio"] = round(tx / twn, 6)
+            out["ratioDay" if sess == "day" else "ratioNight"] = out["ratio"]
             out["txPx"] = tx
             out["twnPx"] = twn
             out["ratioSession"] = sess
