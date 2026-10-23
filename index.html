@@ -1328,9 +1328,8 @@
           return null;
         })();
         const hsLast = hsLastPt ? hsLastPt.v : 0;
-        // 倍數依「最後富台點」的盤別取值（與折線錨點同源），不用牆上時鐘
-        // 富台點時間戳實測帶 +8h 位移，不能拿來判盤；盤別一律用牆上時間
-        const mult = twnRatioFor(twnSessNow()) || Number(gas.ratioUsed || gas.ratio) || 11.406323;
+        // 倍數與折線同源：都走 twnRatioFor()（同一時刻配對，最近一組）
+        const mult = twnRatioFor() || Number(gas.ratioUsed || gas.ratio) || 11.4063;
         const rtxNow = hsLast || Number(gas.rtxNow || twnData.latestPrice) || 0;
         const estOpen = Math.round(rtxNow * mult);
         const dayClose = Number(tr.dayClose) || Number(gas.dayClose) || n(q() && q().CRefPrice) || estOpen;
@@ -2150,18 +2149,27 @@
     let twnRatio = null;
     // 最近一次換算基準（供畫面顯示「這個估值怎麼來的」，老公 10-23）
     let twnRatioInfo = null;
-    function computeTwnRatio(sess) {
+    let twnRatioCache = null; // { bars: 來源陣列參照, map: 分鐘→價格 }
+    function computeTwnRatio() {
+      // 每次重算前先清掉，避免失敗時畫面殘留上一次的倍數（Rumi 審查 MINOR-2）
+      twnRatioInfo = null;
       const twnBars = twnHist && Array.isArray(twnHist.bars) ? twnHist.bars : [];
       if (!twnBars.length) return 0;
-      const twnMap = new Map();
-      for (const b of twnBars) {
-        const ts = Number(b[0]);
-        const px = Number(b[1]);
-        if (Number.isFinite(ts) && Number.isFinite(px) && px > 0) twnMap.set(Math.floor(ts / 60), px);
+      // 富台分 K 上萬根，Map 快取起來，重繪時不重建（Rumi 審查 MAJOR-1）
+      if (!twnRatioCache || twnRatioCache.bars !== twnBars) {
+        const m = new Map();
+        for (const b of twnBars) {
+          const ts = Number(b[0]);
+          const px = Number(b[1]);
+          if (Number.isFinite(ts) && Number.isFinite(px) && px > 0) m.set(Math.floor(ts / 60), px);
+        }
+        twnRatioCache = { bars: twnBars, map: m };
       }
-      // 錨點＝「兩邊都有報價的最近那一分鐘」所屬的盤別，不看牆上時鐘（老公 10-23）。
+      const twnMap = twnRatioCache.map;
+      // 錨點＝「兩邊都有報價的最近那一分鐘」所在的那一組，不看牆上時鐘（老公 10-23）。
       // 休市時（如颱風假）台指當日沒開，最近配對自然落在昨晚夜盤，那才是今早前的最後真值。
       // 10/23 實測：夜盤 11.5319（04:59 收）比日盤 11.4963（前一日 13:44）更接近今早。
+      // 兩盤只用同一個比值：兩者追蹤不同指數，分盤倍數差異在極差 0.98% 內，不值得多一套分支。
       const pick = (key) => {
         const tx = minutePack[key] || [];
         let newest = 0;
@@ -2190,8 +2198,8 @@
       return r;
     }
     // 倍數：先用同時刻配對算出的真值；資料不足才退回上次寫入的 ratio
-    function twnRatioFor(sess) {
-      const live = computeTwnRatio(sess);
+    function twnRatioFor() {
+      const live = computeTwnRatio();
       if (live) return live;
       const tr = twnRatio || {};
       return Number(tr.ratio) || 0;
@@ -3303,7 +3311,8 @@
       if (isTwnSimWindow() && ((twnData && Array.isArray(twnData.points) && twnData.points.length > 0) || histBars.length > 1)) {
         const gas = (twnData && twnData.gas) || {};
         const tr = twnRatio || {};
-        const ratioOf = (sess) => twnRatioFor(sess) || Number(gas.ratioUsed || gas.ratio) || 11.4063;
+        // 比值只算一次（老公 10-23）：原本逐點呼叫 ratioOf，每個點都重建富台 Map（11k 根）
+        const twnRatioVal = twnRatioFor() || Number(gas.ratioUsed || gas.ratio) || 11.4063;
         // ① 存檔段（TradingView 1 分 K，真實時間；休市期間由 twn-hist.yml 持續存，不再有斷口）
         const raw = [];
         for (const b of histBars) {
@@ -3383,11 +3392,11 @@
           if (cur.length) segs.push(cur);
           // 錨點＝全資料最新一點（＝現在那點）；頭部由同一 HiStock 末值換算 → 頭尾同源
           const anchorRaw = raw[raw.length - 1][1];
-          const anchorPts = Math.round(anchorRaw * ratioOf(twnSessOfTs(raw[raw.length - 1][0])));
+          const anchorPts = Math.round(anchorRaw * twnRatioVal);
           const toPts = (seg) =>
             seg.map((p) => {
               // 每點依自己的盤別倍數換算差距（日盤、夜盤各用各的倍數）
-              const px = Math.round(anchorPts + (Number(p[1]) - anchorRaw) * ratioOf(twnSessOfTs(p[0])));
+              const px = Math.round(anchorPts + (Number(p[1]) - anchorRaw) * twnRatioVal);
               return { time: p[0], px: px, rawPx: Number(p[1]), vol: 1, open: px, high: px, low: px, close: px, twn: true };
             });
           if (daySpan < 2) {
@@ -6386,31 +6395,30 @@
     }
 
     // 後端權威 1 分價（D1）→ 奇摩 chart 補洞；不依賴何時開頁
-    // 休市日（如颱風假）imbDayKey() 會跳到「下一個交易日」，那天根本沒資料；
-    // 此時往最近有資料的交易日回試，否則比值算不出來（老公 10-23）。
+    // 當日 key 沒有資料時（休市、颱風假、或當日尚無成交）往最近交易日回試，
+    // 否則休市時算不出富台換算比值（老公 10-23）。
     async function pullCloudPx1m() {
-      try {
-        const tried = [];
-        let day = imbDayKey();
-        for (let i = 0; i < 6; i++) {
-          tried.push(day);
-          const y = await fetch(LIVE + "?kind=px1m&day=" + day, { cache: "default" }).then((r) =>
+      let day = imbDayKey();
+      for (let i = 0; i < 6 && day; i++) {
+        // 逐次 try：單日失敗不中斷回試（Rumi 審查 MINOR-3）
+        let y = null;
+        try {
+          y = await fetch(LIVE + "?kind=px1m&day=" + day, { cache: "default" }).then((r) =>
             r.ok ? r.json() : null
           );
-          const n0 = y && ((y.night || []).length + (y.day || []).length);
-          if (n0) {
-            minutePack.night_1m = mergeBarLists(minutePack.night_1m, y.night || []);
-            minutePack.day_1m = mergeBarLists(minutePack.day_1m, y.day || []);
-            save1m();
-            return true;
-          }
-          day = prevTradingYmd(day);
-          if (!day) break;
+        } catch (e) {
+          y = null;
         }
-        return false;
-      } catch (e) {
-        return false;
+        const n0 = y && ((y.night || []).length + (y.day || []).length);
+        if (n0) {
+          minutePack.night_1m = mergeBarLists(minutePack.night_1m, y.night || []);
+          minutePack.day_1m = mergeBarLists(minutePack.day_1m, y.day || []);
+          save1m();
+          return true;
+        }
+        day = prevTradingYmd(day);
       }
+      return false;
     }
 
     async function pullYahoo1m() {
@@ -6713,7 +6721,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.01";
+        const VER = "3.02";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
