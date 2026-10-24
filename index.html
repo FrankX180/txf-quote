@@ -3350,7 +3350,10 @@
       // → 預設（當前 session）時折線終點 == 頂部預估點數
       let twnAppend = null;
       const histBars = twnHist && Array.isArray(twnHist.bars) ? twnHist.bars : [];
-      if (isTwnSimWindow() && ((twnData && Array.isArray(twnData.points) && twnData.points.length > 0) || histBars.length > 1)) {
+      // 多日看歷史存檔，不受「現在是否國定假日」限制；當日才走即時模擬，週末不多抓即時值。
+      const useTwnHist = daySpan >= 2 && histBars.length > 1;
+      const useTwnLive = isTwnSimWindow() && twnData && Array.isArray(twnData.points) && twnData.points.length > 0;
+      if (useTwnHist || useTwnLive) {
         const gas = (twnData && twnData.gas) || {};
         const tr = twnRatio || {};
         // 比值只算一次（老公 10-23）：原本逐點呼叫 ratioOf，每個點都重建富台 Map（11k 根）
@@ -3366,7 +3369,7 @@
         // ② HiStock 即時尾巴：存檔延遲約 10 分，SGX 開盤中才用它補最新一小段；
         //    SGX 休盤時其「最後一點＝現在」校正會把尾巴錯放到現在，改為只補「收盤最終價」一點（頭尾同源）
         const live = [];
-        for (const p of (twnData && twnData.points) || []) {
+        for (const p of (daySpan < 2 && twnData && twnData.points) || []) {
           if (!Array.isArray(p) || p.length < 2) continue;
           const ts = Number(p[0]);
           const px = Number(p[1]);
@@ -6120,8 +6123,8 @@
       // 休市資料是靜態的：開頁這一次已經由 load() 拉 Worker，pollLive 不必同時再打一次
       if (!marketOpen()) window.__txfClosedPollAt = Date.now();
 
-      // 台灣休市日優先拉取富台指資料以供走勢圖與頂部開盤價估算
-      if (isTwnSimWindow()) {
+      // 當日模擬只在國定假日啟用；多日歷史則不論今天是否休市都可讀富台存檔。
+      if (isTwnSimWindow() || (daySpan >= 2 && !twnHist)) {
         try {
           await fetchTwnQuote();
         } catch (_) {}
@@ -6319,6 +6322,12 @@
         daySpan = Number(btn.getAttribute("data-line"));
         markChips();
         draw();
+        // 預設當日頁在週末不抓富台；切到多日時即時補載，避免歷史補線因目前非假日而消失。
+        if (daySpan >= 2 && !twnHist) {
+          fetchTwnQuote().then(() => {
+            if (chartMode === "line" && daySpan >= 2) draw();
+          }).catch(() => {});
+        }
       };
     });
 
@@ -6779,7 +6788,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.09";
+        const VER = "3.10";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
