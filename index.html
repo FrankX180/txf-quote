@@ -2359,15 +2359,15 @@
       } catch (_) {}
       return null;
     }
-    // 多日頁只需要歷史存檔；失敗時 60 秒內不重打三個來源，避免輪詢形成重試風暴。
+    // 多日頁只需要歷史存檔；失敗後 60 秒內不重打三個來源，避免快速切換形成重試。
     async function fetchTwnForMulti() {
       if (twnHist) return twnHist;
       const now = Date.now();
       if (now - twnMultiFetchAt < 60000) return null;
       twnMultiFetchAt = now;
-      const result = await fetchTwnQuote();
-      if (!twnHist) console.warn("[twn] 富台歷史存檔載入失敗，60 秒後才會重試");
-      return result;
+      await fetchTwnQuote();
+      if (!twnHist) console.warn("[twn] 富台歷史存檔載入失敗，60 秒內不重試");
+      return twnHist;
     }
     function liveSess() {
       const d = new Date();
@@ -4236,7 +4236,10 @@
       const c = $("chart");
       const multi0 = daySpan >= 2;
       // 富台模擬模式：休市且已有富台分時資料 → 當日走勢以橘色呈現、免切換 UI
-      const twnSim = isTwnSimWindow() && daySpan < 2 && twnData && Array.isArray(twnData.points) && twnData.points.length > 1;
+      const twnSim = isTwnSimWindow() && daySpan < 2 && (
+        (twnData && Array.isArray(twnData.points) && twnData.points.length > 1) ||
+        (twnHist && Array.isArray(twnHist.bars) && twnHist.bars.length > 1)
+      );
       const TWN_COLOR = "#f97316";
       const showImb = !multi0 && !twnSim;
       const { ctx, w, h } = fitCanvas(c, showImb ? 364 : 280);
@@ -4269,7 +4272,7 @@
       const open = daySpan >= 2 ? prices[0] : (twnSim || !so0 || so0.o == null ? prices[0] : so0.o);
       let flat;
       if (twnSim) {
-        flat = (twnData.gas && twnData.gas.dayClose) || prices[0];
+        flat = (twnData && twnData.gas && twnData.gas.dayClose) || prices[0];
       } else {
         // 多日：平盤＝固定參考（前日結算 dayClose），不隨窗寬移動（原 prices[0] 會亂跑）
         const refPx = daySpan >= 2
@@ -6801,7 +6804,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.11";
+        const VER = "3.12";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
