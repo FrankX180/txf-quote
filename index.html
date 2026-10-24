@@ -2278,6 +2278,7 @@
     let twnData = null;
     // 富台 1 分 K 存檔（scripts/fetch_twn_hist.py → data/twn-hist.json）：補 HiStock 只留約一個半盤的缺口
     let twnHist = null;
+    let twnMultiFetchAt = 0;
     async function loadTwnHist() {
       try {
         // 不加時間戳：gh() 的 no-cache 會帶 ETag 重新驗證，沒變回 304 不下載內容。
@@ -2357,6 +2358,16 @@
         }
       } catch (_) {}
       return null;
+    }
+    // 多日頁只需要歷史存檔；失敗時 60 秒內不重打三個來源，避免輪詢形成重試風暴。
+    async function fetchTwnForMulti() {
+      if (twnHist) return twnHist;
+      const now = Date.now();
+      if (now - twnMultiFetchAt < 60000) return null;
+      twnMultiFetchAt = now;
+      const result = await fetchTwnQuote();
+      if (!twnHist) console.warn("[twn] 富台歷史存檔載入失敗，60 秒後才會重試");
+      return result;
     }
     function liveSess() {
       const d = new Date();
@@ -3351,7 +3362,7 @@
       let twnAppend = null;
       const histBars = twnHist && Array.isArray(twnHist.bars) ? twnHist.bars : [];
       // 多日看歷史存檔，不受「現在是否國定假日」限制；當日才走即時模擬，週末不多抓即時值。
-      const useTwnHist = daySpan >= 2 && histBars.length > 1;
+      const useTwnHist = (daySpan >= 2 || isTwnSimWindow()) && histBars.length > 1;
       const useTwnLive = isTwnSimWindow() && twnData && Array.isArray(twnData.points) && twnData.points.length > 0;
       if (useTwnHist || useTwnLive) {
         const gas = (twnData && twnData.gas) || {};
@@ -6124,10 +6135,12 @@
       if (!marketOpen()) window.__txfClosedPollAt = Date.now();
 
       // 當日模擬只在國定假日啟用；多日歷史則不論今天是否休市都可讀富台存檔。
-      if (isTwnSimWindow() || (daySpan >= 2 && !twnHist)) {
+      if (isTwnSimWindow()) {
         try {
           await fetchTwnQuote();
         } catch (_) {}
+      } else if (daySpan >= 2) {
+        await fetchTwnForMulti();
       }
 
       // 分拆載入：任一來源失敗不擋整頁；Worker 成功就能更新五檔
@@ -6324,9 +6337,9 @@
         draw();
         // 預設當日頁在週末不抓富台；切到多日時即時補載，避免歷史補線因目前非假日而消失。
         if (daySpan >= 2 && !twnHist) {
-          fetchTwnQuote().then(() => {
+          fetchTwnForMulti().then(() => {
             if (chartMode === "line" && daySpan >= 2) draw();
-          }).catch(() => {});
+          }).catch((e) => console.warn("[twn] 多日富台載入失敗", e));
         }
       };
     });
@@ -6788,7 +6801,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.10";
+        const VER = "3.11";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
