@@ -68,11 +68,13 @@ def main():
     bars = fetch_bars()
     old = {}
     if OUT.exists():
+        # 讀不回舊檔就中止，**不要** old = {}：新抓的只有最近 N_BARS 根（4000 分钟 ≈ 2.8 天），
+        # 靜默清空會把 14 天存檔覆蓋掉，而且還印 OK 看起來像成功。寧可整支失敗讓人發現。
         try:
             for t, c in json.loads(OUT.read_text(encoding="utf-8")).get("bars", []):
                 old[int(t)] = float(c)
-        except Exception:
-            old = {}
+        except Exception as e:
+            raise RuntimeError("old twn-hist unreadable (%d bytes): %s" % (OUT.stat().st_size, e))
     for t, c in bars:
         if c > 0:
             old[t] = c
