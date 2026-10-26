@@ -3400,8 +3400,12 @@
         } else if (live.length) {
           if (sgxOpen) {
             const off = live[live.length - 1][0] - Date.now();
-            if (Math.abs(off) > 60 * 1000) for (const r of live) r[0] -= off;
-            for (const r of live) if (r[0] > histLastMs) raw.push(r);
+            // 尾點落後超過 10 分＝HiStock 還没更新到本場（開盤瞬間或延遲）。
+            // 那種情況按「最後一點＝現在」平移會把整段推錯位，寧可不補（存檔段兜底）。
+            if (Math.abs(off) <= 10 * 60 * 1000) {
+              if (Math.abs(off) > 60 * 1000) for (const r of live) r[0] -= off;
+              for (const r of live) if (r[0] > histLastMs) raw.push(r);
+            }
           } else {
             // SGX 休盤：存檔約缺收盤前 15 分（TradingView 延遲）→ HiStock 尾巴以「最後一點＝該場收盤時刻」校正後補上
             const hd = new Date(histLastMs);
@@ -3670,7 +3674,8 @@
           let winStart = rightMs - daySpan * 86400000;
           try {
             const daySet = new Set();
-            for (const k of lastDates(daySpan)) {
+            // 多要 3 個名額：台指夜盤棒會被標成次一交易日，會佔掉 lastDates 的名額
+            for (const k of lastDates(daySpan + 3)) {
               const m = ymdMs0(k);
               if (Number.isFinite(m)) daySet.add(m);
             }
@@ -3680,7 +3685,8 @@
               if (Number.isFinite(m)) daySet.add(m);
             }
             const days = [...daySet].filter((m) => m <= rightMs).sort((a, b) => b - a).slice(0, daySpan);
-            if (days.length === daySpan) winStart = days[days.length - 1];
+            // 只要算得出有行情日就一定用，不退回 48 小時窗（那正是本次要修的 bug）
+            if (days.length) winStart = days[days.length - 1];
           } catch (e) {
             // 不能靜默：失敗就退回上面的日曆窗（就是本次要修的 48 小時 bug），留痕跡好查
             console.warn("[twn] 有行情日視窗計算失敗，退回日曆窗", e);
