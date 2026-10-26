@@ -378,11 +378,13 @@ const HEAL_GH_TWNMETA = "https://frankx180.github.io/txf-quote/data/twn-hist-met
 // 來源（TradingView 1 分 K）延遲約 10 分，門檻必須高於它才不會在健康狀態下自我觸發。
 // 2026-10-27 實測：GitHub 的 */5 cron 被節流成 ~41 分鐘一次，原本 45 分門檻＝永遠落後 40 分以上
 // （01:24 時資料還停在 01:00，玩股網已 4,046.75、我們 4,032.75）。
-// 20 分＝來源 10 分延遲 + Pages 傳播 ~1 分 + 兩個檢查週期的餘裕，只在真的沒跑時補，穩態不亂打。
-// 實測穩態：資料落後 10～20 分（剛補完 11～13 分、接近門檻約 20 分），不是「跟到 10 分內」。
+// 20 分＝來源 10 分延遲 + Pages 傳播 ~1 分 + 兩個檢查週期的餘裕。
+// 實測穩態：剛補完 10～13 分、接近門檻約 20 分（＝約每 10 分鐘補一次，屬預期節奏不是異常）。
+// dispatch 本身還有 HEAL_MIN_INTERVAL_MS（8 分）上限，實際不會高於 1 次／8 分。
 const HEAL_TWN_STALE_MS = 20 * 60 * 1000;
 const HEAL_TWN_CHECK_MS = 2 * 60 * 1000;
-// 同一根 bar 的重送間隔（分鐘級）：落後時尾巴每分鐘換根，4 分鐘足以跳脫穩態自我觸發
+// 同一根 bar 的重送間隔：實際由 triggerGithubWorkflow 的 HEAL_MIN_INTERVAL_MS（8 分）兜底，
+// 這裡的 4 分只是多一層早退（尾巴不前進時最多 1 次／8 分，≈180 次／日，打不爆 API 額度）。
 const HEAL_TWN_RETRY_MS = 4 * 60 * 1000;
 // D1 故障時的保險（同一 isolate 內不重送）；主節流仍靠 D1
 let _twnLastDispatchMs = 0;
@@ -447,6 +449,9 @@ async function triggerGithubWorkflow(env, reason, opts) {
   if (!token) return { ok: false, reason: "no-token", skipped: true };
   const now = Date.now();
   const last = await getHealState(env, stateKey);
+  // D1 讀失敗回 { err: true }（ts 為 undefined → NaN 比較為 false → 直接放行＝fail-open，
+  // 每分鐘 dispatch 的正回饋）。這裡必須 fail-closed，與 getHealState 的註解一致。
+  if (last && last.err) return { ok: false, reason: "state-unavailable", skipped: true };
   if (last && now - Number(last.ts) < HEAL_MIN_INTERVAL_MS) {
     return { ok: false, reason: "rate-limited", lastTs: last.ts, skipped: true };
   }

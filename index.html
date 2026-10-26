@@ -620,7 +620,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">3.18</div>
+      <div class="ver foot-right" id="verFoot">3.19</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1342,9 +1342,15 @@
           }
           return null;
         })();
-        const HIS_K = 32 * 60 * 60 * 1000; // 與 linePoints 的 HiStock 時戳校正同一個常數
-        const hsRealTs = hsLastPt ? Number(hsLastPt.ts) - HIS_K : 0;
-        const freshest = hsLast && hsRealTs > ((histTail && histTail.ts) || 0)
+        // HiStock 時戳有兩種形態（與 linePoints 的守門一致）：正常＝落後 0～10 分（不校）；
+        // 異常＝固定超前約 32 小時（2026-10-26 三次取樣 31h55m～31h59m）。
+        const HIS_K = 32 * 60 * 60 * 1000;
+        const hsRawTs = hsLastPt ? Number(hsLastPt.ts) : 0;
+        const hsNearNow = hsRawTs && Math.abs(hsRawTs - Date.now()) <= 10 * 60 * 1000;
+        const hsRealTs = hsLastPt ? (hsNearNow ? hsRawTs : hsRawTs - HIS_K) : 0;
+        // 絕對鮮度：超過 30 分的點不當現價（HiStock 整條凍結時就是這種情況）
+        const hsFresh = !!hsLast && !!hsRealTs && Date.now() - hsRealTs <= 30 * 60 * 1000;
+        const freshest = hsFresh && hsRealTs > ((histTail && histTail.ts) || 0)
           ? { v: hsLast, ts: hsRealTs }
           : histTail;
         const rtxNow = (freshest && freshest.v) || Number(gas.rtxNow || twnData.latestPrice) || 0;
@@ -1352,9 +1358,14 @@
         // 漲跌基準＝台指最近一次成交價（休市時 q().CLastPrice 就是最後收盤）。
         // 不可用 data/twn-ratio.json 的 dayClose：休市日整條跳過，會停在放假前那天
         // （2026-10-27 實測卡在 46,234＝前一日收盤，導致漲跌少算 580 點）。
-        // tr.dayClose 只跟「還新鮮的」倍數檔一起用（twnRatioFor 已驗 ratioAt ≤ 3 天）：
-        // 過期就整組丟掉，免得再把放假前那天的收盤當基準。
-        const fileBase = ratioLive ? Number(tr.dayClose) : 0;
+        // twn-ratio.json 沒有自己的日期欄，只有 ratioAt（數值真正的取樣時刻）→ 用它驗檔案鮮度。
+        // 超過 3 天就整組丟掉（休市日整條跳過，會停在放假前那天，例如 10/23 的 46,234）。
+        const trAtMs = (function () {
+          const s = String(tr.ratioAt || "").replace(" ", "T");
+          const t = Date.parse(s.length === 19 ? s + "+08:00" : s);
+          return Number.isFinite(t) ? t : 0;
+        })();
+        const fileBase = trAtMs && Date.now() - trAtMs <= 3 * 24 * 3600 * 1000 ? Number(tr.dayClose) : 0;
         const dayClose = n(q() && q().CLastPrice) || fileBase || Number(gas.dayClose) || n(q() && q().CRefPrice) || estOpen;
         const diff = estOpen - dayClose;
         const rate = (diff / dayClose) * 100;
@@ -6883,7 +6894,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.18";
+        const VER = "3.19";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {

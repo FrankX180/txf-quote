@@ -6,6 +6,7 @@
 # 與 update-quote 分開、不套休市閘門：SGX 在台灣假日照常交易，必須照抓照存。
 # 輸出：{"updatedAt", "symbol", "bars": [[epoch_sec, close], ...]}，與舊檔以時間戳合併，保留 14 天。
 import json
+import os
 import random
 import re
 import string
@@ -68,13 +69,20 @@ def main():
     bars = fetch_bars()
     old = {}
     if OUT.exists():
-        # 讀不回舊檔就中止，**不要** old = {}：新抓的只有最近 N_BARS 根（4000 分钟 ≈ 2.8 天），
-        # 靜默清空會把 14 天存檔覆蓋掉，而且還印 OK 看起來像成功。寧可整支失敗讓人發現。
+        # 讀不回舊檔：把它改名留下（不删、可回溯）再繼續，不要 hard fail。
+        # hard fail 會和 twn-hist.yml 的 cancel-in-progress 形成死循環（被取消→截斷檔→每次 raise→
+        # worker 每 8 分 dispatch 一次永遠好不了）；改名保留就够了，舊檔不會被默默覆蓋。
         try:
             for t, c in json.loads(OUT.read_text(encoding="utf-8")).get("bars", []):
                 old[int(t)] = float(c)
         except Exception as e:
-            raise RuntimeError("old twn-hist unreadable (%d bytes): %s" % (OUT.stat().st_size, e))
+            bad = OUT.with_name(OUT.name + ".bad-" + datetime.now(TZ).strftime("%Y%m%d-%H%M%S"))
+            try:
+                OUT.replace(bad)
+                print("WARN old twn-hist unreadable (%s); moved to %s" % (e, bad.name), flush=True)
+            except Exception as e2:
+                print("WARN old twn-hist unreadable (%s); rename failed (%s)" % (e, e2), flush=True)
+            old = {}
     for t, c in bars:
         if c > 0:
             old[t] = c
@@ -87,13 +95,16 @@ def main():
         "bars": [[t, c] for t, c in merged],
     }
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    # 原子寫：tmp → os.replace。twn-hist.yml 是 cancel-in-progress，run 被砍在中途時
+    # 直接覆寫主檔會留下截斷 JSON（之後每次讀都炸），改名換檔才不會壞到主檔。
+    def _atomic_write(path, text):
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    _atomic_write(OUT, json.dumps(out, ensure_ascii=False, separators=(",", ":")))
     # 小檔：只給 Worker 的缺口巡檢讀（幾十 bytes），避免每次抓 235KB 完整檔（2026-10-23）
-    META.write_text(
-        json.dumps({"lastTs": merged[-1][0], "count": len(merged), "updatedAt": out["updatedAt"]},
-                   ensure_ascii=False, separators=(",", ":")),
-        encoding="utf-8",
-    )
+    _atomic_write(META, json.dumps({"lastTs": merged[-1][0], "count": len(merged), "updatedAt": out["updatedAt"]},
+                                   ensure_ascii=False, separators=(",", ":")))
     f = lambda t: datetime.fromtimestamp(t, TZ).strftime("%m-%d %H:%M")
     print("OK bars=%d new=%d range=%s..%s last=%.2f" % (len(merged), len(bars), f(merged[0][0]), f(merged[-1][0]), merged[-1][1]), flush=True)
 

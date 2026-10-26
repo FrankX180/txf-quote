@@ -1,0 +1,8 @@
+﻿fix(v3.19): Rumi 對抗審查四修——D1 節流 fail-closed、dayClose 驗檔案日期、HiStock 時戳雙形態、twn-hist 原子寫
+
+- worker: triggerGithubWorkflow 加 last.err 判斷（D1 讀失敗原本 Number(undefined)=NaN 直接放行＝fail-open）
+- worker: 註解改寫實測節奏（約每 10 分補一次，dispatch 另有 8 分上限）
+- index.html: dayClose 的檔案基準改用 ratioAt 驗鮮度（≤3 天），不再用 ratioLive 當代理
+- index.html: hsRealTs 照 linePoints 的 nearNow 分支重算，並加「絕對鮮度 30 分」門檻
+- scripts/fetch_twn_hist.py: 壞檔改名保留（不 hard fail，避免 cancel-in-progress 死循環）＋ tmp→os.replace 原子寫
+- VER 3.18 → 3.19
