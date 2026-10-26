@@ -620,7 +620,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">3.16</div>
+      <div class="ver foot-right" id="verFoot">3.17</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1330,9 +1330,28 @@
         const hsLast = hsLastPt ? hsLastPt.v : 0;
         // 倍數與折線同源：都走 twnRatioFor()（同一時刻配對，最近一組）
         const mult = twnRatioFor() || Number(gas.ratioUsed || gas.ratio) || 11.4063;
-        const rtxNow = hsLast || Number(gas.rtxNow || twnData.latestPrice) || 0;
+        // 富台現價取「時間戳較新」的來源（2026-10-27）：HiStock 分時會整條凍結（00:59 後不再前進，
+        // 先前直接拿 hsLast 當現價，存檔段更新了也永遠顯示凍結值）。HiStock 時戳固定超前 32h，先校正再比。
+        const histTail = (function () {
+          const B = twnHist && Array.isArray(twnHist.bars) ? twnHist.bars : [];
+          for (let i = B.length - 1; i >= 0; i--) {
+            const t = Number(B[i] && B[i][0]) * 1000;
+            const v = Number(B[i] && B[i][1]);
+            if (Number.isFinite(t) && Number.isFinite(v) && v > 0) return { v: v, ts: t };
+          }
+          return null;
+        })();
+        const HIS_K = 32 * 60 * 60 * 1000; // 與 linePoints 的 HiStock 時戳校正同一個常數
+        const hsRealTs = hsLastPt ? Number(hsLastPt.ts) - HIS_K : 0;
+        const freshest = hsLast && hsRealTs > ((histTail && histTail.ts) || 0)
+          ? { v: hsLast, ts: hsRealTs }
+          : histTail;
+        const rtxNow = (freshest && freshest.v) || Number(gas.rtxNow || twnData.latestPrice) || 0;
         const estOpen = Math.round(rtxNow * mult);
-        const dayClose = Number(tr.dayClose) || Number(gas.dayClose) || n(q() && q().CRefPrice) || estOpen;
+        // 漲跌基準＝台指最近一次成交價（休市時 q().CLastPrice 就是最後收盤）。
+        // 不可用 data/twn-ratio.json 的 dayClose：休市日整條跳過，會停在放假前那天
+        // （2026-10-27 實測卡在 46,234＝前一日收盤，導致漲跌少算 580 點）。
+        const dayClose = n(q() && q().CLastPrice) || Number(tr.dayClose) || Number(gas.dayClose) || n(q() && q().CRefPrice) || estOpen;
         const diff = estOpen - dayClose;
         const rate = (diff / dayClose) * 100;
 
@@ -6860,7 +6879,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.16";
+        const VER = "3.17";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {

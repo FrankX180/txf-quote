@@ -375,12 +375,14 @@ const HEAL_CHIPS_INTERVAL_MS = 2 * 60 * 1000; // 盤後籌碼定案視窗（14:3
 const HEAL_TWN_WORKFLOW = "twn-hist.yml";
 const HEAL_GH_TWNHIST = "https://frankx180.github.io/txf-quote/data/twn-hist.json";
 const HEAL_GH_TWNMETA = "https://frankx180.github.io/txf-quote/data/twn-hist-meta.json";
-// 來源（TradingView 1 分 K）本身就延遲約 10 分，門檻必須遠高於它，
-// 否則健康狀態下也會一直觸發（Rumi 審查 BLOCKER）。45 分＝確定是 Action 沒跑。
-const HEAL_TWN_STALE_MS = 45 * 60 * 1000;
-const HEAL_TWN_CHECK_MS = 10 * 60 * 1000;
-// 同一根 bar 最多每小時重送一次，避免來源延遲造成穩態自我觸發
-const HEAL_TWN_RETRY_MS = 60 * 60 * 1000;
+// 來源（TradingView 1 分 K）延遲約 10 分，門檻必須高於它才不會在健康狀態下自我觸發。
+// 2026-10-27 實測：GitHub 的 */5 cron 被節流成 ~41 分鐘一次，原本 45 分門檻＝永遠落後 40 分以上
+// （01:24 時資料還停在 01:00，玩股網已 4,046.75、我們 4,032.75）。
+// 20 分＝來源 10 分延遲 + Pages 傳播 ~1 分 + 兩個檢查週期的餘裕，只在真的沒跑時補，穩態不亂打。
+const HEAL_TWN_STALE_MS = 20 * 60 * 1000;
+const HEAL_TWN_CHECK_MS = 2 * 60 * 1000;
+// 同一根 bar 的重送間隔（分鐘級）：落後時尾巴每分鐘換根，4 分鐘足以跳脫穩態自我觸發
+const HEAL_TWN_RETRY_MS = 4 * 60 * 1000;
 // D1 故障時的保險（同一 isolate 內不重送）；主節流仍靠 D1
 let _twnLastDispatchMs = 0;
 
