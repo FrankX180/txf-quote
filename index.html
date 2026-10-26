@@ -3380,7 +3380,9 @@
         // ② HiStock 即時尾巴：存檔延遲約 10 分，SGX 開盤中才用它補最新一小段；
         //    SGX 休盤時其「最後一點＝現在」校正會把尾巴錯放到現在，改為只補「收盤最終價」一點（頭尾同源）
         const live = [];
-        for (const p of (daySpan < 2 && twnData && twnData.points) || []) {
+        // 多日模式也要吃 HiStock 即時尾巴（2026-10-26）：原本只在 daySpan<2 收，2 日以上只有存檔段，
+        // 今天的富台日盤永遠接不上，圖上就斷在昨天。
+        for (const p of (twnData && twnData.points) || []) {
           if (!Array.isArray(p) || p.length < 2) continue;
           const ts = Number(p[0]);
           const px = Number(p[1]);
@@ -3648,14 +3650,38 @@
           const stepMs = 5 * 60000;
           // 富台補洞：只補台指無覆蓋的時段（連假整段如 10/09、以及夜盤尾端）；
           // 台指已覆蓋處不重疊，避免兩種源的位準差被讀成尖刺。
-          const histT = pts.map((p) => p.time).sort((a, b) => a - b);
+          let histT = pts.map((p) => p.time).sort((a, b) => a - b);
           // 視窗＝最後 daySpan 天（右緣取台指與富台兩邊的最新點）；台指歷史在連假常只挑到
           // 最新的夜盤複本（如 2日只剩 10 小時），故補洞範圍以「時間窗」界定，不用台指首點。
           const rightMs = Math.max(
             histT.length ? histT[histT.length - 1] : 0,
             twnAppend.length ? twnAppend[twnAppend.length - 1].time : 0
           );
-          const winStart = rightMs - daySpan * 86400000;
+          // 連假修正（2026-10-26 老公）：原本「2 日 = 右界往回 48 小時」。10/23 颱風假、10/26 補假時
+          // 台指完全沒有資料，48 小時窗只到 10/24，整段富台（10/23 日盤＋夜盤）落在窗外被砍掉，
+          // 圖上就變成斷線＋中間被跳過。→ 改成「最近 daySpan 個有行情日」的第一天 00:00，
+          // 有行情日＝台指交易日 ∪ 富台有交易的日，連假其間的富台因此全部留在窗內。
+          const ymdMs0 = (k) => {
+            const s = String(k || "").replace(/[^0-9]/g, "");
+            return s.length >= 8
+              ? new Date(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8)).getTime()
+              : NaN;
+          };
+          let winStart = rightMs - daySpan * 86400000;
+          try {
+            const daySet = new Set();
+            for (const k of lastDates(daySpan < 1 ? 1 : daySpan)) {
+              const m = ymdMs0(k);
+              if (Number.isFinite(m)) daySet.add(m);
+            }
+            for (const p of twnAppend) {
+              if (p.time < rightMs - 20 * 86400000) continue;
+              const m = ymdMs0(tradingDayKey(p.time));
+              if (Number.isFinite(m)) daySet.add(m);
+            }
+            const days = [...daySet].filter((m) => m <= rightMs).sort((a, b) => b - a).slice(0, daySpan);
+            if (days.length === daySpan) winStart = days[days.length - 1];
+          } catch (e) {}
           const COVER = 45 * 60000;
           const covered = (t) => {
             let lo = 0, hi = histT.length - 1;
@@ -3670,6 +3696,9 @@
             return best <= COVER;
           };
           const inWin = (t) => t >= winStart && t <= rightMs + 60000;
+          // 同一個窗口也裁台指歷史：連假時窗落在 10/23 起，10/21、10/22 的台指不該再佔版面
+          pts = pts.filter((p) => p.time >= winStart);
+          histT = pts.map((p) => p.time).sort((a, b) => a - b);
           const fill = resampleTwnTail(twnAppend.filter((p) => inWin(p.time) && !covered(p.time)), stepMs);
           if (fill.length >= 2) {
             // 依 >60 分間隙切段；各段首點標 brk，與台指歷史／他段斷開，不相連成假尖刺
@@ -6804,7 +6833,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.12";
+        const VER = "3.13";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
