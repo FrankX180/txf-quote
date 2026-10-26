@@ -620,7 +620,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">3.09</div>
+      <div class="ver foot-right" id="verFoot">3.14</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -3402,7 +3402,13 @@
             const off = live[live.length - 1][0] - Date.now();
             // 尾點落後超過 10 分＝HiStock 還没更新到本場（開盤瞬間或延遲）。
             // 那種情況按「最後一點＝現在」平移會把整段推錯位，寧可不補（存檔段兜底）。
-            if (Math.abs(off) <= 10 * 60 * 1000) {
+            // 尾點落後超過 10 分＝HiStock 還没更新到本場（開盤瞬間或延遲）。
+            // 那種情況按「最後一點＝現在」平移會把整段推錯位，寧可不補（存檔段兜底）。
+            // 「超前」不是延遲，是 HiStock 時間戳壞掉：2026-10-26 23:18 實測固定超前
+            // 31h55m（同刻 Cloudflare ts 與本機時鐘只差 0.5 秒 ⇒ 來源時間戳錯，非本機時鐘錯）。
+            // 真實時間不可能來自未來，校正後照樣要補，否則橘線停在存檔末根（落後半小時）；
+            // 但超前超過 7 天視為來源不可信，寧可不補。
+            if (off >= -10 * 60 * 1000 && off <= 7 * 24 * 60 * 60 * 1000) {
               if (Math.abs(off) > 60 * 1000) for (const r of live) r[0] -= off;
               for (const r of live) if (r[0] > histLastMs) raw.push(r);
             }
@@ -6842,7 +6848,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.13";
+        const VER = "3.14";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
