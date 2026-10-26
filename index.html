@@ -620,7 +620,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">3.15</div>
+      <div class="ver foot-right" id="verFoot">3.16</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2204,12 +2204,15 @@
       // 退回檔案值前先驗鮮度：data/twn-ratio.json 由 update-quote.yml 產生，休市日整條跳過，
       // 會停在放假前那天；它停的那版（10/23 11:10，ratio 11.7546）是錯配時刻污染出來的壞值
       // （10/23 日盤台指 46,272 配到舊富台 3,936.5），拿它換算會凭空多出約 900 點。
-      // 因此：更新超過 3 天或值域怪異（<9 或 >13）一律不用，退回硬編保底值。
+      // 鮮度看 ratioAt（數值真正的取樣時刻）；updatedAt 每次執行都刷新，不能用來判鮮度。
+      // 時間字串由 fetch_twn_ratio.py 以台北時間寫入、無時區，這裡顯式補 +08:00 再解析。
+      // 更新超過 3 天或值域離譜（腳本 RATIO_MIN/MAX＝8~16）一律不用，退回硬編保底值。
       const tr = twnRatio || {};
-      const at = Date.parse(String(tr.updatedAt || "").replace(" ", "T"));
+      const s = String(tr.ratioAt || tr.updatedAt || "").replace(" ", "T");
+      const at = s.length === 19 ? Date.parse(s + "+08:00") : Date.parse(s);
       const fresh = Number.isFinite(at) && Date.now() - at <= 3 * 24 * 3600 * 1000;
       const v = Number(tr.ratio);
-      const sane = fresh && Number.isFinite(v) && v >= 9 && v <= 13;
+      const sane = fresh && Number.isFinite(v) && v >= 8 && v <= 16;
       return sane ? v : 0;
     }
     async function loadTwnRatio() {
@@ -3408,15 +3411,16 @@
         } else if (live.length) {
           if (sgxOpen) {
             const off = live[live.length - 1][0] - Date.now();
-            // 尾點落後超過 10 分＝HiStock 還没更新到本場（開盤瞬間或延遲）。
-            // 那種情況按「最後一點＝現在」平移會把整段推錯位，寧可不補（存檔段兜底）。
-            // 尾點落後超過 10 分＝HiStock 還没更新到本場（開盤瞬間或延遲）。
-            // 那種情況按「最後一點＝現在」平移會把整段推錯位，寧可不補（存檔段兜底）。
-            // 「超前」不是延遲，是 HiStock 時間戳壞掉：2026-10-26 23:18 實測固定超前
-            // 31h55m（同刻 Cloudflare ts 與本機時鐘只差 0.5 秒 ⇒ 來源時間戳錯，非本機時鐘錯）。
-            // 真實時間不可能來自未來，校正後照樣要補，否則橘線停在存檔末根（落後半小時）；
-            // 但超前超過 7 天視為來源不可信，寧可不補。
-            if (off >= -10 * 60 * 1000 && off <= 7 * 24 * 60 * 60 * 1000) {
+            // HiStock 時間戳不是「落後」而是固定超前 32 小時（2026-10-26 三次取樣 31h55m～31h59m，
+            // 差值恆定＝時區被重複計算，不是資料延遲）。所以 off 不能直接當延遲量用：
+            //   真實落後 lag ＝ 32h − off（時戳正常時 lag ＝ −off）
+            // lag > 10 分 → HiStock 還沒更新到本場（開盤瞬間或延遲），按「最後一點＝現在」平移
+            //               會把整段推錯位 → 不補（存檔段兜底）。
+            // lag 對不上（來源時戳又變了）→ 一律不補，寧可停在存檔末根也不要補錯價格。
+            const HIS_K = 32 * 60 * 60 * 1000; // HiStock 固定超前量
+            const nearNow = Math.abs(off) <= 10 * 60 * 1000; // 時戳正常＝落後 0~10 分
+            const lag = nearNow ? -off : HIS_K - off;
+            if (lag >= -60 * 1000 && lag <= 10 * 60 * 1000) {
               if (Math.abs(off) > 60 * 1000) for (const r of live) r[0] -= off;
               for (const r of live) if (r[0] > histLastMs) raw.push(r);
             }
@@ -6856,7 +6860,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.15";
+        const VER = "3.16";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
