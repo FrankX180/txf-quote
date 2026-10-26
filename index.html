@@ -3670,7 +3670,7 @@
           let winStart = rightMs - daySpan * 86400000;
           try {
             const daySet = new Set();
-            for (const k of lastDates(daySpan < 1 ? 1 : daySpan)) {
+            for (const k of lastDates(daySpan)) {
               const m = ymdMs0(k);
               if (Number.isFinite(m)) daySet.add(m);
             }
@@ -3681,7 +3681,10 @@
             }
             const days = [...daySet].filter((m) => m <= rightMs).sort((a, b) => b - a).slice(0, daySpan);
             if (days.length === daySpan) winStart = days[days.length - 1];
-          } catch (e) {}
+          } catch (e) {
+            // 不能靜默：失敗就退回上面的日曆窗（就是本次要修的 48 小時 bug），留痕跡好查
+            console.warn("[twn] 有行情日視窗計算失敗，退回日曆窗", e);
+          }
           const COVER = 45 * 60000;
           const covered = (t) => {
             let lo = 0, hi = histT.length - 1;
