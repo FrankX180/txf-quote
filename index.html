@@ -620,7 +620,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">3.14</div>
+      <div class="ver foot-right" id="verFoot">3.15</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2201,8 +2201,16 @@
     function twnRatioFor() {
       const live = computeTwnRatio();
       if (live) return live;
+      // 退回檔案值前先驗鮮度：data/twn-ratio.json 由 update-quote.yml 產生，休市日整條跳過，
+      // 會停在放假前那天；它停的那版（10/23 11:10，ratio 11.7546）是錯配時刻污染出來的壞值
+      // （10/23 日盤台指 46,272 配到舊富台 3,936.5），拿它換算會凭空多出約 900 點。
+      // 因此：更新超過 3 天或值域怪異（<9 或 >13）一律不用，退回硬編保底值。
       const tr = twnRatio || {};
-      return Number(tr.ratio) || 0;
+      const at = Date.parse(String(tr.updatedAt || "").replace(" ", "T"));
+      const fresh = Number.isFinite(at) && Date.now() - at <= 3 * 24 * 3600 * 1000;
+      const v = Number(tr.ratio);
+      const sane = fresh && Number.isFinite(v) && v >= 9 && v <= 13;
+      return sane ? v : 0;
     }
     async function loadTwnRatio() {
       try {
@@ -6848,7 +6856,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.14";
+        const VER = "3.15";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
