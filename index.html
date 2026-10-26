@@ -3392,11 +3392,11 @@
         const sgxOpen = twnOpenNow();
         if (!histLastMs) {
           // 無存檔：沿用舊行為（HiStock 時間戳超前，以「最後一點＝現在」校正回真實時刻）
-          if (live.length) {
+          if (live.length && daySpan < 2) {
             const off = live[live.length - 1][0] - Date.now();
             if (Math.abs(off) > 60 * 1000) for (const r of live) r[0] -= off;
           }
-          for (const r of live) raw.push(r);
+          if (daySpan < 2) for (const r of live) raw.push(r);
         } else if (live.length) {
           if (sgxOpen) {
             const off = live[live.length - 1][0] - Date.now();
