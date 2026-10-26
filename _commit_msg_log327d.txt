@@ -1,0 +1,1 @@
+docs: 日誌 20261027 補 fail-closed 五情境實測與 staleMs 讀法
