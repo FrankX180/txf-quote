@@ -327,6 +327,13 @@
       font-size: 13px; cursor: pointer; font-weight: 600; color: #374151;
     }
     .chip.on, .mode.on { background: #b91c1c; color: #fff; }
+    #kIndRow { margin-top: -4px; }
+    #kIndRow[hidden] { display: none !important; }
+    #kIndRow .chip { font-size: 12px; padding: 3px 8px; white-space: nowrap; }
+    #kIndRow .chip.on { background: #374151; color: #fff; }
+    #kIndRow .chip.dim { opacity: .45; }
+    #kMonthNote { left: auto !important; right: 76px; top: 6px !important; }
+    .range-ma-pop.kind-pop { top: 6px; bottom: auto; left: 6px; min-width: 176px; }
     #khost { width: 100%; height: 320px; display: none; }
     /* fallback；實際高度由 syncSideLayout 依走勢圖+五檔實測覆寫 */
     #khost.k-expand { height: 529px; }
@@ -553,6 +560,14 @@
               </span>
             </div>
           </div>
+          <div class="chips" id="kIndRow" hidden>
+            <div class="chipline">
+              <button class="chip" id="kiMa" data-ki="ma" type="button" title="均線 MA">MA</button>
+              <button class="chip" id="kiFlip" data-ki="flip" type="button" title="翻亞當：以最後收盤為軸，把近 N 根 K 線上下鏡射並時間反轉，投影到未來">翻亞當(30,4)</button>
+              <button class="chip" id="kiExt" data-ki="ext" type="button" title="均線以虛線延伸到未來（延伸段用翻亞當投影的 K 線計算）">均線延伸</button>
+              <button class="chip" id="kiGear" type="button" title="指標設定">⚙</button>
+            </div>
+          </div>
           <div class="meta" id="sumline"></div>
           <canvas id="chart" width="720" height="280"></canvas>
           <div id="kWrap">
@@ -568,6 +583,21 @@
               </label>
               <label>粗細
                 <input id="rangeMaWidth" type="number" min="1" max="6" step="1" value="2" />
+              </label>
+            </div>
+            <div class="range-ma-pop kind-pop" id="kIndPop" hidden>
+              <div class="rm-title">指標設定</div>
+              <label>翻亞當 根數
+                <input id="kiN" type="number" min="1" max="60" step="1" value="30" />
+              </label>
+              <label>棒身寬 px
+                <input id="kiBw" type="number" min="1" max="24" step="1" value="4" />
+              </label>
+              <label>MA1 週期
+                <input id="kiP1" type="number" min="2" max="500" step="1" value="9" />
+              </label>
+              <label>MA2 週期
+                <input id="kiP2" type="number" min="2" max="500" step="1" value="36" />
               </label>
             </div>
             <div id="kMonthNote">以結算日繪製月收盤日</div>
@@ -620,7 +650,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">3.19</div>
+      <div class="ver foot-right" id="verFoot">3.20</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -5668,6 +5698,326 @@
       }
       return { color: "#888888" };
     }
+    // ===== 主圖指標：MA / 翻亞當 / 均線延伸（仿 BLOK flash.ts） =====
+    // 翻亞當(N,W)：以「最後一根收盤」為軸，把最近 N 根 K 線價格上下鏡射（2*pivot-價），
+    // 時間順序反轉（最後一根先出現）投影到未來；W＝投影棒身寬度 px。
+    // 均線延伸：真實 K ＋ 投影 K 串起來重算 SMA，從最後一根真實 K 起畫虛線。
+    const KIND_KEY = "txfKInd";
+    const KIND_MA_COLORS = ["#935EBD", "#FF9600"];
+    let kInd = { ma: true, flip: true, ext: true, n: 30, bw: 4, p1: 9, p2: 36 };
+    (function loadKInd() {
+      try {
+        const o = JSON.parse(localStorage.getItem(KIND_KEY) || "null");
+        if (!o) return;
+        ["ma", "flip", "ext"].forEach(function (k) { if (typeof o[k] === "boolean") kInd[k] = o[k]; });
+        const rg = function (v, a, b, d) { v = Math.round(Number(v)); return v >= a && v <= b ? v : d; };
+        kInd.n = rg(o.n, 1, 60, 30);
+        kInd.bw = rg(o.bw, 1, 24, 4);
+        kInd.p1 = rg(o.p1, 2, 500, 9);
+        kInd.p2 = rg(o.p2, 2, 500, 36);
+      } catch (e) {}
+    })();
+    function saveKInd() {
+      try { localStorage.setItem(KIND_KEY, JSON.stringify(kInd)); } catch (e) {}
+    }
+    function kIndActive() { return !!(kInd.flip || kInd.ext); }
+    let kIndReady = false;
+    let kMaShown = false;
+    let kFlipShown = false;
+    let flipCache = { times: [] };
+
+    // 未來每根的時間戳：分K固定步長；日K跳週末；週K+7天；月K+1月
+    function flipFutureTimes(list, n) {
+      const out = [];
+      const last = list[list.length - 1];
+      if (!last) return out;
+      let t = last.timestamp;
+      const stepMin = kInt === "1" ? 60000 : kInt === "5" ? 300000 : kInt === "30" ? 1800000 : 0;
+      for (let i = 0; i < n; i++) {
+        if (stepMin) t += stepMin;
+        else {
+          const d = new Date(t);
+          if (kInt === "w") d.setDate(d.getDate() + 7);
+          else if (kInt === "m") d.setMonth(d.getMonth() + 1);
+          else {
+            do { d.setDate(d.getDate() + 1); } while (d.getDay() === 0 || d.getDay() === 6);
+          }
+          t = d.getTime();
+        }
+        out.push(t);
+      }
+      return out;
+    }
+    function flipCompute(list, n) {
+      const L = list.length;
+      const bars = [];
+      if (L < 2) return { bars: bars, ext: [], hi: null, lo: null };
+      const pivot = list[L - 1].close;
+      const m = Math.min(n, L - 1);
+      for (let i = L - 1, c = 0; c < m; i--, c++) {
+        const k = list[i];
+        const o2 = 2 * pivot - k.open, c2 = 2 * pivot - k.close;
+        const h2 = 2 * pivot - k.low, l2 = 2 * pivot - k.high;
+        bars.push({
+          o: o2, c: c2,
+          h: Math.max(o2, c2, h2, l2),
+          l: Math.min(o2, c2, h2, l2),
+        });
+      }
+      let hi = -Infinity, lo = Infinity;
+      bars.forEach(function (b) { if (b.h > hi) hi = b.h; if (b.l < lo) lo = b.l; });
+      // 均線延伸
+      const ext = [];
+      const closes = list.map(function (k) { return k.close; }).concat(bars.map(function (b) { return b.c; }));
+      [kInd.p1, kInd.p2].forEach(function (per, idx) {
+        const pts = [];
+        for (let j = L - 1; j <= L - 1 + bars.length; j++) {
+          if (j < per - 1) { pts.push(null); continue; }
+          let sum = 0;
+          for (let q = j - per + 1; q <= j; q++) sum += closes[q];
+          const v = sum / per;
+          pts.push(v);
+          if (kInd.ext) { if (v > hi) hi = v; if (v < lo) lo = v; }
+        }
+        ext.push({ color: KIND_MA_COLORS[idx], pts: pts });
+      });
+      return { bars: bars, ext: ext, hi: hi === -Infinity ? null : hi, lo: lo === Infinity ? null : lo };
+    }
+    function ensureKIndIndicators() {
+      if (kIndReady || typeof klinecharts === "undefined" || !klinecharts.registerIndicator) return;
+      kIndReady = true;
+      klinecharts.registerIndicator({
+        name: "FLIP_ADAM",
+        shortName: "翻亞當",
+        series: "price",
+        precision: 0,
+        calcParams: [30, 4],
+        figures: [
+          { key: "hi", title: "", type: "line" },
+          { key: "lo", title: "", type: "line" },
+        ],
+        calc: function (list) {
+          const L = (list || []).length;
+          const res = (list || []).map(function () { return {}; });
+          if (L < 2) { flipCache = { times: [] }; return res; }
+          const fc = flipCompute(list, kInd.n);
+          flipCache = { times: flipFutureTimes(list, fc.bars.length) };
+          const r = res[L - 1];
+          r.flip = fc;
+          if (fc.hi != null) { r.hi = fc.hi; r.lo = fc.lo; }
+          return res;
+        },
+        draw: function (p) {
+          try {
+            const ctx = p.ctx, res = p.indicator.result || [];
+            const L = res.length;
+            const fc = L ? res[L - 1].flip : null;
+            if (!fc) return true;
+            const xAxis = p.xAxis, yAxis = p.yAxis;
+            const W = p.bounding.width;
+            const space = p.barSpace.bar;
+            ctx.save();
+            // 均線延伸：虛線，接續真實均線（同色同粗）
+            if (kInd.ext) {
+              fc.ext.forEach(function (ln) {
+                ctx.beginPath();
+                ctx.strokeStyle = ln.color;
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([6, 4]);
+                let started = false;
+                ln.pts.forEach(function (v, k) {
+                  if (v == null) return;
+                  const x = xAxis.convertToPixel(L - 1 + k), y = yAxis.convertToPixel(v);
+                  if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+                });
+                ctx.stroke();
+              });
+              ctx.setLineDash([]);
+            }
+            // 鏡射 K：跌＝灰、漲＝白，1px 黑框（影線同黑）
+            if (kInd.flip) {
+              const bw = Math.max(1, Math.round(Math.min(kInd.bw, Math.max(2, space - 1))));
+              ctx.lineWidth = 1;
+              ctx.strokeStyle = "#000000";
+              fc.bars.forEach(function (b, k) {
+                const cx = xAxis.convertToPixel(L + k);
+                if (cx < -bw || cx > W + bw) return;
+                const yH = Math.round(yAxis.convertToPixel(b.h)) + 0.5;
+                const yL = Math.round(yAxis.convertToPixel(b.l)) + 0.5;
+                const yO = Math.round(yAxis.convertToPixel(b.o));
+                const yC = Math.round(yAxis.convertToPixel(b.c));
+                const x0 = Math.round(cx - bw / 2);
+                const wx = Math.floor(x0 + bw / 2) + 0.5;
+                ctx.beginPath();
+                ctx.moveTo(wx, yH); ctx.lineTo(wx, yL);
+                ctx.stroke();
+                const top = Math.min(yO, yC), h = Math.max(1, Math.abs(yO - yC));
+                ctx.fillStyle = b.c >= b.o ? "#ffffff" : "#9e9e9e";
+                ctx.fillRect(x0, top, bw, h);
+                if (bw >= 2 && h >= 2) ctx.strokeRect(x0 + 0.5, top + 0.5, bw - 1, h - 1);
+                else { ctx.beginPath(); ctx.moveTo(x0, top + 0.5); ctx.lineTo(x0 + bw, top + 0.5); ctx.stroke(); }
+              });
+            }
+            ctx.restore();
+          } catch (e) {}
+          return true;
+        },
+        createTooltipDataSource: function (params) {
+          const ind = params && params.indicator;
+          const res = (ind && ind.result) || [];
+          const fc = res.length ? res[res.length - 1].flip : null;
+          const n = fc ? fc.bars.length : 0;
+          if (kInd.flip) {
+            return {
+              name: "翻亞當(" + kInd.n + "," + kInd.bw + ")",
+              values: [{ title: "", value: { text: n + " 根", color: "#6b7280" } }],
+            };
+          }
+          return { name: "均線延伸", values: [{ title: "", value: { text: "MA" + kInd.p1 + "/" + kInd.p2, color: "#6b7280" } }] };
+        },
+      });
+      // 自訂 X 軸：在預設刻度後面補「未來」時間刻度
+      if (klinecharts.registerXAxis) {
+        klinecharts.registerXAxis({
+          name: "flipX",
+          createTicks: function (p) {
+            const base = (p && p.defaultTicks) || [];
+            try {
+              if (!kchart || !kIndActive() || !flipCache.times.length) return base;
+              const dl = kchart.getDataList();
+              const L = dl.length;
+              if (!L) return base;
+              const bsp = kchart.getBarSpace();
+              const space = (typeof bsp === "number" ? bsp : bsp && bsp.bar) || 6;
+              const minGap = 66;
+              const step = Math.max(1, Math.ceil(minGap / space));
+              const W = p.bounding.width;
+              const out = base.slice();
+              let lastX = base.length ? base[base.length - 1].coord : -1e9;
+              let prevTs = base.length ? base[base.length - 1].value : dl[L - 1].timestamp;
+              const pad = function (v) { return (v < 10 ? "0" : "") + v; };
+              for (let k = step; k <= flipCache.times.length; k += step) {
+                const pt = kchart.convertToPixel({ dataIndex: L - 1 + k }, { paneId: "candle_pane" });
+                const x = pt && pt.x;
+                if (x == null || x < 0 || x > W - 24 || x - lastX < minGap) continue;
+                const ts = flipCache.times[k - 1];
+                const d = new Date(ts), pd = new Date(prevTs);
+                let text;
+                if (d.getFullYear() !== pd.getFullYear()) text = String(d.getFullYear());
+                else if (d.getMonth() !== pd.getMonth()) text = d.getFullYear() + "-" + pad(d.getMonth() + 1);
+                else if (d.getDate() !== pd.getDate()) text = pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+                else text = pad(d.getHours()) + ":" + pad(d.getMinutes());
+                if (kInt === "d" || kInt === "w" || kInt === "m") {
+                  if (d.getFullYear() === pd.getFullYear() && d.getMonth() === pd.getMonth()) text = pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+                }
+                out.push({ coord: x, value: ts, text: text });
+                lastX = x; prevTs = ts;
+              }
+              return out;
+            } catch (e) { return base; }
+          },
+        });
+      }
+    }
+    function kMaStyles() {
+      return {
+        lines: KIND_MA_COLORS.map(function (c) {
+          return { style: "solid", smooth: false, size: 1.5, color: c, dashedValue: [2, 2] };
+        }),
+      };
+    }
+    // 依 kInd 建立／移除主圖指標，並確保 X 軸可顯示未來刻度
+    function syncKInd() {
+      if (!kchart || typeof klinecharts === "undefined") return;
+      ensureKIndIndicators();
+      try {
+        if (klinecharts.registerXAxis && kchart.setPaneOptions) {
+          kchart.setPaneOptions({ id: "x_axis_pane", axisOptions: { name: "flipX" } });
+        }
+      } catch (e) {}
+      try {
+        // MA
+        if (kInd.ma && !kMaShown) {
+          kchart.createIndicator({ name: "MA", calcParams: [kInd.p1, kInd.p2], precision: 0, styles: kMaStyles() }, true, { id: "candle_pane" });
+          kMaShown = true;
+        } else if (kInd.ma) {
+          kchart.overrideIndicator({ name: "MA", calcParams: [kInd.p1, kInd.p2], styles: kMaStyles() }, "candle_pane");
+        } else if (kMaShown) {
+          kchart.removeIndicator("candle_pane", "MA");
+          kMaShown = false;
+        }
+        // 翻亞當／均線延伸
+        if (kIndActive() && !kFlipShown) {
+          kchart.createIndicator({ name: "FLIP_ADAM", calcParams: [kInd.n, kInd.bw] }, true, { id: "candle_pane" });
+          kFlipShown = true;
+        } else if (kIndActive()) {
+          kchart.overrideIndicator({ name: "FLIP_ADAM", calcParams: [kInd.n, kInd.bw] }, "candle_pane");
+        } else if (kFlipShown) {
+          kchart.removeIndicator("candle_pane", "FLIP_ADAM");
+          kFlipShown = false;
+        }
+      } catch (e) { try { console.warn("syncKInd", e); } catch (e2) {} }
+      syncKIndUi();
+    }
+    function syncKIndUi() {
+      const set = function (id, on) { const b = $(id); if (b) b.classList.toggle("on", !!on); };
+      set("kiMa", kInd.ma); set("kiFlip", kInd.flip); set("kiExt", kInd.ext && kInd.ma);
+      const ext = $("kiExt"); if (ext) ext.classList.toggle("dim", kInd.ext && !kInd.ma);
+      const f = $("kiFlip"); if (f) f.textContent = "翻亞當(" + kInd.n + "," + kInd.bw + ")";
+      const ma = $("kiMa"); if (ma) ma.textContent = "MA";
+      const v = { kiN: kInd.n, kiBw: kInd.bw, kiP1: kInd.p1, kiP2: kInd.p2 };
+      Object.keys(v).forEach(function (id) { const e = $(id); if (e && document.activeElement !== e) e.value = String(v[id]); });
+    }
+    // 切換後重算並重新對齊視窗（右側未來空間）
+    function kIndRefit() {
+      if (!kchart) return;
+      syncKInd();
+      try {
+        const dl = kchart.getDataList();
+        if (dl && dl.length) kchart.applyNewData(dl.slice());
+        if (kIndActive() || kInt === "1" || kInt === "5" || kInt === "30") fitKVisible(dl);
+        else if (kchart.setOffsetRightDistance) kchart.setOffsetRightDistance(50);
+        if (kchart.resize) kchart.resize();
+      } catch (e) {}
+    }
+    (function bindKInd() {
+      document.querySelectorAll("#kIndRow .chip[data-ki]").forEach(function (b) {
+        b.addEventListener("click", function () {
+          const k = b.getAttribute("data-ki");
+          kInd[k] = !kInd[k];
+          saveKInd();
+          kIndRefit();
+        });
+      });
+      const pop = $("kIndPop"), gear = $("kiGear");
+      if (gear && pop) {
+        gear.addEventListener("click", function (e) {
+          e.stopPropagation();
+          pop.hidden = !pop.hidden;
+          if (!pop.hidden) syncKIndUi();
+        });
+        document.addEventListener("click", function (e) {
+          if (pop.hidden) return;
+          if (pop.contains(e.target) || gear.contains(e.target)) return;
+          pop.hidden = true;
+        });
+      }
+      function readInputs() {
+        const rg = function (id, a, b, d) { const v = Math.round(Number($(id) && $(id).value)); return v >= a && v <= b ? v : d; };
+        kInd.n = rg("kiN", 1, 60, kInd.n);
+        kInd.bw = rg("kiBw", 1, 24, kInd.bw);
+        kInd.p1 = rg("kiP1", 2, 500, kInd.p1);
+        kInd.p2 = rg("kiP2", 2, 500, kInd.p2);
+        saveKInd();
+        kIndRefit();
+      }
+      ["kiN", "kiBw", "kiP1", "kiP2"].forEach(function (id) {
+        const el = $(id);
+        if (el) el.addEventListener("change", readInputs);
+      });
+      syncKIndUi();
+    })();
+
     function ensureRangeIndicators() {
       if (rangeIndReady || typeof klinecharts === "undefined" || !klinecharts.registerIndicator) return;
       rangeIndReady = true;
@@ -5809,12 +6159,25 @@
     function fitKVisible(data) {
       if (!kchart || !data || !data.length) return;
       try {
-        if (kInt !== "1" && kInt !== "5" && kInt !== "30") return;
+        const act = kIndActive();
+        const isMin = kInt === "1" || kInt === "5" || kInt === "30";
+        if (!isMin && !act) return;
         const el = $("khost");
         const w = (el && el.clientWidth) || 600;
-        const want = Math.min(Math.max(data.length, 2), kInt === "1" ? 420 : 240);
-        const space = Math.max(1.5, Math.min(12, (w - 70) / want));
-        if (kchart.setBarSpace) kchart.setBarSpace(space);
+        let space;
+        if (act) {
+          // 翻亞當／均線延伸：右側要留出 N 根未來空間，並縮窄間距讓 N 根投影看得清楚
+          const n = kInd.n;
+          const real = Math.min(data.length, Math.max(50, Math.floor((w - 70) / (kInd.bw + 1.5)) - n));
+          space = Math.max(2, Math.min(14, (w - 70) / (real + n + 1)));
+          if (kchart.setBarSpace) kchart.setBarSpace(space);
+          if (kchart.setOffsetRightDistance) kchart.setOffsetRightDistance(Math.round((n + 1.5) * space));
+        } else {
+          const want = Math.min(Math.max(data.length, 2), kInt === "1" ? 420 : 240);
+          space = Math.max(1.5, Math.min(12, (w - 70) / want));
+          if (kchart.setBarSpace) kchart.setBarSpace(space);
+          if (kchart.setOffsetRightDistance) kchart.setOffsetRightDistance(50);
+        }
         if (kchart.scrollToRealTime) kchart.scrollToRealTime(true);
       } catch (e) {}
     }
@@ -5858,6 +6221,7 @@
         if (kchart.setPrecision) kchart.setPrecision({ price: 0, volume: 0 });
         else if (kchart.setPriceVolumePrecision) kchart.setPriceVolumePrecision(0, 0);
         kchart.applyNewData(data.length ? data : []);
+        syncKInd();
         fitKVisible(data);
         kViewSig = sig;
         syncKOiPanes();
@@ -5873,6 +6237,7 @@
       if (doFit) {
         if (kchart.setStyles) kchart.setStyles(twStyles());
         kchart.applyNewData(data.length ? data : []);
+        syncKInd();
         fitKVisible(data);
         kViewSig = sig;
         syncKOiPanes();
@@ -6335,6 +6700,9 @@
       const kg = $("kGroup");
       if (lg) lg.hidden = kOn;
       if (kg) kg.hidden = !kOn;
+      const kir = $("kIndRow");
+      if (kir) kir.hidden = !kOn;
+      if (!kOn) { const kp = $("kIndPop"); if (kp) kp.hidden = true; }
       const showRangeMa = !oiChartActive && kOn && (kInt === "d" || kInt === "w" || kInt === "m");
       const gear = $("rangeMaGear");
       const pop = $("rangeMaPop");
@@ -6894,7 +7262,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.19";
+        const VER = "3.20";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
