@@ -1,8 +1,0 @@
-fix(v3.17): 富台即時性修復——Worker 補抓門檻 45→20 分、現價取最新來源、漲跌基準改用台指最後成交
-
-- worker: HEAL_TWN_STALE_MS 45→20 分、CHECK 10→2 分、RETRY 60→4 分
-  （GitHub */5 cron 實測被節流成 ~41 分鐘，45 分門檻等於長期落後 40 分以上）
-- index.html: 富台現價改比時間戳（HiStock 分時會整條凍結在 00:59，先前直接蓋掉存檔段）
-- index.html: 漲跌基準改用 q().CLastPrice（台指最後成交），不再用 twn-ratio.json 的 dayClose
-  （休市日整條跳過，10/27 卡在 46,234 → 漲跌少算 580 點）
-- VER 3.16 → 3.17

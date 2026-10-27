@@ -1,7 +1,0 @@
-fix(v3.18): 自掃三修——twn-hist 舊檔讀不回就中止、漲跌基準跟倍數檔一起驗鮮度、Worker 註解改寫實測延遲
-
-- scripts/fetch_twn_hist.py：舊存檔解析失敗時原本 old={} 繼續寫，新抓只有 4000 根（≈2.8 天）
-  會把 14 天存檔覆蓋掉且看起來像成功 → 改成直接 raise（fail loud）
-- index.html：tr.dayClose 只在 twnRatioFor() 回真值（ratioAt ≤3 天）時才用，過期整組丟掉
-- worker/yahoo-quote.js：補註解寫明實測穩態落後 10~20 分（不是 10 分內）
-- VER 3.17 → 3.18
