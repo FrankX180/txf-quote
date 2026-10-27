@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 99_TempScripts/
 Backup/
+_commit_msg*.txt

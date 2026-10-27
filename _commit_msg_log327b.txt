@@ -1,1 +1,0 @@
-docs: 日誌 20261027 補 v3.18 自掃三修（fetch_twn_hist fail-loud、dayClose 閘、延遲宣稱更正）
