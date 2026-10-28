@@ -1616,9 +1616,11 @@
       ob += `<tr><td class="lab bid"></td><td></td><td class="pxb">買價</td><td class="pxa">賣價</td><td colspan="2" class="rng">${ampTxt}${bookNote}</td></tr>`;
       if (noBook) {
         // 沒有可採信的同源五檔時，不畫五行空表，直接說清楚為什麼（避免與主價打架）
-        const gapTxt = obBookReject && obBookReject.bid1 != null && last != null
-          ? "官方快照 " + (hhmmShort(obBookReject.hhmmss) || "—") + " 買一 " + fmt(obBookReject.bid1) + "／與成交價 " +
-            fmt(last) + " 差 " + fmt(Math.abs(obBookReject.bid1 - last)) + " 點，已停用"
+        const gapTxt = obBookReject && (obBookReject.bid1 != null || obBookReject.ask1 != null) && last != null
+          ? "官方快照 " + (hhmmShort(obBookReject.hhmmss) || "—") +
+            (obBookReject.bid1 != null ? " 買一 " + fmt(obBookReject.bid1) : "") +
+            (obBookReject.ask1 != null ? "／賣一 " + fmt(obBookReject.ask1) : "") +
+            "，與成交價 " + fmt(last) + " 不相符，已停用"
           : "休市或官方推流中斷，暫無同源五檔";
         ob += `<tr><td colspan="6" class="obnone">五檔待即時源<span class="sub">${gapTxt}</span></td></tr>`;
       } else {
@@ -6371,11 +6373,14 @@
     // 五檔一致性：真書必夾住最新成交價（買一 ≤ 成交 ≤ 賣一，允許少量容差）。
     // 夜盤尾 Yahoo 常「成交價續動、五檔欄位停更」，舊書會離成交價上百點。
     // 這種脫節書一律視為無效——寧可留白，也絕不顯示與成交價脫鉤的錯價。
-    const BOOK_PX_TOL = 40; // 點
+    const BOOK_PX_TOL = 40; // 點：書與成交價的「距離」上限（防舊書）
+    const BOOK_PX_TICK = 5; // 點：方向性錯位容忍（買一不得高於成交、賣一不得低於成交，只容許極小的時間差）
     let obBookReject = null; // 官方五檔快照因與成交價脫節被剔除時的紀錄 {hhmmss,bid1,ask1}
     function pad6(t) {
       let s = String(t == null ? "" : t).replace(/\D/g, "");
-      while (s.length > 0 && s.length < 6) s = "0" + s;
+      // 只接受 HHMMSS／HMMSS；其他長度（含帶日期的 12/14 位）一律視為無效，不猜
+      if (s.length !== 5 && s.length !== 6) return "";
+      while (s.length < 6) s = "0" + s;
       return s;
     }
     function hhmmShort(t) {
@@ -6393,8 +6398,14 @@
       const b = n(q.CBidPrice1);
       const a = n(q.CAskPrice1);
       if (b == null && a == null) return true;
-      if (b != null && last < b - BOOK_PX_TOL) return false;
-      if (a != null && last > a + BOOK_PX_TOL) return false;
+      // 交叉書（買一 > 賣一）本身就是壞資料
+      if (b != null && a != null && b > a) return false;
+      // 方向性錯位：買一高於成交、賣一低於成交 → 只容許 tick 級時間差（否則就是打臉主價）
+      if (b != null && last < b - BOOK_PX_TICK) return false;
+      if (a != null && last > a + BOOK_PX_TICK) return false;
+      // 距離過遠：書整體躺在離成交價很遠的地方（舊書）
+      if (b != null && last - b > BOOK_PX_TOL) return false;
+      if (a != null && a - last > BOOK_PX_TOL) return false;
       return true;
     }
     function stripBookFields(q) {
@@ -7301,7 +7312,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.22";
+        const VER = "3.23";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
