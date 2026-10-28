@@ -447,6 +447,8 @@
     .ob .pxb { color: var(--up); text-align: right; white-space: nowrap; font-size: 14px; font-weight: 700; }
     .ob .pxa { color: var(--dn); text-align: left; white-space: nowrap; font-size: 14px; font-weight: 700; }
     .ob .rng { text-align: right; font-size: 12px; font-weight: 700; color: #374151; white-space: nowrap; }
+    .ob .obnone { text-align: center; padding: 12px 6px; font-size: 12.5px; font-weight: 700; color: #374151; }
+    .ob .obnone .sub { display: block; margin-top: 4px; font-size: 11.5px; font-weight: 400; color: var(--muted); white-space: normal; }
     .bar-wrap {
       position: relative;
       display: flex;
@@ -1132,6 +1134,7 @@
       obAged = false;
       obStale = false;
       obDegraded = false;
+      obBookReject = null;
       const clearAll = function () {
         for (let i = 1; i <= 5; i++) {
           delete x["CBidPrice" + i]; delete x["CBidSize" + i];
@@ -1146,17 +1149,31 @@
         // 休市時快取不限時效（收盤歸檔的靈沒有「舊」），盤中才套 12h 上限
         if (symOk && age >= 0 && (age <= MIS_BOOK_KEEP_MS || !marketOpen())) {
           const f = b.f;
+          // 先組候選，不直接寫進 x：官方推流「五檔」只在掛單變動時送，「成交價」隨時送，
+          // 尾盤/斷線會出現同一筆快照裡 價 46,880 卻掛著 46,960 的舊書。
+          const cand = {};
           let any = false;
           for (let i = 1; i <= 5; i++) {
             ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach(function (p) {
               const k = p + i;
-              if (f[k] != null && f[k] !== "") { x[k] = f[k]; any = true; }
-              else delete x[k];
+              if (f[k] != null && f[k] !== "") { cand[k] = f[k]; any = true; }
             });
           }
-          if (any) {
+          // 書必須夾住成交價（與 Yahoo 同一條判準），脫節就整組剔除，絕不顯示打臉主價的五檔
+          if (any && bookStraddles(cand, last)) {
+            for (let i = 1; i <= 5; i++) {
+              ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach(function (p) {
+                const k = p + i;
+                if (cand[k] != null) x[k] = cand[k]; else delete x[k];
+              });
+            }
             obAged = age > MIS_FRESH_MS; // 休市顯示的是官方最後快照
             return "mis";
+          }
+          if (any) {
+            // 記下被剔除的快照時點，讓畫面說得出「為什麼沒有五檔」（不顯示錯價）
+            obBookReject = { hhmmss: pad6(f.CTime), bid1: n(cand.CBidPrice1), ask1: n(cand.CAskPrice1) };
+            clearAll();
           }
         }
       }
@@ -1594,9 +1611,17 @@
       const ampPct = (amp != null && openPx) ? (amp / openPx) * 100 : null;
       const ampTxt = amp == null ? "" : ("震幅" + Math.round(amp) + "點(" + (ampPct == null ? "—" : ampPct.toFixed(1) + "%") + ")");
       // 五檔來源標示（單一真相）：MIS 官方快照／待即時源／正常
-      const bookNote = bookSrc === "mis" ? (obAged ? "・官方五檔（收盤快照）" : "") :
-        (bookSrc === "none" ? "・五檔待即時源" : "");
+      const noBook = bookSrc === "none";
+      const bookNote = bookSrc === "mis" ? (obAged ? "・官方五檔（收盤快照）" : "") : "";
       ob += `<tr><td class="lab bid"></td><td></td><td class="pxb">買價</td><td class="pxa">賣價</td><td colspan="2" class="rng">${ampTxt}${bookNote}</td></tr>`;
+      if (noBook) {
+        // 沒有可採信的同源五檔時，不畫五行空表，直接說清楚為什麼（避免與主價打架）
+        const gapTxt = obBookReject && obBookReject.bid1 != null && last != null
+          ? "官方快照 " + (hhmmShort(obBookReject.hhmmss) || "—") + " 買一 " + fmt(obBookReject.bid1) + "／與成交價 " +
+            fmt(last) + " 差 " + fmt(Math.abs(obBookReject.bid1 - last)) + " 點，已停用"
+          : "休市或官方推流中斷，暫無同源五檔";
+        ob += `<tr><td colspan="6" class="obnone">五檔待即時源<span class="sub">${gapTxt}</span></td></tr>`;
+      } else {
       levels.forEach((i) => {
         const bs = n(x["CBidSize" + i]) || 0;
         const asz = n(x["CAskSize" + i]) || 0;
@@ -1611,6 +1636,7 @@
           <td class="qty ask">${fmt(x["CAskSize" + i])}</td>
         </tr>`;
       });
+      }
       $("ob").innerHTML = ob;
       $("live").className = "live" + (live ? " on" : "");
       $("live").textContent = live ? "LIVE" : closedLabel();
@@ -6346,6 +6372,19 @@
     // 夜盤尾 Yahoo 常「成交價續動、五檔欄位停更」，舊書會離成交價上百點。
     // 這種脫節書一律視為無效——寧可留白，也絕不顯示與成交價脫鉤的錯價。
     const BOOK_PX_TOL = 40; // 點
+    let obBookReject = null; // 官方五檔快照因與成交價脫節被剔除時的紀錄 {hhmmss,bid1,ask1}
+    function pad6(t) {
+      let s = String(t == null ? "" : t).replace(/\D/g, "");
+      while (s.length > 0 && s.length < 6) s = "0" + s;
+      return s;
+    }
+    function hhmmShort(t) {
+      const s = pad6(t);
+      if (s.length < 6) return "";
+      const hh = s.slice(0, 2), mm = s.slice(2, 4);
+      if (Number(hh) > 23 || Number(mm) > 59) return "";
+      return hh + ":" + mm;
+    }
     let obStale = false;    // 本輪五檔因與成交價脫節被剔除
     let obDegraded = false; // 退化為官方單檔（買一／賣一）
     let obAged = false;     // 本輪顯示的是官方五檔最後快照（非即時）
@@ -7262,7 +7301,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.20";
+        const VER = "3.21";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
