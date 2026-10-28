@@ -1171,9 +1171,9 @@
             return "mis";
           }
           if (any) {
-            // 記下被剔除的快照時點，讓畫面說得出「為什麼沒有五檔」（不顯示錯價）
+            // 記下被剔除的快照時點，讓畫面說得出「為什麼沒有五檔」（不顯示錯價）。
+            // 注意：不清 x——x 上可能已有 slimYahoo 展開的真書，留給 ② 去判（清掉等於把好書一起丟）。
             obBookReject = { hhmmss: pad6(f.CTime), bid1: n(cand.CBidPrice1), ask1: n(cand.CAskPrice1) };
-            clearAll();
           }
         }
       }
@@ -7301,7 +7301,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.21";
+        const VER = "3.22";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
