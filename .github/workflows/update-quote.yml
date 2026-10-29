@@ -57,14 +57,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Fetch MIS MXF quote (小台)
-        # Yahoo 無小台（WTXM& 停更）；主報價改期交所 MIS CID=MXF。真的掛掉也不要拖垮其他資料的 commit
+      - name: Fetch Yahoo WTX quote and 5-level book
+        # Yahoo 偶發 5xx；腳本內已重試，這裡第二層保險：真的掛掉也不要拖垮其他資料的 commit
         continue-on-error: true
         run: python scripts/fetch_quote.py
       - name: Fetch self-built TWN ratio (台指÷富台 同刻 + wise 匯率)
         continue-on-error: true
         run: python scripts/fetch_twn_ratio.py
-      - name: Fetch 1m/5m/15m (day=FIMTXN 小台, night=WTX& 大台)
+      - name: Fetch Yahoo WTX 1m/5m/15m
         run: python scripts/fetch_minute.py
         continue-on-error: true
       # uncovered 長歷史靠 scripts 合併 repo 舊檔維持（不需本機 PG／開機）

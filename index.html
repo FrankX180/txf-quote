@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>台指期 小台 MXF — 即時看盤</title>
+  <title>台指期 TXF — 即時看盤</title>
   <style>
     :root {
       --up: #d32f2f;
@@ -529,7 +529,7 @@
       <div class="hero" id="hero">
         <div class="hero-head">
           <div class="title-row">
-            <div class="title" id="name">小台期</div>
+            <div class="title" id="name">台指期</div>
             <span class="live" id="live">未連線</span>
           </div>
           <div class="pxrow">
@@ -954,7 +954,7 @@
         m += 1;
         if (m > 12) { m = 1; y += 1; }
       }
-      return "MXF" + String.fromCharCode(64 + m) + (y % 10);
+      return "TXF" + String.fromCharCode(64 + m) + (y % 10);
     }
     function misSymFor(sk) {
       return misSymBase() + (sk === "day" ? "-F" : "-M");
@@ -1507,7 +1507,7 @@
         if ($("sumline")) $("sumline").style.display = "";
         if ($("live")) $("live").style.display = "";
         $("name").textContent = String(x.DispCName || "台指期")
-          .replace(/\s*(WTX&MX|MXF&|WTX&)\s*/g, "")
+          .replace(/\s*WTX&\s*/g, "")
           .replace(/近一/g, "")
           .trim();
         $("last").className = "px " + cls(diff);
@@ -2123,47 +2123,50 @@
       const night = uncover.night;
       const day0 = String((hist[0] && hist[0].date) || uncover.date || "").replace(/\D/g, "");
       const nightDate = night && night.date ? String(night.date).replace(/\D/g, "") : "";
-      // ── 日盤／夜盤拆分兩列（2026-10-29 指定）──
-      // 完整日K＝前一曆日夜盤＋當日日盤；日盤在上（時間較晚）、夜盤在下，
-      // 中間 3px 粗線分隔，下方接原本的逐日歷史列。
+      // ── 日盤／夜盤拆分兩列（2026-10-29 指定，A+B=C）──
+      // 期交所日盤 Δ 已含前一夜盤成交，所以不能直接把日盤 Δ 再列一次（會與下方歷史列重複）。
+      // 拆法：夜盤列 B = night.xxxDelta；日盤列 A = 歷史列 C − B；A + B 必定等於 C。
       const splitRows = [];
       const baseDay = hist[0] || {};
+      const nightOk = !!(night && nightDate && nightDate !== day0 && night.close != null);
+      const bF = nightOk ? Number(night.foreignDelta || 0) : 0;
+      const bT = nightOk ? Number(night.trustDelta || 0) : 0;
+      const bD = nightOk ? Number(night.dealerDelta || 0) : 0;
+      const bR = nightOk ? Number(night.retailDelta || 0) : 0;
       if (day0 && baseDay.close != null) {
+        const cF = oiNetFlow ? (baseDay.foreignDelta != null ? Number(baseDay.foreignDelta) : oiDayDiff(hist, 0, "foreign")) : baseDay.foreign;
+        const cT = oiNetFlow ? oiDayDiff(hist, 0, "trust") : baseDay.trust;
+        const cD = oiNetFlow ? oiDayDiff(hist, 0, "dealer") : baseDay.dealer;
+        const cR = oiNetFlow ? (baseDay.retailDelta != null ? Number(baseDay.retailDelta) : oiDayDiff(hist, 0, "retail")) : baseDay.retail;
         splitRows.push({
           date: day0,
           session: "daypart",
           close: baseDay.close,
           _prevClose: hist[1] ? hist[1].close : null,
-          foreign: oiNetFlow ? (baseDay.foreignDelta != null ? baseDay.foreignDelta : oiDayDiff(hist, 0, "foreign")) : baseDay.foreign,
-          trust: oiNetFlow ? oiDayDiff(hist, 0, "trust") : baseDay.trust,
-          dealer: oiNetFlow ? oiDayDiff(hist, 0, "dealer") : baseDay.dealer,
-          retail: oiNetFlow ? (baseDay.retailDelta != null ? baseDay.retailDelta : oiDayDiff(hist, 0, "retail")) : baseDay.retail,
+          foreign: oiNetFlow ? (Number(cF || 0) - bF) : cF,
+          trust: oiNetFlow ? (Number(cT || 0) - bT) : cT,
+          dealer: oiNetFlow ? (Number(cD || 0) - bD) : cD,
+          retail: oiNetFlow ? (Number(cR || 0) - bR) : cR,
         });
       }
-      const nightOk = !!(night && nightDate && nightDate !== day0 && night.close != null);
       if (nightOk) {
-        const hasDelta = night.foreignDelta != null;
-        const nF = hasDelta ? Number(night.foreignDelta) : null;
-        const nT = hasDelta ? Number(night.trustDelta || 0) : null;
-        const nD = hasDelta ? Number(night.dealerDelta || 0) : null;
-        const nR = hasDelta ? Number(night.retailDelta || 0) : null;
         splitRows.push({
           date: day0 || nightDate,
           session: "nightpart",
           close: night.close,
           _prevClose: baseDay.close != null ? baseDay.close : null,
-          foreign: oiNetFlow ? nF : (hasDelta ? night.foreign : Number(baseDay.foreign || 0) + (nF || 0)),
-          trust: oiNetFlow ? nT : (hasDelta ? night.trust : Number(baseDay.trust || 0) + (nT || 0)),
-          dealer: oiNetFlow ? nD : (hasDelta ? night.dealer : Number(baseDay.dealer || 0) + (nD || 0)),
-          retail: oiNetFlow ? nR : (hasDelta ? night.retail : Number(baseDay.retail || 0) + (nR || 0)),
+          foreign: oiNetFlow ? bF : night.foreign,
+          trust: oiNetFlow ? bT : night.trust,
+          dealer: oiNetFlow ? bD : night.dealer,
+          retail: oiNetFlow ? bR : night.retail,
           _splitEnd: true,
         });
       }
       if (splitRows.length) {
         oiRows = splitRows.concat(oiRows);
         oiNote += oiNetFlow
-          ? "；上方兩列＝當日日盤／前一日夜盤拆分（夜盤三大法人成交淨口，T+1 早上定案）"
-          : "；上方兩列＝當日日盤／前一日夜盤拆分（夜盤列為日盤水位＋當夜成交淨口）";
+          ? "；上方兩列＝今日日盤＋前一日夜盤拆分，兩列相加＝下方同日期合計（夜盤三大法人成交淨口）"
+          : "；上方兩列＝今日日盤／前一日夜盤拆分（夜盤列為當夜成交後估水位）";
       }
       oiEl.innerHTML = oiBuildHistTable("oi", oiRows, oiKeys, oiLabs, oiNote);
 
@@ -6329,9 +6332,9 @@
         now = new Date(rmt < 1e12 ? rmt * 1000 : rmt);
       }
       const q = {
-        SymbolID: d.symbol || "MXF&",
-        DispCName: d.symbolName || "小台期近一",
-        DispEName: d.symbol || "MXF&",
+        SymbolID: d.symbol || "WTX&",
+        DispCName: d.symbolName || "台指期近一",
+        DispEName: d.symbol || "WTX&",
         CLastPrice: last,
         // 奇摩 stockList 開高低是混盤，先留空，由 patchQuoteOHLC 寫入當盤真值
         COpenPrice: "",
@@ -6432,9 +6435,7 @@
       return hm > 1345 && hm < 1458;
     }
     function applyLive(rows) {
-      // 只認小台主檔。Worker 打 MIS 會被 CF 擋（HTTP 520），rows 可能只剩相關商品
-      // （台積電期／聯電期）；絕不可 fallback 到 rows[0]，否則主報價會顯示成台積電期貨。
-      const wtx = rows.find((x) => x.symbol === "MXF&") || rows.find((x) => x.symbol === "WTX&");
+      const wtx = rows.find((x) => x.symbol === "WTX&") || rows[0];
       if (!wtx) return;
       const q0 = slimYahoo(wtx);
       const nowTs = Date.now();
@@ -7324,7 +7325,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.29";
+        const VER = "3.30";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {

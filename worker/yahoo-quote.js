@@ -1,108 +1,9 @@
-// 2026-10-29 改小台：Yahoo 奇摩沒有小台（WTXM& 停更、MXF& 404），
-// 主報價一律走 MIS（CID=MXF）；Yahoo 只留相關商品（台積電期、聯電期）。
 const YAHOO =
   "https://tw.stock.yahoo.com/_td-stock/api/resource/" +
-  "StockServices.stockList;symbols=WCDF%26,WCCF%26";
-// 1 分 K 改富邦 DJ 小台近月（FIMTXN）；回傳格式在 parseFubon1m() 轉成 Yahoo chart 形狀。
+  "StockServices.stockList;symbols=WTX%26,WCDF%26,WCCF%26";
 const CHART1M =
-  "https://fubon-ebrokerdj.fbs.com.tw/Z/ZM/ZMB/CZMB.djbcd?a=FIMTXN&b=-1&c=1&D=12000";
-// 夜盤唯一來源：Yahoo 大台（富邦 DJ 只有日盤，最後一筆 13:44）
-const CHART1M_YH =
   "https://tw.stock.yahoo.com/_td-stock/api/resource/" +
   "StockServices.chart;symbol=WTX%26;period=1m;range=1d";
-
-function mergeCharts(primary, secondary) {
-  // primary＝富邦小台（日盤，優先）；secondary＝Yahoo 大台（補夜盤）
-  const map = new Map();
-  const push = (ch, prefer, filter) => {
-    if (!ch) return;
-    const ts = ch.timestamp || [];
-    const q = ((ch.indicators || {}).quote || [{}])[0] || {};
-    const cl = q.close || [];
-    for (let i = 0; i < ts.length; i++) {
-      if (cl[i] == null) continue;
-      if (filter && !filter(ts[i])) continue;
-      const cur = map.get(ts[i]);
-      if (cur && cur.prefer && !prefer) continue;
-      map.set(ts[i], {
-        t: ts[i], o: q.open[i], h: q.high[i], l: q.low[i], c: cl[i], v: q.volume[i], prefer: !!prefer,
-      });
-    }
-  };
-  const isNightTs = (ts) => {
-    const d = new Date(ts * 1000 + 8 * 3600 * 1000);
-    const hm = d.getUTCHours() * 100 + d.getUTCMinutes();
-    return hm >= 1500 || hm < 500;
-  };
-  // secondary（Yahoo 大台 range=1d）含大台日盤棒；富邦缺分鐘時會混進小台日盤序列，
-  // 故非夜盤時段一律丟棄（2026-10-29 顧問審查）。
-  push(secondary, false, isNightTs);
-  push(primary, true);
-  const t = [], o = [], h = [], l = [], c = [], v = [];
-  for (const k of [...map.keys()].sort((x, y) => x - y)) {
-    const r = map.get(k);
-    t.push(r.t); o.push(r.o); h.push(r.h); l.push(r.l); c.push(r.c); v.push(r.v);
-  }
-  return { timestamp: t, indicators: { quote: [{ open: o, high: h, low: l, close: c, volume: v }] } };
-}
-
-async function fetchMerged1m() {
-  const [fbTxt, yhJson] = await Promise.all([
-    fetch(CHART1M, { headers: { "User-Agent": "Mozilla/5.0", Referer: "https://fubon-ebrokerdj.fbs.com.tw/" } })
-      .then((r) => r.text()).catch(() => ""),
-    fetch(CHART1M_YH, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0", Referer: "https://tw.stock.yahoo.com/" } })
-      .then((r) => r.json()).catch(() => null),
-  ]);
-  return mergeCharts(parseFubon1m(fbTxt), yhJson);
-}
-
-// 富邦 DJ djbcd → Yahoo chart 形狀（{timestamp, indicators.quote[0]}）。
-// 格式：MMDDHHMM opens highs lows closes vols，空格分段、逗號分項，舊→新。
-function parseFubon1m(text) {
-  const empty = { timestamp: [], indicators: { quote: [{ open: [], high: [], low: [], close: [], volume: [] }] } };
-  const ch = String(text || "").trim().split(" ");
-  if (ch.length < 5) return empty;
-  const codes = ch[0].split(",").map((x) => x.trim()).filter((x) => /^\d{6}$/.test(x));
-  const O = ch[1].split(","), H = ch[2].split(","), L = ch[3].split(","), C = ch[4].split(",");
-  const V = ch[5] ? ch[5].split(",") : [];
-  const n = Math.min(codes.length, C.length);
-  if (!n) return empty;
-  // 富邦 code 是台北時間 MMDDHHMM；年月必須用台北取，不能用 UTC
-  // （台北 00:00~08:00 時 UTC 還在前一日/前一月，每月 1 日凌晨會算錯月份）
-  const nowTw = new Date(Date.now() + 8 * 3600 * 1000);
-  let y = nowTw.getUTCFullYear(), m = nowTw.getUTCMonth() + 1;
-  const stamps = new Array(n);
-  let prevDd = null;
-  for (let i = n - 1; i >= 0; i--) {
-    const c = codes[i];
-    const dd = +c.slice(0, 2), hh = +c.slice(2, 4), mi = +c.slice(4, 6);
-    if (prevDd != null && dd > prevDd) { m -= 1; if (m < 1) { m = 12; y -= 1; } }
-    prevDd = dd;
-    stamps[i] = Math.floor(Date.UTC(y, m - 1, dd, hh - 8, mi) / 1000);
-  }
-  const out = { timestamp: stamps, indicators: { quote: [{ open: [], high: [], low: [], close: [], volume: [] }] } };
-  const q = out.indicators.quote[0];
-  const num = (v) => {
-    const x = parseFloat(v);
-    return isFinite(x) ? x : null;
-  };
-  for (let i = 0; i < n; i++) {
-    const c = num(C[i]);
-    if (c == null) {
-      q.open.push(null); q.high.push(null); q.low.push(null); q.close.push(null); q.volume.push(null);
-      continue;
-    }
-    const o = num(O[i]);
-    const h = num(H[i]);
-    const l = num(L[i]);
-    q.open.push(o == null ? c : o);
-    q.high.push(h == null ? Math.max(o == null ? c : o, c) : h);
-    q.low.push(l == null ? Math.min(o == null ? c : o, c) : l);
-    q.close.push(c);
-    q.volume.push(V[i] != null && isFinite(parseFloat(V[i])) ? Math.round(parseFloat(V[i])) : 0);
-  }
-  return out;
-}
 
 // ── 期交所 MIS 官方即時報價（REST；盤後即時、欄位穩定）──
 // 台指期夜盤 Yahoo 常滯後或不穩（IP 選擇性 5xx）；以 MIS 即時價覆蓋，Yahoo 供五檔。
@@ -110,10 +11,9 @@ const MIS_API = "https://mis.taifex.com.tw/futures/api/getQuoteList";
 const MIS_REFERER =
   "https://mis.taifex.com.tw/futures/RegularSession/EquityIndices/FuturesDomestic/";
 const MIS_MONTHS = "ABCDEFGHIJKL";  // MIS 月份字母 A=1月..L=12月（非期貨慣用碼）
-const MIS_CID = "MXF";             // 小台（2026-10-29 從 TXF 改）
 
 function misMonthScore(s) {
-  const m = /^MXF([A-Z])(\d)-[MF]$/.exec(s || "");
+  const m = /^TXF([A-Z])(\d)-[MF]$/.exec(s || "");
   if (!m) return 9e9;
   const mi = MIS_MONTHS.indexOf(m[1]);
   return mi < 0 ? 9e9 : Number(m[2]) * 100 + mi;
@@ -142,7 +42,7 @@ async function fetchMisQuote() {
           Referer: MIS_REFERER,
         },
         body: JSON.stringify({
-          MarketType: mt, SymbolType: "F", KindID: "1", CID: MIS_CID, ExpireMonth: "", PageNo: 1,
+          MarketType: mt, SymbolType: "F", KindID: "1", CID: "", ExpireMonth: "", PageNo: 1,
         }),
       });
       if (!r.ok) { _misDebug += " MT" + mt + ":http" + r.status; continue; }
@@ -155,7 +55,7 @@ async function fetchMisQuote() {
       // 日盤契約 -F、夜盤 -M（2026-10-13 實測）；兩種後綴都接受，再依 MT 順序與月份排序取近月
       const todayKey = twDateStr(Date.now());
       const cand = ql
-        .filter((x) => /^MXF[A-Z]\d-[MF]$/.test(x.SymbolID || ""))
+        .filter((x) => /^TXF[A-Z]\d-[MF]$/.test(x.SymbolID || ""))
         .sort((a, b) => misMonthScore(a.SymbolID) - misMonthScore(b.SymbolID));
       // 優先取「今日交易日」且有成交價者，避免另一盤殘值；再退而求其次
       const pick =
@@ -374,7 +274,7 @@ function minuteSlot(ms) {
 
 function extractWtx(rows) {
   if (!Array.isArray(rows) || !rows.length) return null;
-  const w = rows.find((x) => x && x.symbol === "MXF&") || null;
+  const w = rows.find((x) => x && x.symbol === "WTX&") || rows[0];
   if (!w) return null;
   let inn = rawNum(w.inMarket);
   let outv = rawNum(w.outMarket);
@@ -1062,11 +962,18 @@ async function backfillChart1m(env, full = false) {
   let lastErr = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const chart = await fetchMerged1m();
-      if (!chart || !chart.timestamp || !chart.timestamp.length) {
-        lastErr = "merged-1m-empty";
+      const r = await fetch(CHART1M, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
+          Referer: "https://tw.stock.yahoo.com/",
+        },
+      });
+      if (!r.ok) {
+        lastErr = "yahoo-chart-fail:" + r.status;
         continue;
       }
+      const chart = await r.json();
       // 非 full 模式只解析尾端 12 根 K 棒，省去 500 根的時區迴圈運算 (CPU 從 6ms 降至 0.1ms)
       const all = barsFromChartJson(chart, full ? 0 : 12);
       const dayKey = tradingDayKey(Date.now());
@@ -1153,7 +1060,7 @@ async function appendImb(env, rows, nowMs) {
   const sess = sessionOf(nowMs);
   if (!sess) return { ok: false, reason: "closed" };
   const rawW = Array.isArray(rows) && rows.length
-    ? (rows.find((x) => x && x.symbol === "MXF&") || null)
+    ? (rows.find((x) => x && x.symbol === "WTX&") || rows[0])
     : null;
   if (!yahooBookFresh(rawW, nowMs)) return { ok: false, reason: "stale-source-day" };
   const w = extractWtx(rows);
@@ -1280,7 +1187,7 @@ async function pollAndStore(env, opts) {
       const hm = p.hm;
       const isPast15m = (hm >= 900 && hm <= 1345) || (hm >= 1515 || hm < 500);
       const rawW = Array.isArray(rows) && rows.length
-        ? (rows.find((x) => x && x.symbol === "MXF&") || null)
+        ? (rows.find((x) => x && x.symbol === "WTX&") || rows[0])
         : null;
       if (looksLikeLiveQuote(rawW, nowMs)) {
         _dormantUntil = 0;
@@ -2069,19 +1976,6 @@ export default {
       });
     }
 
-    if (kind === "fixbad") {
-      // 一次性修復：2026-10-29 worker fallback rows[0]（台積電期）把 2,420 寫進小台 price_1m。
-      // 把當日 l/c 超出合理價區的壞棒拉回該棒 open（不刪列，保留分鐘連續性）。
-      const dk = twDateStr(Date.now());
-      const rr = await env.IMB_DB.prepare(
-        "UPDATE price_1m SET l = o, c = o WHERE day_key = ? AND (l < 30000 OR c < 30000 OR l > 80000 OR c > 80000)"
-      ).bind(dk).run();
-      return jsonResp({ ok: true, changed: (rr.meta && rr.meta.changes) || 0, dayKey: dk }, 200, {
-        "Cache-Control": "no-store",
-        "CDN-Cache-Control": "no-store",
-      });
-    }
-
     if (kind === "mis") {
       // 診斷：CF Worker 打期交所 MIS 是否通
       const m = await fetchMisQuote();
@@ -2098,10 +1992,10 @@ export default {
     };
 
     if (kind === "1m") {
-      const chart = await fetchMerged1m();
-      const body = JSON.stringify(chart);
+      const r = await fetch(CHART1M, { headers: YH_HDR });
+      const body = await r.text();
       return new Response(body, {
-        status: 200,
+        status: r.status,
         headers: {
           "content-type": "application/json; charset=utf-8",
           "Cache-Control": "public, max-age=0",
@@ -2124,8 +2018,8 @@ export default {
     }
     if (mis && mis.px != null) {
       if (!Array.isArray(rows)) rows = [];
-      let w = rows.find((x) => x && x.symbol === "MXF&");
-      if (!w) { w = { symbol: "MXF&", symbolName: "小台期近一" }; rows.unshift(w); }
+      let w = rows.find((x) => x && x.symbol === "WTX&");
+      if (!w) { w = { symbol: "WTX&", symbolName: "台指期近一" }; rows.unshift(w); }
       const num = (v) => (v == null ? undefined : { raw: String(v) });
       w.price = num(mis.px);
       if (mis.bid != null) w.bid = num(mis.bid);
@@ -2142,7 +2036,7 @@ export default {
     const nowMs = Date.now();
     await ensureHolidays();
     if (Array.isArray(rows)) {
-      const wtx = rows.find((x) => x && x.symbol === "MXF&") || rows[0];
+      const wtx = rows.find((x) => x && x.symbol === "WTX&") || rows[0];
       if (wtx) {
         if (!yahooBookFresh(wtx, nowMs)) {
           // 假日／來源日≠交易鍵：不把殘值五檔與內外盤送給前端 applyLive。
@@ -2154,42 +2048,6 @@ export default {
           delete wtx.orderbook;
         }
       }
-    }
-    // 小台主檔補位：Cloudflare 打期交所 MIS 實測 HTTP 520（CF-to-CF 被擋），
-    // 只有 GitHub Actions 打得到 MIS。故 rows 缺 MXF& 時，改由 Pages 上的
-    // snapshot.json（Actions 每 5 分寫）補一列，避免前端 fallback 顯示成台積電期貨。
-    if (Array.isArray(rows) && !rows.some((x) => x && x.symbol === "MXF&")) {
-      try {
-        const sr = await fetch(HEAL_GH_SNAPSHOT, {
-          headers: { "Cache-Control": "no-cache" },
-          cf: { cacheTtl: 30, cacheEverything: true },
-        });
-        if (sr.ok) {
-          const sj = await sr.json();
-          // 依快照的 session 選盤：夜盤欄位在日盤與休市時同樣有 SymbolID，
-          // 若只看 SymbolID 會讓日盤主價顯示成前一夜盤收盤價。
-          const src = (sj && sj.session === "night" && sj.night && sj.night.SymbolID)
-            ? sj.night
-            : ((sj && sj.day && sj.day.SymbolID) ? sj.day : (sj && sj.night));
-          if (src && src.SymbolID) {
-            const t = String(src.CTime || "000000").padEnd(6, "0");
-            const d = String(src.CDate || "");
-            rows.unshift({
-              symbol: "MXF&",
-              symbolName: src.DispCName || "小台期近一",
-              price: { raw: String(src.CLastPrice) },
-              change: { raw: String(src.CDiff) },
-              changePercent: String(src.CDiffRate || 0) + "%",
-              regularMarketPreviousClose: { raw: String(src.CRefPrice) },
-              volume: String(src.CTotalVolume || ""),
-              regularMarketTime: d.length >= 8
-                ? d.slice(0, 4) + "-" + d.slice(4, 6) + "-" + d.slice(6, 8) + "T" + t.slice(0, 2) + ":" + t.slice(2, 4) + ":" + t.slice(4, 6) + "+08:00"
-                : undefined,
-              _src: "gh-snapshot",
-            });
-          }
-        }
-      } catch (_) {}
     }
     if (!Array.isArray(rows)) {
       const body = await yRes.text().catch(() => "");

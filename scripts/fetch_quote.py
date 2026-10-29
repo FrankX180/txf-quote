@@ -1,7 +1,4 @@
-# 小台（MXF）報價 + 五檔 → data/snapshot.json
-# 2026-10-29 改小台：Yahoo 奇摩沒有小台報價（WTXM& 為停更舊商品、MXF& 404），
-# 主報價改用期交所 MIS 官方（CID=MXF，日盤 MXF**-F／夜盤 MXF**-M），
-# Yahoo 僅保留給相關商品（台積電期 WCDF&、聯電期 WCCF&）。
+# 奇摩 stockList WTX&：報價 + 五檔 → data/snapshot.json
 # 勿打 query1.finance.yahoo.com。
 import json
 import re
@@ -18,12 +15,8 @@ DATA = ROOT / "data"
 TZ = timezone(timedelta(hours=8))
 URL = (
     "https://tw.stock.yahoo.com/_td-stock/api/resource/"
-    "StockServices.stockList;symbols=WCDF%26,WCCF%26"
+    "StockServices.stockList;symbols=WTX%26,WCDF%26,WCCF%26"
 )
-# 主檔（小台）代碼：前端／快照統一用 MXF& 當 SymbolID
-SYM = "MXF&"
-SYM_NAME = "小台期近一"
-MIS_CID = "MXF"   # MIS 商品代碼（不帶月份）
 # 備源：自家 Cloudflare Worker 直接 proxy 同一支 Yahoo stockList（同格式）。
 # Yahoo 對此端點會按來源 IP 選擇性回 500（本機／GitHub Runner 中、CF 邊緣不中），
 # 直連失敗時改走 Worker，等於借道 Cloudflare IP 繞過。
@@ -84,7 +77,7 @@ def _mis_quote(sess):
     want = "0" if sess == "day" else "1"
     for m in (want, "0" if want == "1" else "1"):
         try:
-            body = {"MarketType": m, "SymbolType": "F", "KindID": "1", "CID": MIS_CID, "ExpireMonth": "", "PageNo": 1}
+            body = {"MarketType": m, "SymbolType": "F", "KindID": "1", "CID": "", "ExpireMonth": "", "PageNo": 1}
             req = urllib.request.Request(
                 MIS,
                 data=json.dumps(body).encode("utf-8"),
@@ -105,15 +98,14 @@ def _mis_quote(sess):
             want_suffix = "-F" if want == "0" else "-M"
 
             def score(sid):
-                # 只認月契約 MXF{月}{年}-F/-M；排除 MXF-S（現貨）、MX1/MX2（週契約）
-                mm = re.match(r"^" + MIS_CID + r"([A-Z])(\d)-[MF]$", sid or "")
+                mm = re.match(r"^TXF([A-Z])(\d)-[MF]$", sid or "")
                 if not mm:
                     return 10 ** 9
                 mi = MIS_MONTHS.find(mm.group(1))
                 return 10 ** 9 if mi < 0 else int(mm.group(2)) * 100 + mi
 
             cand = sorted(
-                [x for x in ql if re.match(r"^" + MIS_CID + r"[A-Z]\d-[MF]$", x.get("SymbolID") or "")],
+                [x for x in ql if re.match(r"^TXF[A-Z]\d-[MF]$", x.get("SymbolID") or "")],
                 key=lambda x: score(x.get("SymbolID")),
             )
             live = [x for x in cand if x.get("CLastPrice")]
@@ -130,61 +122,32 @@ def _mis_quote(sess):
     return None
 
 
-MIS_META = {}
-
-
 def apply_mis(rows, sess):
-    """用 MIS 官方價覆蓋小台列的報價欄位（五檔 orderbook 仍留 Yahoo；小台 Yahoo 無書 → 靠前端 MIS 推流補滿）。"""
-    # 日盤收盤過渡期（13:46–14:59，sess_now 回 None 但夜盤尚未開）：
-    # 此時若拿 MIS 夜盤合約回的前一夜盤殘值寫快照，當盤價就會倒退。保留舊快照。
-    if sess not in ("day", "night"):
-        try:
-            from when import hm as _hm
-            _h = _hm()
-            if 1346 <= _h < 1500:
-                print("SKIP mis: day-close transition", flush=True)
-                return rows
-        except Exception:
-            pass
+    """用 MIS 官方價覆盖 WTX& 列的報價欄位（五檔 orderbook 仍留 Yahoo）。"""
     mis = _mis_quote(sess)
     if not mis:
         return rows
     if not rows:
-        rows = []
-    w = pick(rows, SYM)
-    if w is None:
-        # 小台列不存在（Yahoo 只回相關商品）→ 自己建一列，絕不落到 rows[0]（那是台積電期）
-        w = {"symbol": SYM, "symbolName": SYM_NAME}
-        rows.insert(0, w)
+        rows = [{"symbol": "WTX&", "symbolName": "台指期近一"}]
+    w = pick(rows, "WTX&") or rows[0]
 
     def val(k):
         v = mis.get(k)
         return None if v in (None, "") else str(v)
 
-    # 盤別把關：_mis_quote 在本盤無資料時會 fallback 到他盤；休市／換盤時若把他盤價
-    # 寫進當盤快照，前端會把夜盤殘值當日盤（反之亦然）。只有同盤資料才採用，
-    # 不同盤仍寫入但記下 misMt，讓下游可判斷來源盤別。
-    same_mt = mis.get("_mt") == mis.get("_want")
-    MIS_META["mt"] = mis.get("_mt")
-    MIS_META["want"] = mis.get("_want")
-    MIS_META["same"] = same_mt
-    if not same_mt:
-        print("WARN mis cross-session mt=%s want=%s (mark only)" % (
-            mis.get("_mt"), mis.get("_want")), flush=True)
-
-    if val("CLastPrice") is not None and same_mt:
+    if val("CLastPrice") is not None:
         w["price"] = {"raw": val("CLastPrice")}
-    if val("CBidPrice1") is not None and same_mt:
+    if val("CBidPrice1") is not None:
         w["bid"] = {"raw": val("CBidPrice1")}
-    if val("CAskPrice1") is not None and same_mt:
+    if val("CAskPrice1") is not None:
         w["ask"] = {"raw": val("CAskPrice1")}
-    if val("CDiff") is not None and same_mt:
+    if val("CDiff") is not None:
         w["change"] = {"raw": val("CDiff")}
-    if val("CDiffRate") is not None and same_mt:
+    if val("CDiffRate") is not None:
         w["changePercent"] = val("CDiffRate") + "%"
     if val("CRefPrice") is not None:
         w["regularMarketPreviousClose"] = {"raw": val("CRefPrice")}
-    if val("CTotalVolume") is not None and same_mt:
+    if val("CTotalVolume") is not None:
         w["volume"] = val("CTotalVolume")
     # MIS 官方開高低／漲跌停＝當盤值：僅在「本次查詢盤別＝目標盤別」時採用，
     # 避免休市／日收後 fallback 取到他盤值污染當盤 OHLC（下游 ohlc_from_kline 會回填）。
@@ -198,11 +161,11 @@ def apply_mis(rows, sess):
         if val("CFloorPrice") is not None:
             w["misFloor"] = val("CFloorPrice")
     dt, tt = str(mis.get("CDate") or ""), str(mis.get("CTime") or "")
-    if same_mt and len(dt) >= 8 and len(tt) >= 6:
+    if len(dt) >= 8 and len(tt) >= 6:
         w["regularMarketTime"] = "%s-%s-%sT%s:%s:%s+08:00" % (
             dt[0:4], dt[4:6], dt[6:8], tt[0:2], tt[2:4], tt[4:6])
     if not w.get("symbolName"):
-        w["symbolName"] = SYM_NAME
+        w["symbolName"] = "台指期近一"
     print("MIS applied px=%s t=%s" % (val("CLastPrice"), w.get("regularMarketTime")), flush=True)
     return rows
 
@@ -368,9 +331,9 @@ def slim(d):
         rate = (diff / ref) * 100
     dt = parse_mkt_time(d)
     q = {
-        "SymbolID": d.get("symbol") or SYM,
-        "DispCName": d.get("symbolName") or SYM_NAME,
-        "DispEName": d.get("symbol") or SYM,
+        "SymbolID": d.get("symbol") or "WTX&",
+        "DispCName": d.get("symbolName") or "台指期近一",
+        "DispEName": "WTX&",
         "CLastPrice": fmt_num(last),
         # 奇摩 regularMarketOpen/High/Low 是混盤，勿寫入；由 apply_mis 蓋入官方當盤值，
         # 或（MIS 無值時）由 ohlc_from_kline 以 1 分 K 回填。
@@ -590,20 +553,7 @@ def main():
             print("WARN no quote source (yahoo+mis); keep previous snapshot", flush=True)
             return
         raise SystemExit("no quote source")
-    d = pick(rows, SYM)
-    if not d:
-        # MIS 掛掉且 Yahoo 已無小台備援（WTX& 已移除）→ rows 只剩相關商品。
-        # 絕不可拿 rows[0]／{} 寫快照（會把小台列靜默抹掉），保留上一份有效快照。
-        if (DATA / "snapshot.json").exists():
-            print("WARN mis failed and no MXF row; keep previous snapshot", flush=True)
-            return
-        raise SystemExit("no MXF row and no previous snapshot")
-    if raw(d.get("price")) is None:
-        # 跨盤（_mt != _want）被擋住或 MIS 空值 → 寫了就是空白快照，保留上一份
-        if (DATA / "snapshot.json").exists():
-            print("WARN no price after apply_mis (cross-session?); keep previous snapshot", flush=True)
-            return
-        raise SystemExit("no price and no previous snapshot")
+    d = pick(rows, "WTX&") or (rows[0] if rows else {})
     q = slim(d)
     fresh = book_fresh(d, now)
     # 夜盤尾 Yahoo 常「成交價續動、五檔欄位停更」：來源日仍是今日（fresh=True），
@@ -654,35 +604,11 @@ def main():
             copy_book(night_q, q)
         elif prev.get("night"):
             copy_book(night_q, prev["night"])
-        if prev.get("day") and prev["day"].get("SymbolID") == SYM:
+        if prev.get("day"):
             day_q = day_ohlc_from_kline(dict(prev["day"]))
             copy_book(day_q, prev["day"])
         else:
-            # prev day 可能是改小台前的大台殘值（SymbolID=WTX&）→ 改用 MIS 日盤小台重建
-            m0 = _mis_quote("day")
-            if m0 and m0.get("CLastPrice") and m0.get("_mt") == m0.get("_want"):
-                day_q = day_ohlc_from_kline({
-                    "SymbolID": SYM,
-                    "DispCName": SYM_NAME,
-                    "DispEName": SYM,
-                    "CLastPrice": m0.get("CLastPrice"),
-                    "CRefPrice": m0.get("CRefPrice"),
-                    "CDiff": m0.get("CDiff"),
-                    "CDiffRate": m0.get("CDiffRate"),
-                    "CTotalVolume": m0.get("CTotalVolume"),
-                    "CDate": m0.get("CDate"),
-                    "CTime": m0.get("CTime"),
-                    "CBidPrice1": m0.get("CBestBidPrice") or m0.get("CBidPrice1") or "",
-                    "CAskPrice1": m0.get("CBestAskPrice") or m0.get("CAskPrice1") or "",
-                    "inMarket": "",
-                    "outMarket": "",
-                })
-                print("DAY-REBUILD from MIS MXF day=%s" % m0.get("CLastPrice"), flush=True)
-            elif prev.get("day"):
-                day_q = day_ohlc_from_kline(dict(prev["day"]))
-                copy_book(day_q, prev["day"])
-            else:
-                day_q = strip_book(day_ohlc_from_kline(dict(q)))
+            day_q = strip_book(day_ohlc_from_kline(dict(q)))
     else:
         # 休市（日收後～夜開前等）：仍用最新一口更新「應顯示盤」收／量／五檔
         # 舊邏輯只抄 prev，會卡在中午舊價（例 12:24=45937）
@@ -720,11 +646,8 @@ def main():
                 night_q = strip_book(dict(q))
     snap = {
         "fetchedAt": now_iso,
-        "source": "mis taifex CID=MXF (小台近月) / yahoo WCDF& WCCF& (相關商品)",
+        "source": "yahoo tw.stock StockServices.stockList WTX& WCDF& WCCF&",
         "session": cur or "",
-        "misMt": MIS_META.get("mt", ""),
-        "misWant": MIS_META.get("want", ""),
-        "misSameSession": bool(MIS_META.get("same")),
         "night": night_q,
         "day": day_q,
         "related": related,

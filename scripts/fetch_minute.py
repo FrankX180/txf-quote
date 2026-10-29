@@ -1,13 +1,5 @@
-# 小台（MXF）1/5/15 分 K。
-#
-# 2026-10-29 改小台的重要事實（實測）：
-#   · Yahoo 奇摩沒有小台（WTXM& 停更於 2026-06-23、MXF&/MTX& 皆 404）。
-#   · 富邦 DJ CZMB.djbcd?a=FIMTXN 有真小台 1 分 K，但**只有日盤**（最後一筆 13:44，無夜盤）。
-#   · MIS 無分時 K API（getChartData 等全 404）。
-# ⇒ 折衷架構：日盤 1 分 K 用富邦真小台；夜盤沿用 Yahoo 大台（WTX&，同一標的，
-#   兩者價差僅流動性差異 1~3 點）。5/15 分一律由 1 分聚合。
+# 盤中：奇摩 1/5/15 分。收盤後：富邦 DJ 1 分補齊。
 import json
-import time
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -20,124 +12,41 @@ HOLIDAYS = load_holidays()
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data" / "kline-minute.json"
 TZ = timezone(timedelta(hours=8))
+SYM = "WTX%26"
 KEEP_DAYS = 10
-CONTRACT = "MXF&"
-# FIMTXN＝富邦 DJ 小台近月（只有日盤）；FITXN＝大台近月
-FUBON = "https://fubon-ebrokerdj.fbs.com.tw/Z/ZM/ZMB/CZMB.djbcd?a=FIMTXN&b=-1&c=1&D=12000"
+HDR = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
+    "Referer": "https://tw.stock.yahoo.com/",
+}
+FUBON = "https://fubon-ebrokerdj.fbs.com.tw/Z/ZM/ZMB/CZMB.djbcd?a=FITXN&b=-1&c=1&D=12000"
 FUBON_HDR = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
     "Referer": "https://fubon-ebrokerdj.fbs.com.tw/",
 }
-# 夜盤唯一來源：Yahoo 大台（小台無夜盤分時源）
-YH_1M = (
-    "https://tw.stock.yahoo.com/_td-stock/api/resource/"
-    "StockServices.chart;symbol=WTX%26;period=1m;range=1d"
-)
-YH_HDR = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
-    "Referer": "https://tw.stock.yahoo.com/",
-}
-# 備源：自家 Worker 代理同一支（CF IP 可過 Yahoo 的 IP 選擇性 5xx）
+# 備源：自家 Cloudflare Worker proxy 同一支 Yahoo chart（CF IP 可過 Yahoo 的 IP 選擇性 5xx）。
 WORKER_1M = "https://wtx.blok.trading/?kind=1m"
+
+
+def get(url: str, headers=None) -> dict:
+    req = urllib.request.Request(url, headers=headers or HDR)
+    with urllib.request.urlopen(req, timeout=25) as r:
+        return json.loads(r.read().decode("utf-8", "replace"))
 
 
 def classify(ts: int):
     dt = datetime.fromtimestamp(int(ts), TZ)
     hm = dt.hour * 100 + dt.minute
+    # date 一律 YYYYMMDD，與報價 CDate／前端一致
     if hm >= 1500 or hm < 500:
         d0 = dt.date() - timedelta(days=1) if hm < 500 else dt.date()
-        return "night", d0.strftime("%Y%m%d"), dt
+        sdate = d0.strftime("%Y%m%d")
+        return "night", sdate, dt
     if 845 <= hm <= 1345:
         return "day", dt.strftime("%Y%m%d"), dt
     return None, None, dt
 
 
-def get_json(url, headers=None):
-    req = urllib.request.Request(url, headers=headers or YH_HDR)
-    with urllib.request.urlopen(req, timeout=25) as r:
-        return json.loads(r.read().decode("utf-8", "replace"))
-
-
-def fetch_fubon_1m():
-    """富邦小台 1 分 K（僅日盤）。"""
-    req = urllib.request.Request(FUBON, headers=FUBON_HDR)
-    with urllib.request.urlopen(req, timeout=40) as r:
-        text = r.read().decode("utf-8", "replace")
-    chunks = text.split(" ")
-    if len(chunks) < 5:
-        return [], []
-    codes = [x.strip() for x in chunks[0].split(",") if len(x.strip()) == 6 and x.strip().isdigit()]
-    opens = chunks[1].split(",")
-    highs = chunks[2].split(",")
-    lows = chunks[3].split(",")
-    closes = chunks[4].split(",")
-    vols = chunks[5].split(",") if len(chunks) > 5 else []
-    now = datetime.now(TZ)
-    y, m = now.year, now.month
-    # 富邦 code 無年份：最新一根通常是今天。但月初開盤前或連假後，最新一根仍是上月底
-    # （例：11/1 早上最新是 10/30）⇒ dd 比今天大 1 天以上就退回上個月，否則整段被標成本月。
-    if codes:
-        try:
-            last_dd = int(codes[-1][:2])
-            if last_dd > now.day + 1:
-                m -= 1
-                if m < 1:
-                    m, y = 12, y - 1
-        except ValueError:
-            pass
-    prev_dd = None
-    stamps = []
-    for code in reversed(codes):
-        dd, hh, mm = int(code[:2]), int(code[2:4]), int(code[4:6])
-        if prev_dd is not None and dd > prev_dd:
-            m -= 1
-            if m < 1:
-                m, y = 12, y - 1
-        prev_dd = dd
-        try:
-            stamps.append(datetime(y, m, dd, hh, mm, tzinfo=TZ))
-        except ValueError:
-            stamps.append(None)
-    stamps.reverse()
-    night, day = [], []
-    n = min(len(codes), len(closes))
-    for i in range(n):
-        dt = stamps[i] if i < len(stamps) else None
-        if dt is None:
-            continue
-        try:
-            c = float(closes[i])
-        except (TypeError, ValueError):
-            continue
-
-        def f(arr):
-            try:
-                return float(arr[i])
-            except (TypeError, ValueError, IndexError):
-                return c
-
-        try:
-            v = int(round(float(vols[i]))) if i < len(vols) else 0
-        except (TypeError, ValueError):
-            v = 0
-        sess, sdate, _ = classify(int(dt.timestamp()))
-        if not sess:
-            continue
-        row = {
-            "timestamp": int(dt.timestamp()) * 1000,
-            "open": f(opens),
-            "high": f(highs),
-            "low": f(lows),
-            "close": c,
-            "volume": v,
-            "date": sdate,
-            "session": sess,
-        }
-        (night if sess == "night" else day).append(row)
-    return night, day
-
-
-def bars_from_chart(chart):
+def bars_from_chart(chart: dict):
     ts_list = chart.get("timestamp") or []
     q = ((chart.get("indicators") or {}).get("quote") or [{}])[0]
     opens, highs, lows, closes = q.get("open") or [], q.get("high") or [], q.get("low") or [], q.get("close") or []
@@ -160,7 +69,7 @@ def bars_from_chart(chart):
             "high": float(h),
             "low": float(l),
             "close": float(c),
-            "volume": int(round(float(v))),
+            "volume": int(round(float(v) * 1000)),
             "date": sdate,
             "session": sess,
         }
@@ -168,15 +77,20 @@ def bars_from_chart(chart):
     return night, day
 
 
-def fetch_yahoo_night_1m():
-    """Yahoo 大台 1 分 K，只取夜盤段（小台夜盤無源）。"""
+YH_1M = (
+    "https://tw.stock.yahoo.com/_td-stock/api/resource/"
+    f"StockServices.chart;symbol={SYM};period=1m;range=1d"
+)
+
+
+def fetch_1m():
+    """1m 先直連 Yahoo；失敗改走自家 Worker（借 CF IP 繞過 IP 選擇性 5xx）。"""
     try:
-        j = get_json(YH_1M)
+        j = get(YH_1M)
     except Exception as e:
-        print("WARN yahoo 1m failed (%s); via worker" % e, flush=True)
-        j = get_json(WORKER_1M)
-    n, _d = bars_from_chart(j)
-    return n
+        print("WARN 1m yahoo failed (%s); via worker" % e, flush=True)
+        j = get(WORKER_1M)
+    return bars_from_chart(j)
 
 
 def merge_bars(*groups):
@@ -187,37 +101,9 @@ def merge_bars(*groups):
     return sorted(by_ts.values(), key=lambda x: x["timestamp"])
 
 
-def agg_bars(rows, minutes):
-    """1 分 K 聚合成 N 分 K。時間桶對齊整分鐘（台北 +8h 為 5/15 的倍數，epoch floor 等價）。"""
-    if not rows:
-        return []
-    step = minutes * 60000
-    by = {}
-    for b in rows:
-        slot = (int(b["timestamp"]) // step) * step
-        k = (slot, b.get("date"), b.get("session"))
-        x = by.get(k)
-        if x is None:
-            by[k] = {
-                "timestamp": slot,
-                "open": b["open"],
-                "high": b["high"],
-                "low": b["low"],
-                "close": b["close"],
-                "volume": int(b.get("volume") or 0),
-                "date": b.get("date"),
-                "session": b.get("session"),
-            }
-        else:
-            x["high"] = max(x["high"], b["high"])
-            x["low"] = min(x["low"], b["low"])
-            x["close"] = b["close"]
-            x["volume"] += int(b.get("volume") or 0)
-    return [by[k] for k in sorted(by)]
-
-
 def fix_future_ts(rows):
-    """夜盤標次交易日回移保護（僅 Yahoo 夜盤需要）。
+    """Yahoo 夜盤標次交易日：平日最多 -1 天、週五夜最多 -3 天、連假/中秋 -4 天、春節最多 -10 天。
+    禁止無限回移：舊夜盤被扣到今晚會在同一分鐘疊 KEEP_DAYS 根（千點刷針）。
     SSOT: 01_Docs/Yahoo-台指期K線日期慣例.md"""
     if not rows:
         return rows
@@ -231,6 +117,8 @@ def fix_future_ts(rows):
             n += 1
         if ts > limit:
             continue
+        # 夜盤開盤日必須是營業日：連假時只退到「不晚於現在」會落在週末／假日夜（例：10/8 夜盤 → 10/9 假日夜）
+        # 舊檔已存錯者每輪也會被搬回，再由 collapse_minute 併掉重複
         m = 0
         while m < 10:
             dt = datetime.fromtimestamp(ts, TZ)
@@ -254,6 +142,7 @@ def fix_future_ts(rows):
 
 
 def collapse_minute(rows):
+    """同一分鐘只留一根（回移後舊夜盤會撞槽）。"""
     by = {}
     for b in rows or []:
         slot = (int(b["timestamp"]) // 60000) * 60000
@@ -286,6 +175,84 @@ def load_old():
     return old.get("night_1m") or old.get("night") or [], old.get("day_1m") or old.get("day") or []
 
 
+def fetch_fubon_1m():
+    req = urllib.request.Request(FUBON, headers=FUBON_HDR)
+    with urllib.request.urlopen(req, timeout=40) as r:
+        text = r.read().decode("utf-8", "replace")
+    chunks = text.split(" ")
+    if len(chunks) < 5:
+        return [], []
+    codes = [x.strip() for x in chunks[0].split(",") if len(x.strip()) == 6 and x.strip().isdigit()]
+    opens = chunks[1].split(",")
+    highs = chunks[2].split(",")
+    lows = chunks[3].split(",")
+    closes = chunks[4].split(",")
+    vols = chunks[5].split(",") if len(chunks) > 5 else []
+    now = datetime.now(TZ)
+    y, m = now.year, now.month
+    prev_dd = None
+    stamps = []
+    for code in reversed(codes):
+        dd, hh, mm = int(code[:2]), int(code[2:4]), int(code[4:6])
+        if prev_dd is not None and dd > prev_dd:
+            m -= 1
+            if m < 1:
+                m, y = 12, y - 1
+        prev_dd = dd
+        try:
+            stamps.append(datetime(y, m, dd, hh, mm, tzinfo=TZ))
+        except ValueError:
+            stamps.append(None)
+    stamps.reverse()
+    night, day = [], []
+    n = min(len(codes), len(closes))
+    for i in range(n):
+        dt = stamps[i] if i < len(stamps) else None
+        if dt is None:
+            continue
+        try:
+            c = float(closes[i])
+        except (TypeError, ValueError):
+            continue
+        def f(arr):
+            try:
+                return float(arr[i])
+            except (TypeError, ValueError, IndexError):
+                return c
+        try:
+            v = int(round(float(vols[i]))) if i < len(vols) else 0
+        except (TypeError, ValueError):
+            v = 0
+        sess, sdate, _ = classify(int(dt.timestamp()))
+        if not sess:
+            continue
+        row = {
+            "timestamp": int(dt.timestamp()) * 1000,
+            "open": f(opens),
+            "high": f(highs),
+            "low": f(lows),
+            "close": c,
+            "volume": v,
+            "date": sdate,
+            "session": sess,
+        }
+        (night if sess == "night" else day).append(row)
+    return night, day
+
+
+def fetch_apac(period: str):
+    enc = "%5B%22WTX%26%22%5D"
+    url = (
+        "https://tw.stock.yahoo.com/_td-stock/api/resource/"
+        f"FinanceChartService.ApacLibraCharts;period={period};symbols={enc}"
+        "?intl=tw&lang=zh-Hant-TW&region=TW&site=finance&tz=Asia/Taipei&returnMeta=true"
+    )
+    j = get(url)
+    block = j.get("data") or []
+    chart = (block[0] or {}).get("chart") or {} if block else {}
+    return bars_from_chart(chart)
+
+
 def main():
     do_y = want_yahoo_minute()
     do_f = want_fubon()
@@ -293,44 +260,43 @@ def main():
         print("SKIP minute: closed")
         return
     on, od = load_old()
-    fn, fd = [], []
+    yn, yd = [], []
     src = []
-    if do_f or do_y:
-        for attempt in range(2):
-            try:
-                fn, fd = fetch_fubon_1m()
-                break
-            except Exception as e:
-                print("WARN fubon 1m attempt%d failed (%s)" % (attempt + 1, e), flush=True)
-                if attempt == 0:
-                    time.sleep(3)
-        if fd:
-            src.append("fubon 1m FIMTXN (day)")
-    yn = []
     if do_y:
         try:
-            yn = fetch_yahoo_night_1m()
-            if yn:
-                src.append("yahoo 1m WTX& (night only)")
+            yn, yd = fetch_1m()
         except Exception as e:
-            print("WARN yahoo night 1m failed (%s); keep old night" % e, flush=True)
-    if not (fn or fd or yn):
-        print("SKIP minute: no data, keep old")
-        return
-    # 日盤＝富邦真小台；夜盤＝Yahoo 大台（小台無夜盤源）
-    n1 = fix_future_ts(trim_days(merge_bars(on, yn)))
-    d1 = fix_future_ts(trim_days(merge_bars(od, fd)))
-    n5 = fix_future_ts(trim_days(agg_bars(n1, 5)))
-    d5 = fix_future_ts(trim_days(agg_bars(d1, 5)))
-    n15 = fix_future_ts(trim_days(agg_bars(n1, 15)))
-    d15 = fix_future_ts(trim_days(agg_bars(d1, 15)))
-    src.append("agg 5m 15m")
+            print("WARN 1m fetch failed (%s); keep old" % e, flush=True)
+            yn, yd = [], []
+        src.append("yahoo 1m")
+    fn, fd = [], []
+    if do_f:
+        try:
+            fn, fd = fetch_fubon_1m()
+            src.append("fubon 1m")
+        except Exception as e:
+            print("WARN fubon 1m failed (%s)" % e, flush=True)
+    n1 = fix_future_ts(trim_days(merge_bars(on, yn, fn)))
+    d1 = fix_future_ts(trim_days(merge_bars(od, yd, fd)))
+    n5, d5, n15, d15 = [], [], [], []
+    old = json.loads(OUT.read_text(encoding="utf-8")) if OUT.exists() else {}
+    if do_y:
+        try:
+            n5, d5 = fetch_apac("5m")
+            n15, d15 = fetch_apac("15m")
+            src.append("yahoo 5m 15m")
+        except Exception as e:
+            print("WARN apac 5m/15m failed (%s); keep old" % e, flush=True)
+            n5, d5 = old.get("night_5m") or [], old.get("day_5m") or []
+            n15, d15 = old.get("night_15m") or [], old.get("day_15m") or []
+        n5, d5, n15, d15 = (fix_future_ts(x) for x in (n5, d5, n15, d15))
+    else:
+        n5, d5 = old.get("night_5m") or [], old.get("day_5m") or []
+        n15, d15 = old.get("night_15m") or [], old.get("day_15m") or []
     payload = {
         "fetchedAt": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
         "source": " / ".join(src),
-        "contract": CONTRACT,
-        "note": "日盤=FIMTXN 真小台；夜盤=WTX& 大台（小台無夜盤分時源，價差 1~3 點）",
-        "nightStale": not bool(yn),
+        "contract": "WTX&",
         "night_1m": n1,
         "day_1m": d1,
         "night_5m": n5,

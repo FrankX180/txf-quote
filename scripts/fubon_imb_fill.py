@@ -62,7 +62,7 @@ def near_month_symbol(day_key, session):
     y, m = d.year, d.month
     if d > third_wed or (d == third_wed and session == "night"):
         y, m = (y + 1, 1) if m == 12 else (y, m + 1)
-    return "MXF%s%d" % (MONTHS[m - 1], y % 10)
+    return "TXF%s%d" % (MONTHS[m - 1], y % 10)
 
 
 # ── D1 ──
