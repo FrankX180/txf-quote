@@ -6,6 +6,46 @@ const YAHOO =
 // 1 分 K 改富邦 DJ 小台近月（FIMTXN）；回傳格式在 parseFubon1m() 轉成 Yahoo chart 形狀。
 const CHART1M =
   "https://fubon-ebrokerdj.fbs.com.tw/Z/ZM/ZMB/CZMB.djbcd?a=FIMTXN&b=-1&c=1&D=12000";
+// 夜盤唯一來源：Yahoo 大台（富邦 DJ 只有日盤，最後一筆 13:44）
+const CHART1M_YH =
+  "https://tw.stock.yahoo.com/_td-stock/api/resource/" +
+  "StockServices.chart;symbol=WTX%26;period=1m;range=1d";
+
+function mergeCharts(primary, secondary) {
+  // primary＝富邦小台（日盤，優先）；secondary＝Yahoo 大台（補夜盤）
+  const map = new Map();
+  const push = (ch, prefer) => {
+    if (!ch) return;
+    const ts = ch.timestamp || [];
+    const q = ((ch.indicators || {}).quote || [{}])[0] || {};
+    for (let i = 0; i < ts.length; i++) {
+      if (q.close[i] == null) continue;
+      const cur = map.get(ts[i]);
+      if (cur && cur.prefer && !prefer) continue;
+      map.set(ts[i], {
+        t: ts[i], o: q.open[i], h: q.high[i], l: q.low[i], c: q.close[i], v: q.volume[i], prefer: !!prefer,
+      });
+    }
+  };
+  push(secondary, false);
+  push(primary, true);
+  const t = [], o = [], h = [], l = [], c = [], v = [];
+  for (const k of [...map.keys()].sort((x, y) => x - y)) {
+    const r = map.get(k);
+    t.push(r.t); o.push(r.o); h.push(r.h); l.push(r.l); c.push(r.c); v.push(r.v);
+  }
+  return { timestamp: t, indicators: { quote: [{ open: o, high: h, low: l, close: c, volume: v }] } };
+}
+
+async function fetchMerged1m() {
+  const [fbTxt, yhJson] = await Promise.all([
+    fetch(CHART1M, { headers: { "User-Agent": "Mozilla/5.0", Referer: "https://fubon-ebrokerdj.fbs.com.tw/" } })
+      .then((r) => r.text()).catch(() => ""),
+    fetch(CHART1M_YH, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0", Referer: "https://tw.stock.yahoo.com/" } })
+      .then((r) => r.json()).catch(() => null),
+  ]);
+  return mergeCharts(parseFubon1m(fbTxt), yhJson);
+}
 
 // 富邦 DJ djbcd → Yahoo chart 形狀（{timestamp, indicators.quote[0]}）。
 // 格式：MMDDHHMM opens highs lows closes vols，空格分段、逗號分項，舊→新。
@@ -1011,18 +1051,11 @@ async function backfillChart1m(env, full = false) {
   let lastErr = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const r = await fetch(CHART1M, {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
-          Referer: "https://tw.stock.yahoo.com/",
-        },
-      });
-      if (!r.ok) {
-        lastErr = "yahoo-chart-fail:" + r.status;
+      const chart = await fetchMerged1m();
+      if (!chart || !chart.timestamp || !chart.timestamp.length) {
+        lastErr = "merged-1m-empty";
         continue;
       }
-      const chart = parseFubon1m(await r.text());
       // 非 full 模式只解析尾端 12 根 K 棒，省去 500 根的時區迴圈運算 (CPU 從 6ms 降至 0.1ms)
       const all = barsFromChartJson(chart, full ? 0 : 12);
       const dayKey = tradingDayKey(Date.now());
@@ -2041,10 +2074,10 @@ export default {
     };
 
     if (kind === "1m") {
-      const r = await fetch(CHART1M, { headers: { "User-Agent": "Mozilla/5.0", Referer: "https://fubon-ebrokerdj.fbs.com.tw/" } });
-      const body = JSON.stringify(parseFubon1m(await r.text()));
+      const chart = await fetchMerged1m();
+      const body = JSON.stringify(chart);
       return new Response(body, {
-        status: r.ok ? 200 : r.status,
+        status: 200,
         headers: {
           "content-type": "application/json; charset=utf-8",
           "Cache-Control": "public, max-age=0",
