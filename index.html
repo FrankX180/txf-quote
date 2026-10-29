@@ -4576,9 +4576,10 @@
         const refRaw = daySpan >= 2
           ? (Number(twnRatio && twnRatio.dayClose) || Number(twnData && twnData.gas && twnData.gas.dayClose) || n(qx0 && qx0.CRefPrice))
           : n(qx0 && qx0.CRefPrice);
-        if (refRaw != null) saveRefPx(refRaw, (qx0 && qx0.CDate) || "");
+        if (daySpan < 2 && refRaw != null) saveRefPx(refRaw, (qx0 && qx0.CDate) || "");
         // 平盤未定時絕不用開盤價充當：改用同日快取；兩者都沒有就「不上色」，等基準到齊再重繪
-        flat = refRaw != null ? refRaw : cachedRefPx();
+        // 快取只給單日圖用：多日圖的基準是富台換算 dayClose，寫進單日快取會污染下一場
+        flat = refRaw != null ? refRaw : (daySpan < 2 ? cachedRefPx() : null);
         if (flat == null) { flatPending = true; flat = prices[0]; } // 此值僅供 y 軸縮放，絕不參與上色
       }
       const lastPx = n(qx0 && qx0.CLastPrice);
