@@ -4,7 +4,17 @@
 
 ## Purpose
 
-公開單頁台指期近月看盤站。前端 `index.html` 上 GitHub Pages；即時報價／1 分 K 走 Cloudflare Worker `wtx.blok.trading`（舊別名 `wtx.19850926.xyz`）；靜態 JSON 由 Actions 每 5 分寫入 `data/`。
+公開單頁**小台（MXF）**近月看盤站。前端 `index.html` 上 GitHub Pages；即時報價／1 分 K 走 Cloudflare Worker `wtx.blok.trading`（舊別名 `wtx.19850926.xyz`）；靜態 JSON 由 Actions 每 5 分寫入 `data/`。
+
+**2026-10-29 由大台 TXF 全面改小台 MXF**（奇摩沒有人小台：`WTXM&` 停更於 2026-06-23、`MXF&`/`MTX&` 皆 404）。新資料源：
+
+| 用途 | 來源 |
+|------|------|
+| 報價／五檔 | 期交所 MIS `getQuoteList` `CID=MXF`（`MXF*-F` 日／`MXF*-M` 夜）＋ SockJS 推流完整五檔 |
+| 1 分 K 日盤 | 富邦 DJ `CZMB.djbcd?a=FIMTXN`（真小台） |
+| 1 分 K 夜盤 | Yahoo `WTX&`（大台；小台無夜盤分時源，價差 1~3 點） |
+| 5／15 分 | 由 1 分自行聚合 |
+| 日／週／月 K | MoneyDJ `FITX`（大台；`FIMTX` 實測為別名，payload 標 `proxyNote`） |
 
 **全站雲端自足（硬原則）**：運行與部署都不依賴任何本機檔案／服務。
 
@@ -68,8 +78,10 @@
 
 ### External
 
-- 奇摩 `StockServices.stockList` / `chart`（`WTX&`）
-- 期交所／MoneyDJ／富邦 DJ（腳本）
+- 期交所 MIS `getQuoteList`／SockJS 推流（`CID=MXF`；報價＋完整五檔）
+- 富邦 DJ `CZMB.djbcd`（`FIMTXN` 小台日盤 1 分 K）
+- MoneyDJ（`FITX` 日／週 K，小台日 K 代理源）
+- 奇摩 `StockServices.stockList`（僅相關商品 `WCDF&`／`WCCF&`）
 - Cloudflare Worker + D1 `txf-imb`
 - klinecharts CDN
 

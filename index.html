@@ -6422,7 +6422,9 @@
       return hm > 1345 && hm < 1458;
     }
     function applyLive(rows) {
-      const wtx = rows.find((x) => x.symbol === "MXF&") || rows.find((x) => x.symbol === "WTX&") || rows[0];
+      // 只認小台主檔。Worker 打 MIS 會被 CF 擋（HTTP 520），rows 可能只剩相關商品
+      // （台積電期／聯電期）；絕不可 fallback 到 rows[0]，否則主報價會顯示成台積電期貨。
+      const wtx = rows.find((x) => x.symbol === "MXF&") || rows.find((x) => x.symbol === "WTX&");
       if (!wtx) return;
       const q0 = slimYahoo(wtx);
       const nowTs = Date.now();
@@ -7312,7 +7314,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.24";
+        const VER = "3.25";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {

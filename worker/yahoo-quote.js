@@ -2098,6 +2098,38 @@ export default {
         }
       }
     }
+    // 小台主檔補位：Cloudflare 打期交所 MIS 實測 HTTP 520（CF-to-CF 被擋），
+    // 只有 GitHub Actions 打得到 MIS。故 rows 缺 MXF& 時，改由 Pages 上的
+    // snapshot.json（Actions 每 5 分寫）補一列，避免前端 fallback 顯示成台積電期貨。
+    if (Array.isArray(rows) && !rows.some((x) => x && x.symbol === "MXF&")) {
+      try {
+        const sr = await fetch(HEAL_GH_SNAPSHOT, {
+          headers: { "Cache-Control": "no-cache" },
+          cf: { cacheTtl: 30, cacheEverything: true },
+        });
+        if (sr.ok) {
+          const sj = await sr.json();
+          const src = (sj && sj.night && sj.night.SymbolID) ? sj.night : (sj && sj.day);
+          if (src && src.SymbolID) {
+            const t = String(src.CTime || "000000").padEnd(6, "0");
+            const d = String(src.CDate || "");
+            rows.unshift({
+              symbol: "MXF&",
+              symbolName: src.DispCName || "小台期近一",
+              price: { raw: String(src.CLastPrice) },
+              change: { raw: String(src.CDiff) },
+              changePercent: String(src.CDiffRate || 0) + "%",
+              regularMarketPreviousClose: { raw: String(src.CRefPrice) },
+              volume: String(src.CTotalVolume || ""),
+              regularMarketTime: d.length >= 8
+                ? d.slice(0, 4) + "-" + d.slice(4, 6) + "-" + d.slice(6, 8) + "T" + t.slice(0, 2) + ":" + t.slice(2, 4) + ":" + t.slice(4, 6) + "+08:00"
+                : undefined,
+              _src: "gh-snapshot",
+            });
+          }
+        }
+      } catch (_) {}
+    }
     if (!Array.isArray(rows)) {
       const body = await yRes.text().catch(() => "");
       return new Response(body, {

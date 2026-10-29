@@ -1,0 +1,17 @@
+fix(mxf): Worker 打 MIS 被 CF 擋 520，主檔改由 Pages 快照補；前端不再 fallback 到相關商品
+
+現象（線上實測）
+- 首頁主報價顯示「台積電期貨 2,420」，OHLC 卻是小台的 → 主檔選錯
+- Worker `?kind=mis` 回 `{"ok":false,"debug":"MT1:http520 MT0:http520"}`
+  ＝ Cloudflare Worker 打 mis.taifex.com.tw 全被擋 520
+- GitHub Actions 打 MIS 是通的（snapshot.json fetchedAt 16:44:17、SymbolID=MXF&）
+
+修正
+- worker/yahoo-quote.js：rows 缺 MXF& 時，從 Pages 的 data/snapshot.json
+  （Actions 寫入）補一列小台主檔，cf cacheTtl 30 秒
+- index.html applyLive()：移除 `|| rows[0]` fallback。Worker 只有相關商品時直接 return，
+  主檔維持 snapshot，即時價由瀏覽器直連的 MIS SockJS 推流覆蓋
+- VER 3.24 → 3.25
+
+驗證
+- node --check 通過（worker）、inline JS node --check 通過
