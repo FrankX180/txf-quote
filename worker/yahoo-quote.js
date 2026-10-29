@@ -2069,6 +2069,19 @@ export default {
       });
     }
 
+    if (kind === "fixbad") {
+      // 一次性修復：2026-10-29 worker fallback rows[0]（台積電期）把 2,420 寫進小台 price_1m。
+      // 把當日 l/c 超出合理價區的壞棒拉回該棒 open（不刪列，保留分鐘連續性）。
+      const dk = twDateStr(Date.now());
+      const rr = await env.IMB_DB.prepare(
+        "UPDATE price_1m SET l = o, c = o WHERE day_key = ? AND (l < 30000 OR c < 30000 OR l > 80000 OR c > 80000)"
+      ).bind(dk).run();
+      return jsonResp({ ok: true, changed: (rr.meta && rr.meta.changes) || 0, dayKey: dk }, 200, {
+        "Cache-Control": "no-store",
+        "CDN-Cache-Control": "no-store",
+      });
+    }
+
     if (kind === "mis") {
       // 診斷：CF Worker 打期交所 MIS 是否通
       const m = await fetchMisQuote();
