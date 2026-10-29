@@ -1457,6 +1457,39 @@
       return q;
     }
 
+    // 平盤基準快取：開頁瞬間 snapshot 還沒到時，用同盤別最後一次成功的 CRefPrice 補位。
+    // 絕不用「開盤價」當平盤（2026-10-29：開頁那一瞬間，盤下全被塗成紅色）。
+    const REFPX_KEY = "txfRefPx.v1";
+    function cachedRefPx() {
+      try {
+        const sk = sessKey();
+        const all = JSON.parse(localStorage.getItem(REFPX_KEY) || "{}");
+        const it = all && all[sk];
+        if (!it || it.ref == null || !it.ts) return null;
+        if (Date.now() - it.ts > 10 * 60 * 60 * 1000) return null; // 超過 10 小時視為過期
+        const wantDays = (function () {
+          const qq = q();
+          // 交易日必須能確認：有 snapshot 就對 CDate；沒有就對本機交易日（含跨午夜的前一日）
+          if (qq && qq.CDate) return [String(qq.CDate)];
+          return [String(tradingDayKey()).replace(/-/g, ""), ymdOf(new Date(Date.now() - 86400000))];
+        })();
+        if (!it.date || wantDays.indexOf(String(it.date)) < 0) return null;
+        return Number(it.ref);
+      } catch (e) { return null; }
+    }
+    function saveRefPx(ref, date) {
+      try {
+        if (ref == null) return;
+        const sk = sessKey();
+        const all = JSON.parse(localStorage.getItem(REFPX_KEY) || "{}");
+        const cur = all && all[sk];
+        const d = String(date || "");
+        if (cur && Number(cur.ref) === Number(ref) && String(cur.date || "") === d) return;
+        all[sk] = { ref: Number(ref), date: d, ts: Date.now() };
+        localStorage.setItem(REFPX_KEY, JSON.stringify(all));
+      } catch (e) {}
+    }
+
     function render() {
       applyMisOverlay(); // MIS 即時五檔／成交價覆疊（未接通則維持 Yahoo）
       const isHol = isTwnSimWindow();
@@ -4527,14 +4560,18 @@
       // 開高低用當盤 1 分；平盤線／紅綠分界用該盤昨收（CRefPrice），不是開盤
       const open = daySpan >= 2 ? prices[0] : (twnSim || !so0 || so0.o == null ? prices[0] : so0.o);
       let flat;
+      let flatPending = false;
       if (twnSim) {
         flat = (twnData && twnData.gas && twnData.gas.dayClose) || prices[0];
       } else {
         // 多日：平盤＝固定參考（前日結算 dayClose），不隨窗寬移動（原 prices[0] 會亂跑）
-        const refPx = daySpan >= 2
+        const refRaw = daySpan >= 2
           ? (Number(twnRatio && twnRatio.dayClose) || Number(twnData && twnData.gas && twnData.gas.dayClose) || n(qx0 && qx0.CRefPrice))
           : n(qx0 && qx0.CRefPrice);
-        flat = refPx != null ? refPx : open;
+        if (refRaw != null) saveRefPx(refRaw, (qx0 && qx0.CDate) || "");
+        // 平盤未定時絕不用開盤價充當：改用同日快取；兩者都沒有就「不上色」，等基準到齊再重繪
+        flat = refRaw != null ? refRaw : cachedRefPx();
+        if (flat == null) { flatPending = true; flat = prices[0]; } // 此值僅供 y 軸縮放，絕不參與上色
       }
       const lastPx = n(qx0 && qx0.CLastPrice);
       let hiBase = so0 && so0.h != null ? so0.h : -Infinity;
@@ -4607,15 +4644,17 @@
       }
       ctx.textAlign = "left";
 
-      // 平盤虛線＝昨收（日／夜各自 snap 的 CRefPrice）
-      const yFlat = Math.round(yAt(flat)) + 0.5;
-      ctx.setLineDash([5, 4]);
-      ctx.strokeStyle = "#9ca3af";
-      ctx.beginPath();
-      ctx.moveTo(padL, yFlat);
-      ctx.lineTo(w - padR, yFlat);
-      ctx.stroke();
-      ctx.setLineDash([]);
+      // 平盤虛線＝昨收（日／夜各自 snap 的 CRefPrice）；基準未定時不畫，避免把開盤價誤標成平盤
+      const yFlat = flatPending ? null : Math.round(yAt(flat)) + 0.5;
+      if (yFlat != null) {
+        ctx.setLineDash([5, 4]);
+        ctx.strokeStyle = "#9ca3af";
+        ctx.beginPath();
+        ctx.moveTo(padL, yFlat);
+        ctx.lineTo(w - padR, yFlat);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
 
       // 斷線只留給跨盤／跨日大洞；同盤缺棒已由 fillMinutes 補平
       let gap = Infinity;
@@ -4695,7 +4734,7 @@
             ctx.stroke();
             continue;
           }
-          if ((a.px - flat) * (b.px - flat) < 0 && b.px !== a.px) {
+          if (!flatPending && (a.px - flat) * (b.px - flat) < 0 && b.px !== a.px) {
             const t = (flat - a.px) / (b.px - a.px);
             const xm = a.x + (b.x - a.x) * t;
             ctx.beginPath();
@@ -4712,7 +4751,7 @@
             ctx.beginPath();
             ctx.moveTo(a.x, a.y);
             ctx.lineTo(b.x, b.y);
-            ctx.strokeStyle = (a.px >= flat || b.px >= flat) ? "#d32f2f" : "#1b8a3e";
+            ctx.strokeStyle = flatPending ? "#94a3b8" : ((a.px >= flat || b.px >= flat) ? "#d32f2f" : "#1b8a3e");
             ctx.stroke();
           }
         }
@@ -4843,6 +4882,16 @@
       if (loV < Infinity) markExt(loI, loV, false);
 
       // 富台標註：當日＝模擬走勢；多日＝在富台段上標「富台（估）」，別與台指歷史混讀
+      // 平盤基準未到（snapshot 尚未載入）時明說，避免灰線被誤讀成跌勢
+      if (flatPending) {
+        ctx.save();
+        ctx.fillStyle = "#94a3b8";
+        ctx.font = "12px sans-serif";
+        ctx.textAlign = "right";
+        ctx.textBaseline = "alphabetic";
+        ctx.fillText("平盤載入中", w - padR, padT + 12);
+        ctx.restore();
+      }
       if (twnSim) {
         ctx.save();
         ctx.fillStyle = TWN_COLOR;
@@ -7433,7 +7482,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.32";
+        const VER = "3.33";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
