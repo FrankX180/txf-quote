@@ -58,8 +58,10 @@ function parseFubon1m(text) {
   const V = ch[5] ? ch[5].split(",") : [];
   const n = Math.min(codes.length, C.length);
   if (!n) return empty;
-  const now = new Date();
-  let y = now.getUTCFullYear(), m = now.getUTCMonth() + 1;
+  // 富邦 code 是台北時間 MMDDHHMM；年月必須用台北取，不能用 UTC
+  // （台北 00:00~08:00 時 UTC 還在前一日/前一月，每月 1 日凌晨會算錯月份）
+  const nowTw = new Date(Date.now() + 8 * 3600 * 1000);
+  let y = nowTw.getUTCFullYear(), m = nowTw.getUTCMonth() + 1;
   const stamps = new Array(n);
   let prevDd = null;
   for (let i = n - 1; i >= 0; i--) {
