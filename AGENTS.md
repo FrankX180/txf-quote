@@ -4,17 +4,17 @@
 
 ## Purpose
 
-公開單頁**小台（MXF）**近月看盤站。前端 `index.html` 上 GitHub Pages；即時報價／1 分 K 走 Cloudflare Worker `wtx.blok.trading`（舊別名 `wtx.19850926.xyz`）；靜態 JSON 由 Actions 每 5 分寫入 `data/`。
+公開單頁**大台（TXF）**近月看盤站。前端 `index.html` 上 GitHub Pages；即時報價／1 分 K 走 Cloudflare Worker `wtx.blok.trading`（舊別名 `wtx.19850926.xyz`）；靜態 JSON 由 Actions 每 5 分寫入 `data/`。
 
-**2026-10-29 由大台 TXF 全面改小台 MXF**（奇摩沒有人小台：`WTXM&` 停更於 2026-06-23、`MXF&`/`MTX&` 皆 404）。新資料源：
+**2026-10-29 曾短暫改小台 MXF，同日已 revert 回大台 TXF**（小台內外盤資料不完整、夜盤無分時源）。目前資料源：
 
 | 用途 | 來源 |
 |------|------|
-| 報價／五檔 | 期交所 MIS `getQuoteList` `CID=MXF`（`MXF*-F` 日／`MXF*-M` 夜）＋ SockJS 推流完整五檔 |
-| 1 分 K 日盤 | 富邦 DJ `CZMB.djbcd?a=FIMTXN`（真小台） |
-| 1 分 K 夜盤 | Yahoo `WTX&`（大台；小台無夜盤分時源，價差 1~3 點） |
+| 報價／五檔 | 期交所 MIS `getQuoteList`（`TXF*-F` 日／`TXF*-M` 夜）＋ SockJS 推流完整五檔 |
+| 1 分 K 日盤 | 富邦 DJ `CZMB.djbcd?a=FITXN`（大台） |
+| 1 分 K 夜盤 | Yahoo `WTX&`（大台） |
 | 5／15 分 | 由 1 分自行聚合 |
-| 日／週／月 K | MoneyDJ `FITX`（大台；`FIMTX` 實測為別名，payload 標 `proxyNote`） |
+| 日／週／月 K | MoneyDJ `FITX`（大台） |
 
 **全站雲端自足（硬原則）**：運行與部署都不依賴任何本機檔案／服務。
 
@@ -78,12 +78,13 @@
 
 ### External
 
-- 期交所 MIS `getQuoteList`／SockJS 推流（`CID=MXF`；報價＋完整五檔）
-- 富邦 DJ `CZMB.djbcd`（`FIMTXN` 小台日盤 1 分 K）
-- MoneyDJ（`FITX` 日／週 K，小台日 K 代理源）
+- 期交所 MIS `getQuoteList`／SockJS 推流（`CID=TXF`；報價＋完整五檔）
+- 富邦 DJ `CZMB.djbcd`（`FITXN` 大台日盤 1 分 K）
+- MoneyDJ（`FITX` 日／週 K）
 - 奇摩 `StockServices.stockList`（僅相關商品 `WCDF&`／`WCCF&`）
 - Cloudflare Worker + D1 `txf-imb`
 - klinecharts CDN
 
 <!-- MANUAL: 2026-09-01 夜盤刷針＝無限回移疊歷史；修在 2.13 -->
 <!-- MANUAL: 2026-09-11 日盤收盤後五檔被奇摩退化書清空；收盤至夜盤轉換（13:46–14:57）凍結真書，修在 2.24/2.25 -->
+<!-- MANUAL: 2026-10-29 五檔常壞：MIS 推流是增量 frame，前端整包覆蓋又丟掉無成交價的 frame，五檔被洗掉；判定用「買一必夾成交±5 點」在夜盤誤殺。修在 3.32（累積合併＋pxTs/bookTs 分開＋新鮮書只擋交叉＋90 秒推流看門狗） -->
