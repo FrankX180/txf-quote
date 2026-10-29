@@ -1,5 +1,5 @@
 {
-  "fetchedAt": "2026-10-29 16:59:43",
+  "fetchedAt": "2026-10-29 17:10:09",
   "source": "mis taifex CID=MXF (小台近月) / yahoo WCDF& WCCF& (相關商品)",
   "session": "night",
   "misMt": "1",
@@ -9,18 +9,18 @@
     "SymbolID": "MXF&",
     "DispCName": "小台期近一",
     "DispEName": "MXF&",
-    "CLastPrice": "46315",
+    "CLastPrice": "46406",
     "COpenPrice": "46418",
     "CHighPrice": "46495",
     "CLowPrice": "46127",
     "CCeilPrice": "51225",
     "CFloorPrice": "41913",
     "CRefPrice": "46569",
-    "CDiff": "-254",
-    "CDiffRate": "-0.55",
-    "CTotalVolume": "18878",
+    "CDiff": "-163",
+    "CDiffRate": "-0.35",
+    "CTotalVolume": "21683",
     "CDate": "20261029",
-    "CTime": "165942",
+    "CTime": "171009",
     "inMarket": "",
     "outMarket": "",
     "marketStatus": "",
@@ -68,16 +68,16 @@
     {
       "symbol": "WCDF&",
       "name": "台積電期貨近一",
-      "last": "2420",
-      "diff": "-13",
-      "rate": "-0.53"
+      "last": "",
+      "diff": "",
+      "rate": ""
     },
     {
       "symbol": "WCCF&",
       "name": "聯電期貨近一",
-      "last": "116",
-      "diff": "-12",
-      "rate": "-9.77"
+      "last": "",
+      "diff": "",
+      "rate": ""
     }
   ]
 }
