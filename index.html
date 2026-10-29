@@ -1005,7 +1005,10 @@
           const sStamp = String(s.f.CDate || "") + String(s.f.CTime || "").padStart(6, "0");
           const cStamp = cur && cur.f ? String(cur.f.CDate || "") + String(cur.f.CTime || "").padStart(6, "0") : "";
           if (cStamp && cStamp > sStamp) return; // 本機已有更新的就不倒退
-          misBook[sk] = { f: s.f, ts: s.ts || Date.now(), sym: s.sym || "" };
+          // 伺服器快照是「上一盤收盤」：書與價的時間都用快照時間，
+          // 不能讓後續 frame 的 ts 冒充（否則舊收盤書會被當成新鮮）
+          const sTs = s.ts || Date.now();
+          misBook[sk] = { f: s.f, ts: sTs, sym: s.sym || "", date: s.f.CDate || "", pxTs: sTs, bookTs: sTs };
           changed = true;
         });
         if (changed) { saveMisBook(true); scheduleMisRender(); }
@@ -1085,7 +1088,14 @@
         }
         if (Date.now() - misLastFrameAt > 90000) {
           misLastFrameAt = Date.now();
+          // 半開連線下 ws.close() 可能等不到 onclose，先拆 handler 再自己收尾，
+          // 否則 misWs 永遠非 null，openMisWs 會一直早退不重連。
+          ws.onclose = null; ws.onerror = null; ws.onmessage = null;
           try { ws.close(); } catch (e) {}
+          if (misWs === ws) { misWs = null; misWsOpen = false; }
+          stopMisWatchdog();
+          scheduleMisRetry();
+          return;
         }
       }, 30000);
     }
@@ -1126,10 +1136,15 @@
       // frame 只帶成交價，掛單變動又是另一筆）。整包覆蓋會把五檔洗掉、丟掉沒有成交價的
       // frame 又會讓五檔永久卡在舊值 —— 兩者都是「五檔常壞」的根因。改為累積合併，
       // 並把成交價與五檔各自的更新時間分開記錄。
-      const inc = {};
+      const incAll = {};
       Object.keys(vals).forEach(function (k) {
         const nm = MIS_QNAME[k];
-        if (nm && vals[k] != null && vals[k] !== "") inc[nm] = vals[k];
+        if (nm && vals[k] != null) incAll[nm] = vals[k];
+      });
+      // inc 只留有效值；incAll 保留空字串，用來判斷「這是不是完整快照」
+      const inc = {};
+      Object.keys(incAll).forEach(function (k) {
+        if (incAll[k] !== "") inc[k] = incAll[k];
       });
       const incKeys = Object.keys(inc);
       if (!incKeys.length) return;
@@ -1138,7 +1153,19 @@
       // 合併只限「同契約、同交易日」：跨日殘留舊書會在隔天第一筆 frame 混進來
       const sameDay = !inc.CDate || !prev || !prev.date || prev.date === inc.CDate;
       const sameSym = prev && prev.f && prev.sym === symStr && sameDay ? prev : null;
-      const f = Object.assign({}, sameSym ? sameSym.f : {}, inc);
+      // 完整快照（10 個書價鍵都在）先清空舊書再合併：增量 frame 只會補不會刪，
+      // 被撤掉的深檔掛單會永遠殘留；只有 refresh 回來的完整快照能把它們清掉。
+      const fullBook = [1, 2, 3, 4, 5].every(function (i) {
+        return ("CBidPrice" + i) in incAll && ("CAskPrice" + i) in incAll;
+      });
+      let base = sameSym ? sameSym.f : {};
+      if (fullBook) {
+        base = Object.assign({}, base);
+        for (let i = 1; i <= 5; i++) {
+          ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach(function (p) { delete base[p + i]; });
+        }
+      }
+      const f = Object.assign({}, base, inc);
       const now = Date.now();
       const bookTouched = incKeys.some(function (k) { return k.indexOf("CBid") === 0 || k.indexOf("CAsk") === 0; });
       misBook[sk] = {
@@ -1186,7 +1213,7 @@
       const f = b.f;
       // 價格是否新鮮只看「成交價自己的時間」：合併後 f 裡可能帶著很久以前的 CLastPrice，
       // 若用 frame 時間（b.ts）冒充，會把舊價回寫成主價。
-      const pxAge = Date.now() - (b.pxTs || b.ts || 0);
+      const pxAge = Date.now() - (typeof b.pxTs === "number" ? b.pxTs : 0);
       const fresh = pxAge <= MIS_FRESH_MS;
       // 價／時間：只在新鮮時覆寫。WS 斷線空窗期間絕不用舊 MIS 價蓋掉 Yahoo 的新價
       // （否則價格與書一起變舊，bookStraddles 會因同源而攔不住）。
@@ -1225,17 +1252,20 @@
           for (let i = 1; i <= 5; i++) {
             ["CBidPrice", "CBidSize", "CAskPrice", "CAskSize"].forEach(function (p) {
               const k = p + i;
-              if (f[k] != null && f[k] !== "") { cand[k] = f[k]; any = true; }
+              if (f[k] != null && f[k] !== "") {
+                // 0 代表無掛單：不能當價格用（bid=0 會顯示 0 買價，ask=0 會讓好書被判成交叉）
+                if ((p === "CBidPrice" || p === "CAskPrice") && !(Number(f[k]) > 0)) return;
+                cand[k] = f[k]; any = true;
+              }
             });
           }
           // 書的新鮮度看「五檔自己的時間」：增量 frame 會把成交價與書分開送，
           // 用成交價的時間冒充書的年紀，正是夜盤書被洗掉又判死的主因。
-          const bookAge = Date.now() - (b.bookTs || b.ts || 0);
+          const bookAge = Date.now() - (typeof b.bookTs === "number" ? b.bookTs : 0);
           const bookFresh = bookAge <= MIS_BOOK_FRESH_MS;
           // 交叉書（買一 > 賣一）無論新鮮都以壞資料處理
           const bb1 = n(cand.CBidPrice1), aa1 = n(cand.CAskPrice1);
-          const crossed = bb1 != null && aa1 != null && bb1 > aa1;
-          // 同源書不再要求「必須夾住成交價」：夜盤薄盤成交稀疏，掛單會整組偏移，
+          const crossed = bb1 != null && aa1 != null && bb1 > aa1;          // 同源書不再要求「必須夾住成交價」：夜盤薄盤成交稀疏，掛單會整組偏移，
           // last 落在書外 5~20 點是常態（2026-10-29 21:16 實例：last 46,497 / 書 46,484-46,489）。
           // 新鮮書直接採用（只擋交叉）；過期書才用寬鬆距離（>BOOK_PX_TOL）判定是否為舊書。
           if (any && !crossed && (bookFresh || !marketOpen() || bookStraddlesSoft(cand, last))) {
@@ -1467,13 +1497,10 @@
         const it = all && all[sk];
         if (!it || it.ref == null || !it.ts) return null;
         if (Date.now() - it.ts > 10 * 60 * 60 * 1000) return null; // 超過 10 小時視為過期
-        const wantDays = (function () {
-          const qq = q();
-          // 交易日必須能確認：有 snapshot 就對 CDate；沒有就對本機交易日（含跨午夜的前一日）
-          if (qq && qq.CDate) return [String(qq.CDate)];
-          return [String(tradingDayKey()).replace(/-/g, ""), ymdOf(new Date(Date.now() - 86400000))];
-        })();
-        if (!it.date || wantDays.indexOf(String(it.date)) < 0) return null;
+        // 交易日必須完全相符：只認本機交易日（夜盤 00:00-05:59 已歸前一日）。
+        // 不再接受「昨天曆日」——那會把前一交易日的 CRefPrice 當成今天的平盤。
+        const wantDay = String(tradingDayKey()).replace(/-/g, "");
+        if (!it.date || String(it.date) !== wantDay) return null;
         return Number(it.ref);
       } catch (e) { return null; }
     }
@@ -4576,7 +4603,7 @@
         const refRaw = daySpan >= 2
           ? (Number(twnRatio && twnRatio.dayClose) || Number(twnData && twnData.gas && twnData.gas.dayClose) || n(qx0 && qx0.CRefPrice))
           : n(qx0 && qx0.CRefPrice);
-        if (daySpan < 2 && refRaw != null) saveRefPx(refRaw, (qx0 && qx0.CDate) || "");
+        if (daySpan < 2 && session !== "merge" && refRaw != null) saveRefPx(refRaw, (qx0 && qx0.CDate) || "");
         // 平盤未定時絕不用開盤價充當：改用同日快取；兩者都沒有就「不上色」，等基準到齊再重繪
         // 快取只給單日圖用：多日圖的基準是富台換算 dayClose，寫進單日快取會污染下一場
         flat = refRaw != null ? refRaw : (daySpan < 2 ? cachedRefPx() : null);
@@ -6540,7 +6567,7 @@
     // 夜盤尾 Yahoo 常「成交價續動、五檔欄位停更」，舊書會離成交價上百點。
     // 這種脫節書一律視為無效——寧可留白，也絕不顯示與成交價脫鉤的錯價。
     const BOOK_PX_TOL = 40; // 點：書與成交價的「距離」上限（防舊書）
-    const BOOK_PX_TICK = 30; // 點：方向性錯位容忍（夜盤成交稀疏時，掛單會整組偏移且不成交，5 點會誤殺真書）
+    const BOOK_PX_TICK = 5; // 點：Yahoo 書的方向性容忍（MIS 同源書走 bookStraddlesSoft，不吃這個值）
     let obBookReject = null; // 官方五檔快照因與成交價脫節被剔除時的紀錄 {hhmmss,bid1,ask1}
     function pad6(t) {
       let s = String(t == null ? "" : t).replace(/\D/g, "");
@@ -6578,7 +6605,8 @@
     // 同源（MIS 的書＋MIS 的價）本來就可能因掛單整組偏移而價在書外，
     // 那是市場狀態，不是壞資料；只有離成交價超過 BOOK_PX_TOL 才算舊書。
     function bookStraddlesSoft(q, last) {
-      if (!q || last == null) return true;
+      if (!q) return true;
+      if (last == null) return false; // 盤中成交價未知時，過期書不採信（新鮮書不經此函式）
       const b = n(q.CBidPrice1);
       const a = n(q.CAskPrice1);
       if (b == null && a == null) return true;
