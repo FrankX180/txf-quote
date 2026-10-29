@@ -1,9 +1,57 @@
+// 2026-10-29 改小台：Yahoo 奇摩沒有小台（WTXM& 停更、MXF& 404），
+// 主報價一律走 MIS（CID=MXF）；Yahoo 只留相關商品（台積電期、聯電期）。
 const YAHOO =
   "https://tw.stock.yahoo.com/_td-stock/api/resource/" +
-  "StockServices.stockList;symbols=WTX%26,WCDF%26,WCCF%26";
+  "StockServices.stockList;symbols=WCDF%26,WCCF%26";
+// 1 分 K 改富邦 DJ 小台近月（FIMTXN）；回傳格式在 parseFubon1m() 轉成 Yahoo chart 形狀。
 const CHART1M =
-  "https://tw.stock.yahoo.com/_td-stock/api/resource/" +
-  "StockServices.chart;symbol=WTX%26;period=1m;range=1d";
+  "https://fubon-ebrokerdj.fbs.com.tw/Z/ZM/ZMB/CZMB.djbcd?a=FIMTXN&b=-1&c=1&D=12000";
+
+// 富邦 DJ djbcd → Yahoo chart 形狀（{timestamp, indicators.quote[0]}）。
+// 格式：MMDDHHMM opens highs lows closes vols，空格分段、逗號分項，舊→新。
+function parseFubon1m(text) {
+  const empty = { timestamp: [], indicators: { quote: [{ open: [], high: [], low: [], close: [], volume: [] }] } };
+  const ch = String(text || "").trim().split(" ");
+  if (ch.length < 5) return empty;
+  const codes = ch[0].split(",").map((x) => x.trim()).filter((x) => /^\d{6}$/.test(x));
+  const O = ch[1].split(","), H = ch[2].split(","), L = ch[3].split(","), C = ch[4].split(",");
+  const V = ch[5] ? ch[5].split(",") : [];
+  const n = Math.min(codes.length, C.length);
+  if (!n) return empty;
+  const now = new Date();
+  let y = now.getUTCFullYear(), m = now.getUTCMonth() + 1;
+  const stamps = new Array(n);
+  let prevDd = null;
+  for (let i = n - 1; i >= 0; i--) {
+    const c = codes[i];
+    const dd = +c.slice(0, 2), hh = +c.slice(2, 4), mi = +c.slice(4, 6);
+    if (prevDd != null && dd > prevDd) { m -= 1; if (m < 1) { m = 12; y -= 1; } }
+    prevDd = dd;
+    stamps[i] = Math.floor(Date.UTC(y, m - 1, dd, hh - 8, mi) / 1000);
+  }
+  const out = { timestamp: stamps, indicators: { quote: [{ open: [], high: [], low: [], close: [], volume: [] }] } };
+  const q = out.indicators.quote[0];
+  const num = (v) => {
+    const x = parseFloat(v);
+    return isFinite(x) ? x : null;
+  };
+  for (let i = 0; i < n; i++) {
+    const c = num(C[i]);
+    if (c == null) {
+      q.open.push(null); q.high.push(null); q.low.push(null); q.close.push(null); q.volume.push(null);
+      continue;
+    }
+    const o = num(O[i]);
+    const h = num(H[i]);
+    const l = num(L[i]);
+    q.open.push(o == null ? c : o);
+    q.high.push(h == null ? Math.max(o == null ? c : o, c) : h);
+    q.low.push(l == null ? Math.min(o == null ? c : o, c) : l);
+    q.close.push(c);
+    q.volume.push(V[i] != null && isFinite(parseFloat(V[i])) ? Math.round(parseFloat(V[i])) : 0);
+  }
+  return out;
+}
 
 // ── 期交所 MIS 官方即時報價（REST；盤後即時、欄位穩定）──
 // 台指期夜盤 Yahoo 常滯後或不穩（IP 選擇性 5xx）；以 MIS 即時價覆蓋，Yahoo 供五檔。
@@ -11,9 +59,10 @@ const MIS_API = "https://mis.taifex.com.tw/futures/api/getQuoteList";
 const MIS_REFERER =
   "https://mis.taifex.com.tw/futures/RegularSession/EquityIndices/FuturesDomestic/";
 const MIS_MONTHS = "ABCDEFGHIJKL";  // MIS 月份字母 A=1月..L=12月（非期貨慣用碼）
+const MIS_CID = "MXF";             // 小台（2026-10-29 從 TXF 改）
 
 function misMonthScore(s) {
-  const m = /^TXF([A-Z])(\d)-[MF]$/.exec(s || "");
+  const m = /^MXF([A-Z])(\d)-[MF]$/.exec(s || "");
   if (!m) return 9e9;
   const mi = MIS_MONTHS.indexOf(m[1]);
   return mi < 0 ? 9e9 : Number(m[2]) * 100 + mi;
@@ -42,7 +91,7 @@ async function fetchMisQuote() {
           Referer: MIS_REFERER,
         },
         body: JSON.stringify({
-          MarketType: mt, SymbolType: "F", KindID: "1", CID: "", ExpireMonth: "", PageNo: 1,
+          MarketType: mt, SymbolType: "F", KindID: "1", CID: MIS_CID, ExpireMonth: "", PageNo: 1,
         }),
       });
       if (!r.ok) { _misDebug += " MT" + mt + ":http" + r.status; continue; }
@@ -55,7 +104,7 @@ async function fetchMisQuote() {
       // 日盤契約 -F、夜盤 -M（2026-10-13 實測）；兩種後綴都接受，再依 MT 順序與月份排序取近月
       const todayKey = twDateStr(Date.now());
       const cand = ql
-        .filter((x) => /^TXF[A-Z]\d-[MF]$/.test(x.SymbolID || ""))
+        .filter((x) => /^MXF[A-Z]\d-[MF]$/.test(x.SymbolID || ""))
         .sort((a, b) => misMonthScore(a.SymbolID) - misMonthScore(b.SymbolID));
       // 優先取「今日交易日」且有成交價者，避免另一盤殘值；再退而求其次
       const pick =
@@ -274,7 +323,7 @@ function minuteSlot(ms) {
 
 function extractWtx(rows) {
   if (!Array.isArray(rows) || !rows.length) return null;
-  const w = rows.find((x) => x && x.symbol === "WTX&") || rows[0];
+  const w = rows.find((x) => x && x.symbol === "MXF&") || rows[0];
   if (!w) return null;
   let inn = rawNum(w.inMarket);
   let outv = rawNum(w.outMarket);
@@ -973,7 +1022,7 @@ async function backfillChart1m(env, full = false) {
         lastErr = "yahoo-chart-fail:" + r.status;
         continue;
       }
-      const chart = await r.json();
+      const chart = parseFubon1m(await r.text());
       // 非 full 模式只解析尾端 12 根 K 棒，省去 500 根的時區迴圈運算 (CPU 從 6ms 降至 0.1ms)
       const all = barsFromChartJson(chart, full ? 0 : 12);
       const dayKey = tradingDayKey(Date.now());
@@ -1060,7 +1109,7 @@ async function appendImb(env, rows, nowMs) {
   const sess = sessionOf(nowMs);
   if (!sess) return { ok: false, reason: "closed" };
   const rawW = Array.isArray(rows) && rows.length
-    ? (rows.find((x) => x && x.symbol === "WTX&") || rows[0])
+    ? (rows.find((x) => x && x.symbol === "MXF&") || rows[0])
     : null;
   if (!yahooBookFresh(rawW, nowMs)) return { ok: false, reason: "stale-source-day" };
   const w = extractWtx(rows);
@@ -1187,7 +1236,7 @@ async function pollAndStore(env, opts) {
       const hm = p.hm;
       const isPast15m = (hm >= 900 && hm <= 1345) || (hm >= 1515 || hm < 500);
       const rawW = Array.isArray(rows) && rows.length
-        ? (rows.find((x) => x && x.symbol === "WTX&") || rows[0])
+        ? (rows.find((x) => x && x.symbol === "MXF&") || rows[0])
         : null;
       if (looksLikeLiveQuote(rawW, nowMs)) {
         _dormantUntil = 0;
@@ -1992,10 +2041,10 @@ export default {
     };
 
     if (kind === "1m") {
-      const r = await fetch(CHART1M, { headers: YH_HDR });
-      const body = await r.text();
+      const r = await fetch(CHART1M, { headers: { "User-Agent": "Mozilla/5.0", Referer: "https://fubon-ebrokerdj.fbs.com.tw/" } });
+      const body = JSON.stringify(parseFubon1m(await r.text()));
       return new Response(body, {
-        status: r.status,
+        status: r.ok ? 200 : r.status,
         headers: {
           "content-type": "application/json; charset=utf-8",
           "Cache-Control": "public, max-age=0",
@@ -2018,8 +2067,8 @@ export default {
     }
     if (mis && mis.px != null) {
       if (!Array.isArray(rows)) rows = [];
-      let w = rows.find((x) => x && x.symbol === "WTX&");
-      if (!w) { w = { symbol: "WTX&", symbolName: "台指期近一" }; rows.unshift(w); }
+      let w = rows.find((x) => x && x.symbol === "MXF&");
+      if (!w) { w = { symbol: "MXF&", symbolName: "小台期近一" }; rows.unshift(w); }
       const num = (v) => (v == null ? undefined : { raw: String(v) });
       w.price = num(mis.px);
       if (mis.bid != null) w.bid = num(mis.bid);
@@ -2036,7 +2085,7 @@ export default {
     const nowMs = Date.now();
     await ensureHolidays();
     if (Array.isArray(rows)) {
-      const wtx = rows.find((x) => x && x.symbol === "WTX&") || rows[0];
+      const wtx = rows.find((x) => x && x.symbol === "MXF&") || rows[0];
       if (wtx) {
         if (!yahooBookFresh(wtx, nowMs)) {
           // 假日／來源日≠交易鍵：不把殘值五檔與內外盤送給前端 applyLive。

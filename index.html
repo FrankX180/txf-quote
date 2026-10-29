@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>台指期 TXF — 即時看盤</title>
+  <title>台指期 小台 MXF — 即時看盤</title>
   <style>
     :root {
       --up: #d32f2f;
@@ -522,7 +522,7 @@
       <div class="hero" id="hero">
         <div class="hero-head">
           <div class="title-row">
-            <div class="title" id="name">台指期</div>
+            <div class="title" id="name">小台期</div>
             <span class="live" id="live">未連線</span>
           </div>
           <div class="pxrow">
@@ -947,7 +947,7 @@
         m += 1;
         if (m > 12) { m = 1; y += 1; }
       }
-      return "TXF" + String.fromCharCode(64 + m) + (y % 10);
+      return "MXF" + String.fromCharCode(64 + m) + (y % 10);
     }
     function misSymFor(sk) {
       return misSymBase() + (sk === "day" ? "-F" : "-M");
@@ -1500,7 +1500,7 @@
         if ($("sumline")) $("sumline").style.display = "";
         if ($("live")) $("live").style.display = "";
         $("name").textContent = String(x.DispCName || "台指期")
-          .replace(/\s*WTX&\s*/g, "")
+          .replace(/\s*(WTX&MX|MXF&|WTX&)\s*/g, "")
           .replace(/近一/g, "")
           .trim();
         $("last").className = "px " + cls(diff);
@@ -6319,9 +6319,9 @@
         now = new Date(rmt < 1e12 ? rmt * 1000 : rmt);
       }
       const q = {
-        SymbolID: d.symbol || "WTX&",
-        DispCName: d.symbolName || "台指期近一",
-        DispEName: d.symbol || "WTX&",
+        SymbolID: d.symbol || "MXF&",
+        DispCName: d.symbolName || "小台期近一",
+        DispEName: d.symbol || "MXF&",
         CLastPrice: last,
         // 奇摩 stockList 開高低是混盤，先留空，由 patchQuoteOHLC 寫入當盤真值
         COpenPrice: "",
@@ -6422,7 +6422,7 @@
       return hm > 1345 && hm < 1458;
     }
     function applyLive(rows) {
-      const wtx = rows.find((x) => x.symbol === "WTX&") || rows[0];
+      const wtx = rows.find((x) => x.symbol === "MXF&") || rows.find((x) => x.symbol === "WTX&") || rows[0];
       if (!wtx) return;
       const q0 = slimYahoo(wtx);
       const nowTs = Date.now();
@@ -7312,7 +7312,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.23";
+        const VER = "3.24";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {

@@ -1,4 +1,7 @@
-# 奇摩 stockList WTX&：報價 + 五檔 → data/snapshot.json
+# 小台（MXF）報價 + 五檔 → data/snapshot.json
+# 2026-10-29 改小台：Yahoo 奇摩沒有小台報價（WTXM& 為停更舊商品、MXF& 404），
+# 主報價改用期交所 MIS 官方（CID=MXF，日盤 MXF**-F／夜盤 MXF**-M），
+# Yahoo 僅保留給相關商品（台積電期 WCDF&、聯電期 WCCF&）。
 # 勿打 query1.finance.yahoo.com。
 import json
 import re
@@ -15,8 +18,12 @@ DATA = ROOT / "data"
 TZ = timezone(timedelta(hours=8))
 URL = (
     "https://tw.stock.yahoo.com/_td-stock/api/resource/"
-    "StockServices.stockList;symbols=WTX%26,WCDF%26,WCCF%26"
+    "StockServices.stockList;symbols=WCDF%26,WCCF%26"
 )
+# 主檔（小台）代碼：前端／快照統一用 MXF& 當 SymbolID
+SYM = "MXF&"
+SYM_NAME = "小台期近一"
+MIS_CID = "MXF"   # MIS 商品代碼（不帶月份）
 # 備源：自家 Cloudflare Worker 直接 proxy 同一支 Yahoo stockList（同格式）。
 # Yahoo 對此端點會按來源 IP 選擇性回 500（本機／GitHub Runner 中、CF 邊緣不中），
 # 直連失敗時改走 Worker，等於借道 Cloudflare IP 繞過。
@@ -77,7 +84,7 @@ def _mis_quote(sess):
     want = "0" if sess == "day" else "1"
     for m in (want, "0" if want == "1" else "1"):
         try:
-            body = {"MarketType": m, "SymbolType": "F", "KindID": "1", "CID": "", "ExpireMonth": "", "PageNo": 1}
+            body = {"MarketType": m, "SymbolType": "F", "KindID": "1", "CID": MIS_CID, "ExpireMonth": "", "PageNo": 1}
             req = urllib.request.Request(
                 MIS,
                 data=json.dumps(body).encode("utf-8"),
@@ -98,14 +105,15 @@ def _mis_quote(sess):
             want_suffix = "-F" if want == "0" else "-M"
 
             def score(sid):
-                mm = re.match(r"^TXF([A-Z])(\d)-[MF]$", sid or "")
+                # 只認月契約 MXF{月}{年}-F/-M；排除 MXF-S（現貨）、MX1/MX2（週契約）
+                mm = re.match(r"^" + MIS_CID + r"([A-Z])(\d)-[MF]$", sid or "")
                 if not mm:
                     return 10 ** 9
                 mi = MIS_MONTHS.find(mm.group(1))
                 return 10 ** 9 if mi < 0 else int(mm.group(2)) * 100 + mi
 
             cand = sorted(
-                [x for x in ql if re.match(r"^TXF[A-Z]\d-[MF]$", x.get("SymbolID") or "")],
+                [x for x in ql if re.match(r"^" + MIS_CID + r"[A-Z]\d-[MF]$", x.get("SymbolID") or "")],
                 key=lambda x: score(x.get("SymbolID")),
             )
             live = [x for x in cand if x.get("CLastPrice")]
@@ -123,13 +131,17 @@ def _mis_quote(sess):
 
 
 def apply_mis(rows, sess):
-    """用 MIS 官方價覆盖 WTX& 列的報價欄位（五檔 orderbook 仍留 Yahoo）。"""
+    """用 MIS 官方價覆蓋小台列的報價欄位（五檔 orderbook 仍留 Yahoo；小台 Yahoo 無書 → 靠前端 MIS 推流補滿）。"""
     mis = _mis_quote(sess)
     if not mis:
         return rows
     if not rows:
-        rows = [{"symbol": "WTX&", "symbolName": "台指期近一"}]
-    w = pick(rows, "WTX&") or rows[0]
+        rows = []
+    w = pick(rows, SYM)
+    if w is None:
+        # 小台列不存在（Yahoo 只回相關商品）→ 自己建一列，絕不落到 rows[0]（那是台積電期）
+        w = {"symbol": SYM, "symbolName": SYM_NAME}
+        rows.insert(0, w)
 
     def val(k):
         v = mis.get(k)
@@ -165,7 +177,7 @@ def apply_mis(rows, sess):
         w["regularMarketTime"] = "%s-%s-%sT%s:%s:%s+08:00" % (
             dt[0:4], dt[4:6], dt[6:8], tt[0:2], tt[2:4], tt[4:6])
     if not w.get("symbolName"):
-        w["symbolName"] = "台指期近一"
+        w["symbolName"] = SYM_NAME
     print("MIS applied px=%s t=%s" % (val("CLastPrice"), w.get("regularMarketTime")), flush=True)
     return rows
 
@@ -331,9 +343,9 @@ def slim(d):
         rate = (diff / ref) * 100
     dt = parse_mkt_time(d)
     q = {
-        "SymbolID": d.get("symbol") or "WTX&",
-        "DispCName": d.get("symbolName") or "台指期近一",
-        "DispEName": "WTX&",
+        "SymbolID": d.get("symbol") or SYM,
+        "DispCName": d.get("symbolName") or SYM_NAME,
+        "DispEName": d.get("symbol") or SYM,
         "CLastPrice": fmt_num(last),
         # 奇摩 regularMarketOpen/High/Low 是混盤，勿寫入；由 apply_mis 蓋入官方當盤值，
         # 或（MIS 無值時）由 ohlc_from_kline 以 1 分 K 回填。
@@ -553,7 +565,7 @@ def main():
             print("WARN no quote source (yahoo+mis); keep previous snapshot", flush=True)
             return
         raise SystemExit("no quote source")
-    d = pick(rows, "WTX&") or (rows[0] if rows else {})
+    d = pick(rows, SYM) or {}
     q = slim(d)
     fresh = book_fresh(d, now)
     # 夜盤尾 Yahoo 常「成交價續動、五檔欄位停更」：來源日仍是今日（fresh=True），
@@ -646,7 +658,7 @@ def main():
                 night_q = strip_book(dict(q))
     snap = {
         "fetchedAt": now_iso,
-        "source": "yahoo tw.stock StockServices.stockList WTX& WCDF& WCCF&",
+        "source": "mis taifex CID=MXF (小台近月) / yahoo WCDF& WCCF& (相關商品)",
         "session": cur or "",
         "night": night_q,
         "day": day_q,

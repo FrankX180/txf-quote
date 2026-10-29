@@ -1,0 +1,29 @@
+feat(mxf): 全站報價改小台 MXF（大台 TXF → 小台 MXF）
+
+主因：奇摩 Yahoo 沒有小台報價（WTXM& 停更於 2026-06-23、MXF&/MTX& 皆 404），
+小台只能走期交所 MIS + 富邦 DJ，資料源整組換掉。
+
+資料源對照（皆本機實測）
+- 報價／五檔：期交所 MIS getQuoteList CID=MXF（MXFK6-F/M）+ SockJS 完整五檔
+- 1 分 K 日盤：富邦 DJ CZMB.djbcd?a=FIMTXN（真小台，收到 13:44）
+- 1 分 K 夜盤：Yahoo WTX&（小台無夜盤分時源；同一標的，實測 MIS 夜盤 46235 vs
+  Yahoo 46234，差 1 點）
+- 5/15 分：由 1 分自行聚合
+- 日/週/月 K：MoneyDJ FITX（FIMTX 實測為 FITX 別名，非真小台，價差 <5 點，payload 已標 proxyNote）
+
+改動
+- scripts/fetch_quote.py：MIS CID=MXF、契約 regex TXF→MXF、小台列自建不落 rows[0]
+- scripts/fetch_minute.py：改富邦 FIMTXN + Yahoo 夜盤，5/15 分自聚合
+- scripts/fetch_kline.py：contract 改 MXF& 並加 proxyNote
+- scripts/fetch_mis_book.py、fubon_imb_fill.py：契約代號 TXF→MXF
+- worker/yahoo-quote.js：Yahoo symbols 移除 WTX&、新增 parseFubon1m()、MIS CID=MXF、
+  px1m/1m 改富邦源
+- index.html：WS 契約 MXF、標題與頁面名改小台、快照解析吃 MXF&、VER 3.23→3.24
+- .github/workflows/update-quote.yml：step 名稱更新
+
+驗證
+- fetch_quote.py：snapshot.json SymbolID=MXF&、小台期近一、夜盤 46283
+- fetch_minute.py：day 2993 根 / night 7662 根，收盤 46579 與 MIS 一致
+- fetch_mis_book.py：syms=['MXFK6-F','MXFK6-M']，day/night 各 24 欄完整五檔
+- worker node --check 通過；index.html inline JS node --check 通過
+- 備份：Backup/20261029-before-mxf（108 檔 10.2MB）

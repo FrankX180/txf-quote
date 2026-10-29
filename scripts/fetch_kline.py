@@ -1,4 +1,6 @@
 # MoneyDJ 期貨 FITX 日／週 K + 結算日月 K → data/kline-daily.json
+# 2026-10-29 改小台：MoneyDJ 的 FIMTX 實測與 FITX 回傳完全相同數字（大台別名，非真小台），
+# 且無其他長歷史日 K 源，故日 K 沿用 FITX，payload 標明 proxy；日 K 與小台價差 <5 點，不影響均線判斷。
 # 月 K：依 TAIFEX 結算日切段（上期結算翌日～本期結算日），雲端預算；前端只併當日 H/L/C。
 # MoneyDJ per=D：曆日 OHLC（是否含夜盤尚未對拍 TAIFEX；量 V6 幾乎全空，月 K volume 不可靠）。
 import json
@@ -200,8 +202,9 @@ def main():
 
     payload = {
         "fetchedAt": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
-        "source": "moneydj daily/week + TAIFEX settlement month",
-        "contract": "FITX",
+        "source": "moneydj daily/week FITX (proxy for MXF) + TAIFEX settlement month",
+        "contract": "MXF&",
+        "proxyNote": "日/週/月 K 取自 MoneyDJ FITX（大台）。小台無長歷史日 K 源（FIMTX 為 FITX 別名），價差 <5 點。",
         "monthRule": "prev_settle+1d .. settle (inclusive); from 2013-01",
         "dailySessionNote": "MoneyDJ calendar daily OHLC; night-session inclusion not verified vs TAIFEX pure day",
         "volumeNote": vol_note,

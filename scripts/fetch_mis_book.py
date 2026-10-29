@@ -1,6 +1,7 @@
 """抓 TAIFEX MIS 官方最佳五檔 -> data/mis-book.json（休市時前端只讀此檔，不連 MIS）。
 
 來源：wss://mis.taifex.com.tw/futures/rt/（SockJS，訂閱後推完整五檔 QID 101-122）。
+2026-10-29 改小台：契約代號 TXF→MXF（近月 MXF{月}{年}-F/-M）。
 規則：日(-F)／夜(-M)各存一份；新資料必須「有買一且成交時間不早於舊檔」才覆蓋，否則保留舊檔。
 失敗不擲例外（exit 0），讓 workflow 其他步驟照跑。
 """
@@ -39,7 +40,7 @@ def sym_base(now):
         m += 1
         if m > 12:
             m, y = 1, y + 1
-    return "TXF" + chr(64 + m) + str(y % 10)
+    return "MXF" + chr(64 + m) + str(y % 10)
 
 
 def collect(syms, seconds=10):
