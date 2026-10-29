@@ -133,12 +133,15 @@
       color: #6b7280; text-decoration: none;
       text-align: right !important;
     }
-    /* 日盤／夜盤拆分兩列與下方逐日歷史列的粗分隔線（2026-10-29） */
+    /* 日盤／夜盤拆分兩列：兩列第一格都加粗，夜盤列底下 3px 粗分隔線（2026-10-29） */
     .oi tr.oi-split-end td {
       border-bottom: 3px solid #9ca3af !important;
     }
-    .oi tr.oi-split-end td:first-child {
+    .oi tr.oi-split-row td:first-child {
       font-weight: 800;
+    }
+    .oi tr.oi-split-row td {
+      font-weight: 700;
     }
     .oi-cbar-wrap {
       display: flex; flex-direction: column; align-items: stretch; gap: 1px;
@@ -2023,7 +2026,8 @@
         // 用完整 rows 算前日（收合只顯示 10 天時，最底列仍要有漲跌幅）
         const prevClose = (r._prevClose != null) ? r._prevClose
           : ((i + 1 < rows.length && rows[i + 1]) ? rows[i + 1].close : null);
-        html += `<tr${r._splitEnd ? ' class="oi-split-end"' : ''}><td>${oiShortDate(r.date, r.session)}</td>${oiCloseCells(r.close, prevClose)}`;
+        const trCls = (r._splitRow ? "oi-split-row" : "") + (r._splitEnd ? " oi-split-end" : "");
+        html += `<tr${trCls.trim() ? ` class="${trCls.trim()}"` : ''}><td>${oiShortDate(r.date, r.session)}</td>${oiCloseCells(r.close, prevClose)}`;
         keys.forEach((k) => {
           if (k === "pc" || k === "vix") {
             const nv = r[k] == null ? null : Number(r[k]);
@@ -2142,6 +2146,7 @@
           date: day0,
           session: "daypart",
           close: baseDay.close,
+          _splitRow: true,
           _prevClose: hist[1] ? hist[1].close : null,
           foreign: oiNetFlow ? (Number(cF || 0) - bF) : cF,
           trust: oiNetFlow ? (Number(cT || 0) - bT) : cT,
@@ -2154,11 +2159,14 @@
           date: day0 || nightDate,
           session: "nightpart",
           close: night.close,
-          _prevClose: baseDay.close != null ? baseDay.close : null,
+          // 夜盤段在時間上先於當日日盤（10/28 15:00→10/29 05:00），漲跌基準要用
+          // 前一交易日日盤收盤，不能拿隔天日盤收盤（那會讓時間倒錯、漲跌反向）。
+          _prevClose: hist[1] ? hist[1].close : (baseDay.close != null ? baseDay.close : null),
           foreign: oiNetFlow ? bF : night.foreign,
           trust: oiNetFlow ? bT : night.trust,
           dealer: oiNetFlow ? bD : night.dealer,
           retail: oiNetFlow ? bR : night.retail,
+          _splitRow: true,
           _splitEnd: true,
         });
       }
@@ -7325,7 +7333,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.30";
+        const VER = "3.31";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
