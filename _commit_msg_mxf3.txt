@@ -1,0 +1,12 @@
+fix(mxf): 夜盤時 day 欄位不再殘留大台，改用 MIS 小台日盤重建
+
+現象：snapshot.json 夜盤時 day 仍是 SymbolID=WTX& 台指期近一 46577（改小台前殘值），
+前端切到日盤會顯示大台。
+
+修正：fetch_quote.py 夜盤分支判斷 prev["day"].SymbolID 是否為 MXF&，
+不是就查 MIS MT0（CID=MXF）重建 day 列，payload 印 DAY-REBUILD 供追蹤。
+
+驗證（本機 TXF_FORCE=1）
+- DAY-REBUILD from MIS MXF day=46579.00
+- day: MXF& 小台期近一 46579.00 13:44:59
+- night: MXF& 小台期近一 46236 16:55:43

@@ -616,11 +616,35 @@ def main():
             copy_book(night_q, q)
         elif prev.get("night"):
             copy_book(night_q, prev["night"])
-        if prev.get("day"):
+        if prev.get("day") and prev["day"].get("SymbolID") == SYM:
             day_q = day_ohlc_from_kline(dict(prev["day"]))
             copy_book(day_q, prev["day"])
         else:
-            day_q = strip_book(day_ohlc_from_kline(dict(q)))
+            # prev day 可能是改小台前的大台殘值（SymbolID=WTX&）→ 改用 MIS 日盤小台重建
+            m0 = _mis_quote("day")
+            if m0 and m0.get("CLastPrice"):
+                day_q = day_ohlc_from_kline({
+                    "SymbolID": SYM,
+                    "DispCName": SYM_NAME,
+                    "DispEName": SYM,
+                    "CLastPrice": m0.get("CLastPrice"),
+                    "CRefPrice": m0.get("CRefPrice"),
+                    "CDiff": m0.get("CDiff"),
+                    "CDiffRate": m0.get("CDiffRate"),
+                    "CTotalVolume": m0.get("CTotalVolume"),
+                    "CDate": m0.get("CDate"),
+                    "CTime": m0.get("CTime"),
+                    "CBidPrice1": m0.get("CBestBidPrice") or m0.get("CBidPrice1") or "",
+                    "CAskPrice1": m0.get("CBestAskPrice") or m0.get("CAskPrice1") or "",
+                    "inMarket": "",
+                    "outMarket": "",
+                })
+                print("DAY-REBUILD from MIS MXF day=%s" % m0.get("CLastPrice"), flush=True)
+            elif prev.get("day"):
+                day_q = day_ohlc_from_kline(dict(prev["day"]))
+                copy_book(day_q, prev["day"])
+            else:
+                day_q = strip_book(day_ohlc_from_kline(dict(q)))
     else:
         # 休市（日收後～夜開前等）：仍用最新一口更新「應顯示盤」收／量／五檔
         # 舊邏輯只抄 prev，會卡在中午舊價（例 12:24=45937）
