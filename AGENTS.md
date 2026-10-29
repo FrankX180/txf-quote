@@ -51,7 +51,7 @@
 ### Working In This Directory
 
 1. **發佈鐵律（硬）**：改 `index.html`／`worker/yahoo-quote.js` 同一輪必須  
-   - 升頁腳 VER **與** `txfMinVer`（同號，例如 2.13）  
+   - 升頁腳 VER **與** `txfMinVer`（同號，例如 2.13），**且與程式改動放在同一個 commit**（2026-10-29 曾先推未升號版本、再另起 chore 升版，origin/master 短暫存在版號與內容不符的中間版本）  
    - `git commit` + **push `origin/master`**  
    - 改 Worker：push 後由 `.github/workflows/deploy-worker.yml` **雲端自動部署**（repo secret `CLOUDFLARE_API_KEY`）；本機可選跑 `scripts/deploy_worker.py`  
    - 遠端常有行情快照：用 cherry-pick 接到最新 `origin/master` 再推，不要跟 `data/*.json` rebase 打架  
