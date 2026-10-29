@@ -29,6 +29,7 @@ AH_URL = "https://www.taifex.com.tw/cht/3/futContractsDateAh?queryDate={}"
 AH_PRODUCT = {"臺股期貨": "TX", "小型臺指期貨": "MTX", "微型臺指期貨": "TMF"}
 AH_INST = {"自營商": "dealer", "投信": "trust", "外資及陸資": "foreign", "外資": "foreign"}
 SNAP = ROOT / "data" / "snapshot.json"
+KLINE = ROOT / "data" / "kline-minute.json"
 HDR = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
     "Accept": "text/html,application/json,*/*",
@@ -1278,6 +1279,30 @@ def scrape_night_ah(date_slash: str):
     }
 
 
+def night_close_from_kline(night_date8):
+    """該夜盤段（date=night_date8）1 分 K 的最後一根收盤＝真夜盤收盤價。
+
+    快照即時價 night_close_from_snap() 只在「現在還在這場夜盤」時才是收盤價；
+    跨到隔天日盤後會變成錯值（2026-10-29 加入）。
+    """
+    try:
+        j = json.loads(KLINE.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    best = None
+    for b in j.get("night_1m") or []:
+        if str(b.get("date")) != str(night_date8):
+            continue
+        if best is None or int(b.get("timestamp") or 0) > int(best.get("timestamp") or 0):
+            best = b
+    if not best:
+        return None
+    try:
+        return float(best.get("close"))
+    except (TypeError, ValueError):
+        return None
+
+
 def night_close_from_snap():
     if not SNAP.exists():
         return None
@@ -1305,14 +1330,19 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
         except Exception:
             old = {}
     close = night_close_from_snap()
+    day_dt = None
+    if day8:
+        try:
+            day_dt = datetime.strptime(day8, "%Y%m%d").date()
+        except ValueError:
+            day_dt = None
     for delta in range(0, 4):
-        d = now - timedelta(days=delta)
+        # 屬於 day8 交易日的夜盤＝前一曆日 15:00 開的那場（10/28 15:00~10/29 05:00）。
+        # 從 day8-1 往回找：當日夜盤還在進行中，抓當日只會拿到未完成的值。
+        d = (day_dt - timedelta(days=1 + delta)) if day_dt else (now - timedelta(days=delta))
         if d.weekday() == 6:
             continue
         d8 = d.strftime("%Y%m%d")
-        # 只跳過「早於」日盤日的夜盤；同日夜盤（日盤收後）要抓
-        if day8 and d8 < day8:
-            continue
         slash = d.strftime("%Y/%m/%d")
         try:
             nets = scrape_night_ah(slash)
@@ -1324,6 +1354,10 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
         if abs(nets["foreign"]) + abs(nets["trust"]) + abs(nets["dealer"]) < 1e-9:
             continue
         trade = dict(nets)
+        # 夜盤收盤價：優先用 1 分 K 該夜盤段最後一根（真收盤價），退而用快照即時價
+        nclose = night_close_from_kline(d8)
+        if nclose is None:
+            nclose = close
         row = {
             "date": d8,
             "session": "night",
@@ -1331,7 +1365,7 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
             "trustDelta": trade["trust"],
             "dealerDelta": trade["dealer"],
             "retailDelta": trade["retail"],
-            "close": close,
+            "close": nclose,
             "unitNote": "夜盤列＝日盤淨未平倉＋當夜三大法人成交淨口（大台等值估水位）",
         }
         if base_row:
@@ -1347,7 +1381,15 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
             row["retail"] = trade["retail"]
         return row
     od = ymd8(old.get("date"))
-    if od and (not day8 or od >= day8) and old.get("foreign") is not None:
+    keep_old = bool(od) and old.get("foreign") is not None
+    if keep_old and day_dt:
+        try:
+            gap = (day_dt - datetime.strptime(od, "%Y%m%d").date()).days
+            # 保留「昨日夜盤」（跨日差 ≤1）；最多容許 4 天（連假）
+            keep_old = 0 <= gap <= 4
+        except ValueError:
+            keep_old = False
+    if keep_old:
         row = dict(old)
         if close is not None:
             row["close"] = close

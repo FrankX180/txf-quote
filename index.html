@@ -133,6 +133,13 @@
       color: #6b7280; text-decoration: none;
       text-align: right !important;
     }
+    /* 日盤／夜盤拆分兩列與下方逐日歷史列的粗分隔線（2026-10-29） */
+    .oi tr.oi-split-end td {
+      border-bottom: 3px solid #9ca3af !important;
+    }
+    .oi tr.oi-split-end td:first-child {
+      font-weight: 800;
+    }
     .oi-cbar-wrap {
       display: flex; flex-direction: column; align-items: stretch; gap: 1px;
       min-width: 36px;
@@ -1677,7 +1684,10 @@
       const s = String(ymd || "").replace(/-/g, "");
       if (s.length < 8) return s || "—";
       const base = s.slice(4, 6) + "/" + s.slice(6, 8);
-      return session === "night" ? base + "(夜)" : base;
+      if (session === "night") return base + "(夜)";
+      if (session === "daypart") return base + "日";
+      if (session === "nightpart") return base + "夜";
+      return base;
     }
     function oiName(name) {
       return String(name || "")
@@ -2011,8 +2021,9 @@
       html += `</tr>`;
       list.forEach((r, i) => {
         // 用完整 rows 算前日（收合只顯示 10 天時，最底列仍要有漲跌幅）
-        const prevClose = (i + 1 < rows.length && rows[i + 1]) ? rows[i + 1].close : null;
-        html += `<tr><td>${oiShortDate(r.date, r.session)}</td>${oiCloseCells(r.close, prevClose)}`;
+        const prevClose = (r._prevClose != null) ? r._prevClose
+          : ((i + 1 < rows.length && rows[i + 1]) ? rows[i + 1].close : null);
+        html += `<tr${r._splitEnd ? ' class="oi-split-end"' : ''}><td>${oiShortDate(r.date, r.session)}</td>${oiCloseCells(r.close, prevClose)}`;
         keys.forEach((k) => {
           if (k === "pc" || k === "vix") {
             const nv = r[k] == null ? null : Number(r[k]);
@@ -2112,48 +2123,47 @@
       const night = uncover.night;
       const day0 = String((hist[0] && hist[0].date) || uncover.date || "").replace(/\D/g, "");
       const nightDate = night && night.date ? String(night.date).replace(/\D/g, "") : "";
-      // 日盤籌碼已是完整交易日（含昨夜）後，不再疊同日(夜)暫行列
-      const showNight = !!(night && nightDate && (!day0 || nightDate !== day0));
-      if (showNight) {
-        const base = hist[0] || {};
+      // ── 日盤／夜盤拆分兩列（2026-10-29 指定）──
+      // 完整日K＝前一曆日夜盤＋當日日盤；日盤在上（時間較晚）、夜盤在下，
+      // 中間 3px 粗線分隔，下方接原本的逐日歷史列。
+      const splitRows = [];
+      const baseDay = hist[0] || {};
+      if (day0 && baseDay.close != null) {
+        splitRows.push({
+          date: day0,
+          session: "daypart",
+          close: baseDay.close,
+          _prevClose: hist[1] ? hist[1].close : null,
+          foreign: oiNetFlow ? (baseDay.foreignDelta != null ? baseDay.foreignDelta : oiDayDiff(hist, 0, "foreign")) : baseDay.foreign,
+          trust: oiNetFlow ? oiDayDiff(hist, 0, "trust") : baseDay.trust,
+          dealer: oiNetFlow ? oiDayDiff(hist, 0, "dealer") : baseDay.dealer,
+          retail: oiNetFlow ? (baseDay.retailDelta != null ? baseDay.retailDelta : oiDayDiff(hist, 0, "retail")) : baseDay.retail,
+        });
+      }
+      const nightOk = !!(night && nightDate && nightDate !== day0 && night.close != null);
+      if (nightOk) {
         const hasDelta = night.foreignDelta != null;
-        const dF = hasDelta ? Number(night.foreignDelta) : Number(night.foreign || 0);
-        const dT = hasDelta ? Number(night.trustDelta || 0) : Number(night.trust || 0);
-        const dD = hasDelta ? Number(night.dealerDelta || 0) : Number(night.dealer || 0);
-        const dR = hasDelta ? Number(night.retailDelta || 0) : Number(night.retail || 0);
-        let nForeign;
-        let nTrust;
-        let nDealer;
-        let nRetail;
-        if (oiNetFlow) {
-          nForeign = dF;
-          nTrust = dT;
-          nDealer = dD;
-          nRetail = dR;
-        } else if (hasDelta) {
-          nForeign = night.foreign;
-          nTrust = night.trust;
-          nDealer = night.dealer;
-          nRetail = night.retail;
-        } else {
-          // 舊 JSON：night.* 曾是成交淨口 → 加回日盤水位
-          nForeign = Number(base.foreign || 0) + dF;
-          nTrust = Number(base.trust || 0) + dT;
-          nDealer = Number(base.dealer || 0) + dD;
-          nRetail = Number(base.retail || 0) + dR;
-        }
-        oiRows = [{
-          date: night.date,
-          session: "night",
+        const nF = hasDelta ? Number(night.foreignDelta) : null;
+        const nT = hasDelta ? Number(night.trustDelta || 0) : null;
+        const nD = hasDelta ? Number(night.dealerDelta || 0) : null;
+        const nR = hasDelta ? Number(night.retailDelta || 0) : null;
+        splitRows.push({
+          date: day0 || nightDate,
+          session: "nightpart",
           close: night.close,
-          foreign: nForeign,
-          trust: nTrust,
-          dealer: nDealer,
-          retail: nRetail,
-        }].concat(oiRows);
+          _prevClose: baseDay.close != null ? baseDay.close : null,
+          foreign: oiNetFlow ? nF : (hasDelta ? night.foreign : Number(baseDay.foreign || 0) + (nF || 0)),
+          trust: oiNetFlow ? nT : (hasDelta ? night.trust : Number(baseDay.trust || 0) + (nT || 0)),
+          dealer: oiNetFlow ? nD : (hasDelta ? night.dealer : Number(baseDay.dealer || 0) + (nD || 0)),
+          retail: oiNetFlow ? nR : (hasDelta ? night.retail : Number(baseDay.retail || 0) + (nR || 0)),
+          _splitEnd: true,
+        });
+      }
+      if (splitRows.length) {
+        oiRows = splitRows.concat(oiRows);
         oiNote += oiNetFlow
-          ? "；最上列日期帶(夜)＝當夜三大法人成交淨口"
-          : "；最上列日期帶(夜)＝日盤淨未平倉＋當夜成交淨口（估水位）";
+          ? "；上方兩列＝當日日盤／前一日夜盤拆分（夜盤三大法人成交淨口，T+1 早上定案）"
+          : "；上方兩列＝當日日盤／前一日夜盤拆分（夜盤列為日盤水位＋當夜成交淨口）";
       }
       oiEl.innerHTML = oiBuildHistTable("oi", oiRows, oiKeys, oiLabs, oiNote);
 
@@ -7314,7 +7324,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.26";
+        const VER = "3.27";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
