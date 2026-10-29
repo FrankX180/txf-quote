@@ -74,6 +74,17 @@ def fetch_fubon_1m():
     vols = chunks[5].split(",") if len(chunks) > 5 else []
     now = datetime.now(TZ)
     y, m = now.year, now.month
+    # 富邦 code 無年份：最新一根通常是今天。但月初開盤前或連假後，最新一根仍是上月底
+    # （例：11/1 早上最新是 10/30）⇒ dd 比今天大 1 天以上就退回上個月，否則整段被標成本月。
+    if codes:
+        try:
+            last_dd = int(codes[-1][:2])
+            if last_dd > now.day + 1:
+                m -= 1
+                if m < 1:
+                    m, y = 12, y - 1
+        except ValueError:
+            pass
     prev_dd = None
     stamps = []
     for code in reversed(codes):
@@ -319,6 +330,7 @@ def main():
         "source": " / ".join(src),
         "contract": CONTRACT,
         "note": "日盤=FIMTXN 真小台；夜盤=WTX& 大台（小台無夜盤分時源，價差 1~3 點）",
+        "nightStale": not bool(yn),
         "night_1m": n1,
         "day_1m": d1,
         "night_5m": n5,

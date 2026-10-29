@@ -135,6 +135,17 @@ MIS_META = {}
 
 def apply_mis(rows, sess):
     """用 MIS 官方價覆蓋小台列的報價欄位（五檔 orderbook 仍留 Yahoo；小台 Yahoo 無書 → 靠前端 MIS 推流補滿）。"""
+    # 日盤收盤過渡期（13:46–14:59，sess_now 回 None 但夜盤尚未開）：
+    # 此時若拿 MIS 夜盤合約回的前一夜盤殘值寫快照，當盤價就會倒退。保留舊快照。
+    if sess not in ("day", "night"):
+        try:
+            from when import hm as _hm
+            _h = _hm()
+            if 1346 <= _h < 1500:
+                print("SKIP mis: day-close transition", flush=True)
+                return rows
+        except Exception:
+            pass
     mis = _mis_quote(sess)
     if not mis:
         return rows
@@ -649,7 +660,7 @@ def main():
         else:
             # prev day 可能是改小台前的大台殘值（SymbolID=WTX&）→ 改用 MIS 日盤小台重建
             m0 = _mis_quote("day")
-            if m0 and m0.get("CLastPrice"):
+            if m0 and m0.get("CLastPrice") and m0.get("_mt") == m0.get("_want"):
                 day_q = day_ohlc_from_kline({
                     "SymbolID": SYM,
                     "DispCName": SYM_NAME,

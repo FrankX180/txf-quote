@@ -14,20 +14,29 @@ const CHART1M_YH =
 function mergeCharts(primary, secondary) {
   // primary＝富邦小台（日盤，優先）；secondary＝Yahoo 大台（補夜盤）
   const map = new Map();
-  const push = (ch, prefer) => {
+  const push = (ch, prefer, filter) => {
     if (!ch) return;
     const ts = ch.timestamp || [];
     const q = ((ch.indicators || {}).quote || [{}])[0] || {};
+    const cl = q.close || [];
     for (let i = 0; i < ts.length; i++) {
-      if (q.close[i] == null) continue;
+      if (cl[i] == null) continue;
+      if (filter && !filter(ts[i])) continue;
       const cur = map.get(ts[i]);
       if (cur && cur.prefer && !prefer) continue;
       map.set(ts[i], {
-        t: ts[i], o: q.open[i], h: q.high[i], l: q.low[i], c: q.close[i], v: q.volume[i], prefer: !!prefer,
+        t: ts[i], o: q.open[i], h: q.high[i], l: q.low[i], c: cl[i], v: q.volume[i], prefer: !!prefer,
       });
     }
   };
-  push(secondary, false);
+  const isNightTs = (ts) => {
+    const d = new Date(ts * 1000 + 8 * 3600 * 1000);
+    const hm = d.getUTCHours() * 100 + d.getUTCMinutes();
+    return hm >= 1500 || hm < 500;
+  };
+  // secondary（Yahoo 大台 range=1d）含大台日盤棒；富邦缺分鐘時會混進小台日盤序列，
+  // 故非夜盤時段一律丟棄（2026-10-29 顧問審查）。
+  push(secondary, false, isNightTs);
   push(primary, true);
   const t = [], o = [], h = [], l = [], c = [], v = [];
   for (const k of [...map.keys()].sort((x, y) => x - y)) {
@@ -365,7 +374,7 @@ function minuteSlot(ms) {
 
 function extractWtx(rows) {
   if (!Array.isArray(rows) || !rows.length) return null;
-  const w = rows.find((x) => x && x.symbol === "MXF&") || rows[0];
+  const w = rows.find((x) => x && x.symbol === "MXF&") || null;
   if (!w) return null;
   let inn = rawNum(w.inMarket);
   let outv = rawNum(w.outMarket);
@@ -1144,7 +1153,7 @@ async function appendImb(env, rows, nowMs) {
   const sess = sessionOf(nowMs);
   if (!sess) return { ok: false, reason: "closed" };
   const rawW = Array.isArray(rows) && rows.length
-    ? (rows.find((x) => x && x.symbol === "MXF&") || rows[0])
+    ? (rows.find((x) => x && x.symbol === "MXF&") || null)
     : null;
   if (!yahooBookFresh(rawW, nowMs)) return { ok: false, reason: "stale-source-day" };
   const w = extractWtx(rows);
@@ -1271,7 +1280,7 @@ async function pollAndStore(env, opts) {
       const hm = p.hm;
       const isPast15m = (hm >= 900 && hm <= 1345) || (hm >= 1515 || hm < 500);
       const rawW = Array.isArray(rows) && rows.length
-        ? (rows.find((x) => x && x.symbol === "MXF&") || rows[0])
+        ? (rows.find((x) => x && x.symbol === "MXF&") || null)
         : null;
       if (looksLikeLiveQuote(rawW, nowMs)) {
         _dormantUntil = 0;
@@ -2144,7 +2153,11 @@ export default {
         });
         if (sr.ok) {
           const sj = await sr.json();
-          const src = (sj && sj.night && sj.night.SymbolID) ? sj.night : (sj && sj.day);
+          // 依快照的 session 選盤：夜盤欄位在日盤與休市時同樣有 SymbolID，
+          // 若只看 SymbolID 會讓日盤主價顯示成前一夜盤收盤價。
+          const src = (sj && sj.session === "night" && sj.night && sj.night.SymbolID)
+            ? sj.night
+            : ((sj && sj.day && sj.day.SymbolID) ? sj.day : (sj && sj.night));
           if (src && src.SymbolID) {
             const t = String(src.CTime || "000000").padEnd(6, "0");
             const d = String(src.CDate || "");
