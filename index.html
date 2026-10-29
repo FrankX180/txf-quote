@@ -1484,8 +1484,16 @@
         const all = JSON.parse(localStorage.getItem(REFPX_KEY) || "{}");
         const cur = all && all[sk];
         const d = String(date || "");
-        if (cur && Number(cur.ref) === Number(ref) && String(cur.date || "") === d) return;
-        all[sk] = { ref: Number(ref), date: d, ts: Date.now() };
+        const now = Date.now();
+        if (cur && Number(cur.ref) === Number(ref) && String(cur.date || "") === d) {
+          // 同值也要續期：ts 代表「最後一次確認」，不是「第一次寫入」。
+          // 一分鐘內不重寫，避免 draw 每秒打 localStorage。
+          if (now - (cur.ts || 0) < 60000) return;
+          all[sk] = { ref: Number(ref), date: d, ts: now };
+          localStorage.setItem(REFPX_KEY, JSON.stringify(all));
+          return;
+        }
+        all[sk] = { ref: Number(ref), date: d, ts: now };
         localStorage.setItem(REFPX_KEY, JSON.stringify(all));
       } catch (e) {}
     }
