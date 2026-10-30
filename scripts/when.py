@@ -151,7 +151,7 @@ def want_night_only(dt=None):
         return False
     if wd == 5:  # 週六 15:00 後已無夜盤（週五夜盤到週六 05:00）
         return False
-    return bool(day_chips_ready(d))
+    return day_chips_exist(d)
 
 
 def _uncovered_payload():
@@ -210,6 +210,35 @@ def day_chips_ready(dt=None):
         return False
     today_vix = (j.get("today") or {}).get("vix")
     if hist0.get("vix") is None and today_vix is None and hm(d) < 1700:
+        return False
+    return True
+
+
+def day_chips_exist(dt=None):
+    """夜盤刷新用的寬鬆判準：今日日盤籌碼列已在檔（不必等大額／VIX 齊）。
+
+    2026-10-30 加（Rumi 審查 M1）：want_night_only 原本用 day_chips_ready，
+    只要 top10／VIX 晚到，15:30 後就沒有任何路徑會執行，夜盤凍結到隔日早上。
+    """
+    d = dt or now_tw()
+    if d.weekday() >= 5:
+        return False
+    today = d.strftime("%Y%m%d")
+    j = _uncovered_payload()
+    if not j:
+        return False
+    if _ymd8(j.get("date")) != today:
+        return False
+    hist0 = (j.get("history") or [{}])[0]
+    if _ymd8(hist0.get("date")) != today:
+        return False
+    if hist0.get("foreign") is None or hist0.get("trust") is None:
+        return False
+    if (
+        float(hist0.get("foreign") or 0) == 0.0
+        and float(hist0.get("trust") or 0) == 0.0
+        and float(hist0.get("dealer") or 0) == 0.0
+    ):
         return False
     return True
 

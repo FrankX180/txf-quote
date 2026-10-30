@@ -1305,10 +1305,21 @@ def night_close_from_kline(night_date8):
 
 
 def night_close_from_snap():
+    """快照夜盤即時價。必須是夜盤快照且新鮮，否則回 None（Rumi 審查 M2）。"""
     if not SNAP.exists():
         return None
     try:
         snap = json.loads(SNAP.read_text(encoding="utf-8"))
+        if str(snap.get("session") or "") != "night":
+            return None
+        fa = str(snap.get("fetchedAt") or "")
+        if fa:
+            try:
+                ft = datetime.strptime(fa, "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ)
+                if (datetime.now(TZ) - ft).total_seconds() > 600:
+                    return None
+            except ValueError:
+                pass
         n = snap.get("night") or {}
         v = n.get("CLastPrice")
         return float(v) if v not in (None, "") else None
@@ -1317,10 +1328,10 @@ def night_close_from_snap():
 
 
 def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
-    """抓日盤之後的最新夜盤列；水位＝日盤 OI＋夜盤成交淨口。沒有則 None。
+    """抓「最新日盤日當晚」的夜盤列；水位＝該日日盤 OI＋該夜成交淨口。沒有則 None。
 
-    夜盤與日盤可同曆日（例 8/20 日盤後的 8/20 夜盤），故用 d8 < day8 才跳過，
-    同日夜盤要保留。
+    夜盤起始曆日與日盤同曆日（10/30 日盤 → 10/30 15:00 開的夜盤），
+    所以只認 day8 這一場、不前溯前幾日。
     """
     day8 = ymd8(day_hist_date)
     now = datetime.now(TZ)
@@ -1337,17 +1348,15 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
             day_dt = datetime.strptime(day8, "%Y%m%d").date()
         except ValueError:
             day_dt = None
-    # 候選＝從「現在」往回推，只接受當天 15:00 已開跑那一場（未開跑＝查了也是空表）。
-    # 2026-10-30 修：原本固定從 day8-1 起算，等於永遠跳過「今天 15:00 開的那場」，
-    # 夜盤列整天停在昨晚（實例：10/30 16:43 夜盤已跑近兩小時，頁面仍掛 10/29(夜)）。
+    # 夜盤起始曆日＝最新日盤日（day8）：10/30 日盤收後 15:00 開的那場。只認這一場、不前溯：
+    #   ①原本固定從 day8-1 起算，永遠跳過今天 15:00 開的那場（頁面整天停在昨晚）
+    #   ②改成從「現在」回溯後，AH 一逾時就退回昨夜，卻仍拿今日日盤水位當底
+    #     → 水位重複計算，畫面重現「10/29(夜)＋今日即時價」（Rumi 審查 H1）
     cands = []
-    for _k in range(0, 6):
-        _d = now.date() - timedelta(days=_k)
-        if _d.weekday() == 6:  # 週日無夜盤
-            continue
-        if datetime.combine(_d, datetime.min.time(), TZ) + timedelta(hours=15) > now:
-            continue
-        cands.append(_d)
+    if day_dt is not None:
+        _ns = datetime.combine(day_dt, datetime.min.time(), TZ) + timedelta(hours=15)
+        if now >= _ns:
+            cands.append(day_dt)
     for d in cands:
         d8 = d.strftime("%Y%m%d")
         slash = d.strftime("%Y/%m/%d")
@@ -1378,8 +1387,8 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
             "close": nclose,
             "unitNote": "夜盤列＝日盤淨未平倉＋當夜三大法人成交淨口（大台等值估水位）",
         }
-        if base_row:
-            # 同日夜盤：加在該日日盤水位上；若 night 日 > day8，也仍以最新日盤列為底
+        if base_row and day_dt is not None and d == day_dt:
+            # 同日夜盤：加在該日日盤水位上
             row["foreign"] = round(float(base_row.get("foreign") or 0) + trade["foreign"], 2)
             row["trust"] = round(float(base_row.get("trust") or 0) + trade["trust"], 2)
             row["dealer"] = round(float(base_row.get("dealer") or 0) + trade["dealer"], 2)
@@ -1401,8 +1410,16 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
             keep_old = False
     if keep_old:
         row = dict(old)
-        if close is not None:
-            row["close"] = close
+        # 只有「舊 night 就是現在正在跑的這一場」才把收盤換成即時價；
+        # 否則快照價屬於別場，寫進去就是時間倒錯（Rumi 審查 H1-③）。
+        if close is not None and od:
+            try:
+                _od = datetime.strptime(od, "%Y%m%d").date()
+                _ons = datetime.combine(_od, datetime.min.time(), TZ) + timedelta(hours=15)
+                if _ons <= now < _ons + timedelta(hours=14):
+                    row["close"] = close
+            except ValueError:
+                pass
         # 舊 night 只有成交淨口：補成水位＋Delta
         if row.get("foreignDelta") is None and base_row:
             trade_f = float(row.get("foreign") or 0)
