@@ -2297,23 +2297,7 @@
       const bT = nightOk ? Number(night.trustDelta || 0) : 0;
       const bD = nightOk ? Number(night.dealerDelta || 0) : 0;
       const bR = nightOk ? Number(night.retailDelta || 0) : 0;
-      if (day0 && baseDay.close != null) {
-        const cF = oiNetFlow ? (baseDay.foreignDelta != null ? Number(baseDay.foreignDelta) : oiDayDiff(hist, 0, "foreign")) : baseDay.foreign;
-        const cT = oiNetFlow ? oiDayDiff(hist, 0, "trust") : baseDay.trust;
-        const cD = oiNetFlow ? oiDayDiff(hist, 0, "dealer") : baseDay.dealer;
-        const cR = oiNetFlow ? (baseDay.retailDelta != null ? Number(baseDay.retailDelta) : oiDayDiff(hist, 0, "retail")) : baseDay.retail;
-        splitRows.push({
-          date: day0,
-          session: "daypart",
-          close: baseDay.close,
-          _splitRow: true,
-          _prevClose: hist[1] ? hist[1].close : null,
-          foreign: oiNetFlow ? (Number(cF || 0) - bF) : cF,
-          trust: oiNetFlow ? (Number(cT || 0) - bT) : cT,
-          dealer: oiNetFlow ? (Number(cD || 0) - bD) : cD,
-          retail: oiNetFlow ? (Number(cR || 0) - bR) : cR,
-        });
-      }
+      // 夜盤段在時間上先於今日日盤：夜 → 日 → 合計，由上往下讀就是發生順序
       if (nightOk) {
         splitRows.push({
           date: nightTradeDate || nightDate || day0,
@@ -2327,7 +2311,24 @@
           dealer: oiNetFlow ? bD : night.dealer,
           retail: oiNetFlow ? bR : night.retail,
           _splitRow: true,
+        });
+      }
+      if (day0 && baseDay.close != null) {
+        const cF = oiNetFlow ? (baseDay.foreignDelta != null ? Number(baseDay.foreignDelta) : oiDayDiff(hist, 0, "foreign")) : baseDay.foreign;
+        const cT = oiNetFlow ? oiDayDiff(hist, 0, "trust") : baseDay.trust;
+        const cD = oiNetFlow ? oiDayDiff(hist, 0, "dealer") : baseDay.dealer;
+        const cR = oiNetFlow ? (baseDay.retailDelta != null ? Number(baseDay.retailDelta) : oiDayDiff(hist, 0, "retail")) : baseDay.retail;
+        splitRows.push({
+          date: day0,
+          session: "daypart",
+          close: baseDay.close,
+          _splitRow: true,
           _splitEnd: true,
+          _prevClose: hist[1] ? hist[1].close : null,
+          foreign: oiNetFlow ? (Number(cF || 0) - bF) : cF,
+          trust: oiNetFlow ? (Number(cT || 0) - bT) : cT,
+          dealer: oiNetFlow ? (Number(cD || 0) - bD) : cD,
+          retail: oiNetFlow ? (Number(cR || 0) - bR) : cR,
         });
       }
       if (splitRows.length) {
@@ -7515,7 +7516,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.37";
+        const VER = "3.38";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
