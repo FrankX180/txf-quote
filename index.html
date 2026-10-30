@@ -2287,12 +2287,14 @@
       // 拆法：夜盤列 B = night.xxxDelta；日盤列 A = 歷史列 C − B；A + B 必定等於 C。
       const splitRows = [];
       const baseDay = hist[0] || {};
-      const nightOk = !!(night && nightDate && nightDate !== day0 && night.close != null);
+      // 夜盤日期可與 day0 同曆日（例：10/30 日盤後的 10/30 夜盤），只擋「比今日還晚」的異常值。
+      const nightOk = !!(night && nightDate && day0 && nightDate <= day0 && night.close != null);
+      const sameDayNight = !!(nightOk && nightDate === day0);
       const bF = nightOk ? Number(night.foreignDelta || 0) : 0;
       const bT = nightOk ? Number(night.trustDelta || 0) : 0;
       const bD = nightOk ? Number(night.dealerDelta || 0) : 0;
       const bR = nightOk ? Number(night.retailDelta || 0) : 0;
-      if (day0 && baseDay.close != null) {
+      if (day0 && baseDay.close != null && !sameDayNight) {
         const cF = oiNetFlow ? (baseDay.foreignDelta != null ? Number(baseDay.foreignDelta) : oiDayDiff(hist, 0, "foreign")) : baseDay.foreign;
         const cT = oiNetFlow ? oiDayDiff(hist, 0, "trust") : baseDay.trust;
         const cD = oiNetFlow ? oiDayDiff(hist, 0, "dealer") : baseDay.dealer;
@@ -2314,9 +2316,11 @@
           date: day0 || nightDate,
           session: "nightpart",
           close: night.close,
-          // 夜盤段在時間上先於當日日盤（10/28 15:00→10/29 05:00），漲跌基準要用
-          // 前一交易日日盤收盤，不能拿隔天日盤收盤（那會讓時間倒錯、漲跌反向）。
-          _prevClose: hist[1] ? hist[1].close : (baseDay.close != null ? baseDay.close : null),
+          // 前夜盤（跨日）時間上先於今日日盤 → 基準用前一交易日日盤收盤；
+          // 同日夜盤（今日 15:00 開）接在今日日盤之後 → 基準就是今日日盤收盤。
+          _prevClose: sameDayNight
+            ? (baseDay.close != null ? baseDay.close : null)
+            : (hist[1] ? hist[1].close : (baseDay.close != null ? baseDay.close : null)),
           foreign: oiNetFlow ? bF : night.foreign,
           trust: oiNetFlow ? bT : night.trust,
           dealer: oiNetFlow ? bD : night.dealer,
@@ -2327,9 +2331,11 @@
       }
       if (splitRows.length) {
         oiRows = splitRows.concat(oiRows);
-        oiNote += oiNetFlow
-          ? "；上方兩列＝今日日盤＋前一日夜盤拆分，兩列相加＝下方同日期合計（夜盤三大法人成交淨口）"
-          : "；上方兩列＝今日日盤／前一日夜盤拆分（夜盤列為當夜成交後估水位）";
+        oiNote += sameDayNight
+          ? "；上方一列＝今日夜盤（15:00 起、持續累積，水位＝今日日盤＋當夜成交淨口）"
+          : (oiNetFlow
+            ? "；上方兩列＝今日日盤＋前一日夜盤拆分，兩列相加＝下方同日期合計（夜盤三大法人成交淨口）"
+            : "；上方兩列＝今日日盤／前一日夜盤拆分（夜盤列為當夜成交後估水位）");
       }
       oiEl.innerHTML = oiBuildHistTable("oi", oiRows, oiKeys, oiLabs, oiNote);
 
@@ -2352,6 +2358,11 @@
           date: night.date,
           session: "night",
           close: night.close,
+          // 漲跌基準：前夜盤用前一交易日日盤收盤；同日夜盤用今日日盤收盤。
+          // （原本沒帶 → 表格自動取下一列，前夜盤會拿到隔天日盤，時間倒錯、漲跌反向）
+          _prevClose: sameDayNight
+            ? (baseDay.close != null ? baseDay.close : null)
+            : (hist[1] ? hist[1].close : null),
           top10: null,
           top10Spec: null,
           pc: null,
@@ -7519,7 +7530,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.34";
+        const VER = "3.35";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {

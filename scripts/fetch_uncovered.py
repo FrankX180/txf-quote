@@ -1336,12 +1336,18 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
             day_dt = datetime.strptime(day8, "%Y%m%d").date()
         except ValueError:
             day_dt = None
-    for delta in range(0, 4):
-        # 屬於 day8 交易日的夜盤＝前一曆日 15:00 開的那場（10/28 15:00~10/29 05:00）。
-        # 從 day8-1 往回找：當日夜盤還在進行中，抓當日只會拿到未完成的值。
-        d = (day_dt - timedelta(days=1 + delta)) if day_dt else (now - timedelta(days=delta))
-        if d.weekday() == 6:
+    # 候選＝從「現在」往回推，只接受當天 15:00 已開跑那一場（未開跑＝查了也是空表）。
+    # 2026-10-30 修：原本固定從 day8-1 起算，等於永遠跳過「今天 15:00 開的那場」，
+    # 夜盤列整天停在昨晚（實例：10/30 16:43 夜盤已跑近兩小時，頁面仍掛 10/29(夜)）。
+    cands = []
+    for _k in range(0, 6):
+        _d = now.date() - timedelta(days=_k)
+        if _d.weekday() == 6:  # 週日無夜盤
             continue
+        if datetime.combine(_d, datetime.min.time(), TZ) + timedelta(hours=15) > now:
+            continue
+        cands.append(_d)
+    for d in cands:
         d8 = d.strftime("%Y%m%d")
         slash = d.strftime("%Y/%m/%d")
         try:
@@ -1354,8 +1360,11 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
         if abs(nets["foreign"]) + abs(nets["trust"]) + abs(nets["dealer"]) < 1e-9:
             continue
         trade = dict(nets)
-        # 夜盤收盤價：優先用 1 分 K 該夜盤段最後一根（真收盤價），退而用快照即時價
-        nclose = night_close_from_kline(d8)
+        # 夜盤收盤價：進行中的那一場用快照即時價（K 線最後一根可能是舊段或未完成）；
+        # 已結束的場次用 1 分 K 該段最後一根（真收盤價），沒有才退回快照。
+        _ns = datetime.combine(d, datetime.min.time(), TZ) + timedelta(hours=15)
+        _live_night = _ns <= now < _ns + timedelta(hours=14)
+        nclose = close if (_live_night and close is not None) else night_close_from_kline(d8)
         if nclose is None:
             nclose = close
         row = {
@@ -1796,11 +1805,19 @@ def main():
         night = fetch_latest_night(day0, history[0] if history else None)
     except Exception as e:
         print("WARN night", e)
-    # 完整交易日＝昨夜 + 今日日盤；日盤籌碼已公布後，同日(夜)暫行列要拿掉
+    # 完整交易日＝昨夜 + 今日日盤。夜盤(date=起始曆日)計入「次一交易日」，
+    # 只有當該交易日的日盤籌碼已公布（day0 >= date+1）才算被吸收、該列才拿掉。
+    # 2026-10-30 修：原本用 night.date == day0 判斷，會誤刪「今晚正在跑的那場」。
     day0_8 = ymd8(day0)
-    if night and day0_8 and ymd8(night.get("date")) == day0_8:
-        print("DROP same-day night", night.get("date"), "(day chips ready)")
-        night = None
+    nd8 = ymd8(night.get("date")) if night else None
+    if day0_8 and nd8:
+        try:
+            nxt8 = (datetime.strptime(nd8, "%Y%m%d").date() + timedelta(days=1)).strftime("%Y%m%d")
+        except ValueError:
+            nxt8 = None
+        if nxt8 and day0_8 >= nxt8:
+            print("DROP absorbed night", nd8, "day0", day0_8)
+            night = None
     if night:
         sources.append("night_ah")
     # 寫檔前再併＋拒縮短：雲端日常 SSOT＝repo 長歷史，不靠本機 PG
