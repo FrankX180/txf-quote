@@ -130,6 +130,26 @@ def want_uncovered(dt=None):
     return False
 
 
+def want_night_only(dt=None):
+    """夜盤時段（15:00 後、凌晨 05:00 前）只刷新夜盤列：日盤已定案就不再重抓整包歷史。
+
+    2026-10-30 加：want_uncovered 在 15:30 後直接回 False，導致整個夜盤時段
+    （15:00→隔日 05:00）夜盤列永遠停在昨晚（實例：10/30 16:43 還绕 10/29(夜)）。
+    """
+    if os.environ.get("TXF_FORCE") == "1":
+        return False
+    d = dt or now_tw()
+    h = hm(d)
+    wd = d.weekday()
+    if wd == 6:  # 週日無夜盤
+        return False
+    if not (h >= 1500 or h < 500):
+        return False
+    if wd == 5 and h >= 500:  # 週六白天起無夜盤（週五夜盤到週六 05:00）
+        return False
+    return bool(day_chips_ready(d))
+
+
 def _uncovered_payload():
     p = Path(__file__).resolve().parents[1] / "data" / "uncovered.json"
     if not p.exists():

@@ -1421,9 +1421,46 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
     return None
 
 
-def main():
-    from when import want_uncovered
+def update_night_only() -> bool:
+    """夜盤時段快路徑：只刷新 night 列，不重抓整包歷史（期交所請求量壓到 1 次）。"""
+    if not OUT.exists():
+        return False
+    try:
+        payload = json.loads(OUT.read_text(encoding="utf-8"))
+    except Exception as e:
+        print("WARN night-only read", e)
+        return False
+    hist = payload.get("history") or []
+    if not hist:
+        return False
+    day0 = hist[0]
+    night = fetch_latest_night(day0.get("date"), day0)
+    old_night = payload.get("night") or {}
 
+    def _sig(n):
+        n = n or {}
+        return tuple(
+            n.get(k)
+            for k in ("date", "close", "foreign", "trust", "dealer", "retail",
+                      "foreignDelta", "trustDelta", "dealerDelta", "retailDelta")
+        )
+
+    if _sig(night) == _sig(old_night):
+        print("SKIP night unchanged", (night or {}).get("date"))
+        return True
+    payload["night"] = night
+    payload["fetchedAt"] = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
+    OUT.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    print("OK night", (night or {}).get("date"), "close", (night or {}).get("close"))
+    return True
+
+
+def main():
+    from when import want_uncovered, want_night_only
+
+    if want_night_only():
+        update_night_only()
+        return
     if not want_uncovered():
         print("SKIP uncovered")
         return
