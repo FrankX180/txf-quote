@@ -134,7 +134,7 @@ def want_night_only(dt=None):
     """夜盤時段（15:00 後、凌晨 05:00 前）只刷新夜盤列：日盤已定案就不再重抓整包歷史。
 
     2026-10-30 加：want_uncovered 在 15:30 後直接回 False，導致整個夜盤時段
-    （15:00→隔日 05:00）夜盤列永遠停在昨晚（實例：10/30 16:43 還绕 10/29(夜)）。
+    （15:00→隔日 05:00）夜盤列永遠停在昨晚（實例：10/30 16:43 還繞 10/29(夜)）。
     """
     if os.environ.get("TXF_FORCE") == "1":
         return False
@@ -143,9 +143,13 @@ def want_night_only(dt=None):
     wd = d.weekday()
     if wd == 6:  # 週日無夜盤
         return False
-    if not (h >= 1500 or h < 500):
+    if h < 500:
+        # 凌晨仍屬前一晚夜盤（跨日），那時查「今日日盤籌碼」必然尚未公布，
+        # 不能拿 day_chips_ready 當閘門，直接刷新（快路徑只打一次期交所）。
+        return True
+    if h < 1500:
         return False
-    if wd == 5 and h >= 500:  # 週六白天起無夜盤（週五夜盤到週六 05:00）
+    if wd == 5:  # 週六 15:00 後已無夜盤（週五夜盤到週六 05:00）
         return False
     return bool(day_chips_ready(d))
 

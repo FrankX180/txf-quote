@@ -22,9 +22,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data" / "uncovered.json"
 TZ = timezone(timedelta(hours=8))
+# 2026-10-30 收緊：期交所憑證鏈可由標準 CA 驗證（本機 strict 實測 futContractsDateAh
+# 回 387KB 正常）。原本 check_hostname=False + CERT_NONE 等於關掉中間人防護，
+# 籌碼資料被替換也看不出來。
 SSL_CTX = ssl.create_default_context()
-SSL_CTX.check_hostname = False
-SSL_CTX.verify_mode = ssl.CERT_NONE
 AH_URL = "https://www.taifex.com.tw/cht/3/futContractsDateAh?queryDate={}"
 AH_PRODUCT = {"臺股期貨": "TX", "小型臺指期貨": "MTX", "微型臺指期貨": "TMF"}
 AH_INST = {"自營商": "dealer", "投信": "trust", "外資及陸資": "foreign", "外資": "foreign"}
