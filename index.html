@@ -2287,14 +2287,17 @@
       // 拆法：夜盤列 B = night.xxxDelta；日盤列 A = 歷史列 C − B；A + B 必定等於 C。
       const splitRows = [];
       const baseDay = hist[0] || {};
-      // 夜盤日期可與 day0 同曆日（例：10/30 日盤後的 10/30 夜盤），只擋「比今日還晚」的異常值。
-      const nightOk = !!(night && nightDate && day0 && nightDate <= day0 && night.close != null);
-      const sameDayNight = !!(nightOk && nightDate === day0);
+      // 夜盤段屬「次一交易日」：10/29 15:00 起的夜盤是 10/30 的夜盤段，標籤要用 tradeDate。
+      // 只有「屬於今日交易日」的夜盤段才併進來，A（日盤段）＋B（夜盤段）＝C（今日合計）才成立。
+      const nightTradeDate = night && (night.tradeDate || night.date)
+        ? String(night.tradeDate || night.date).replace(/\D/g, "")
+        : "";
+      const nightOk = !!(night && nightDate && day0 && nightTradeDate === day0 && night.close != null);
       const bF = nightOk ? Number(night.foreignDelta || 0) : 0;
       const bT = nightOk ? Number(night.trustDelta || 0) : 0;
       const bD = nightOk ? Number(night.dealerDelta || 0) : 0;
       const bR = nightOk ? Number(night.retailDelta || 0) : 0;
-      if (day0 && baseDay.close != null && !sameDayNight) {
+      if (day0 && baseDay.close != null) {
         const cF = oiNetFlow ? (baseDay.foreignDelta != null ? Number(baseDay.foreignDelta) : oiDayDiff(hist, 0, "foreign")) : baseDay.foreign;
         const cT = oiNetFlow ? oiDayDiff(hist, 0, "trust") : baseDay.trust;
         const cD = oiNetFlow ? oiDayDiff(hist, 0, "dealer") : baseDay.dealer;
@@ -2313,14 +2316,12 @@
       }
       if (nightOk) {
         splitRows.push({
-          date: nightDate || day0,
+          date: nightTradeDate || nightDate || day0,
           session: "nightpart",
           close: night.close,
-          // 前夜盤（跨日）時間上先於今日日盤 → 基準用前一交易日日盤收盤；
-          // 同日夜盤（今日 15:00 開）接在今日日盤之後 → 基準就是今日日盤收盤。
-          _prevClose: sameDayNight
-            ? (baseDay.close != null ? baseDay.close : null)
-            : (hist[1] ? hist[1].close : (baseDay.close != null ? baseDay.close : null)),
+          // 夜盤段時間上先於今日日盤 → 基準是前一交易日日盤收盤
+          // （不是今日，否則時間倒錯、漲跌反向）
+          _prevClose: hist[1] ? hist[1].close : (baseDay.close != null ? baseDay.close : null),
           foreign: oiNetFlow ? bF : night.foreign,
           trust: oiNetFlow ? bT : night.trust,
           dealer: oiNetFlow ? bD : night.dealer,
@@ -2331,11 +2332,9 @@
       }
       if (splitRows.length) {
         oiRows = splitRows.concat(oiRows);
-        oiNote += sameDayNight
-          ? "；上方一列＝今日夜盤（15:00 起、持續累積，水位＝今日日盤＋當夜成交淨口）"
-          : (oiNetFlow
-            ? "；上方兩列＝今日日盤＋前一日夜盤拆分，兩列相加＝下方同日期合計（夜盤三大法人成交淨口）"
-            : "；上方兩列＝今日日盤／前一日夜盤拆分（夜盤列為當夜成交後估水位）");
+        oiNote += oiNetFlow
+          ? "；上方兩列＝今日夜盤段＋今日日盤段，兩列相加＝下方同日合計（夜盤段＝前一晚 15:00 起的成交淨口）"
+          : "；上方兩列＝今日夜盤段／日盤段拆分（夜盤段為前一晚成交後估水位）";
       }
       oiEl.innerHTML = oiBuildHistTable("oi", oiRows, oiKeys, oiLabs, oiNote);
 
@@ -2353,22 +2352,8 @@
           vix: vix,
         };
       });
-      if (nightOk) {
-        bigRows = [{
-          date: night.date,
-          session: "night",
-          close: night.close,
-          // 漲跌基準：前夜盤用前一交易日日盤收盤；同日夜盤用今日日盤收盤。
-          // （原本沒帶 → 表格自動取下一列，前夜盤會拿到隔天日盤，時間倒錯、漲跌反向）
-          _prevClose: sameDayNight
-            ? (baseDay.close != null ? baseDay.close : null)
-            : (hist[1] ? hist[1].close : null),
-          top10: null,
-          top10Spec: null,
-          pc: null,
-          vix: null,
-        }].concat(bigRows);
-      }
+      // 特法&VIX 頁不併夜盤列：十大／特法／P-C%／VIX 全部是期交所日盤公布資料，
+      // 夜盤段在這些欄位必然是空的，硬列一列只會讓表格看起來「跑掉」（2026-10-30 使用者指正）。
       bigEl.innerHTML = oiBuildHistTable(
         "big",
         bigRows,
@@ -7530,7 +7515,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.36";
+        const VER = "3.37";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
