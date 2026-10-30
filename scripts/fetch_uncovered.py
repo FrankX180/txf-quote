@@ -1328,18 +1328,28 @@ def night_close_from_snap():
 
 
 def next_trade_date8(d8: str):
-    """夜盤起始曆日 → 所屬交易日（跳過週六日）。10/29 15:00 起的夜盤 = 10/30 交易日。
+    """夜盤起始曆日 → 所屬交易日（跳過週末與休市日）。10/29 15:00 起的夜盤 = 10/30 交易日。
 
-    連假尚未處理（需 holidays.json），單純跳週末即可涵蓋一般情況。
+    休市日讀 data/holidays.json（與前端／holiday_guard 同一份 SSOT）；
+    讀取失敗才退回「只跳週末」，不因日曆檔問題讓整個夜盤列消失。
+
+    2026-10-30 Rumi 審查高-1：只跳週末的話，連假前一晚的夜盤會被誤拒
+    （例：2027-01-01 週五元旦，12/31 夜盤應歸 1/4 交易日，舊版算成 1/1 → 整列消失）。
     """
     try:
         d = datetime.strptime(str(d8), "%Y%m%d").date()
     except (TypeError, ValueError):
         return None
+    try:
+        from holiday_guard import load_holidays
+        hol = load_holidays()
+    except Exception:
+        hol = set()
     d = d + timedelta(days=1)
-    for _ in range(6):
-        if d.weekday() < 5:
-            return d.strftime("%Y%m%d")
+    for _ in range(12):
+        k = d.strftime("%Y%m%d")
+        if d.weekday() < 5 and k not in hol:
+            return k
         d = d + timedelta(days=1)
     return None
 
