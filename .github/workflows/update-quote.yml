@@ -37,8 +37,8 @@ jobs:
     outputs:
       state: ${{ steps.check.outputs.state }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Resolve market state (holiday gate)
@@ -53,8 +53,8 @@ jobs:
     if: github.event_name != 'schedule' || needs.guard.outputs.state != 'closed'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Fetch Yahoo WTX quote and 5-level book
