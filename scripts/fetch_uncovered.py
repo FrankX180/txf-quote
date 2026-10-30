@@ -1377,6 +1377,10 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
             cands.append(day_dt - timedelta(days=_k))
     for d in cands:
         d8 = d.strftime("%Y%m%d")
+        # 只接受「所屬交易日就是 day8」的場次：AH 局部失敗時不能退回前幾天的夜盤
+        # （2026-10-30 Rumi 審查 concern #5：實測只有 10/28 有資料時會回 tradeDate=20261029 的錯場次）
+        if next_trade_date8(d8) != day8:
+            continue
         slash = d.strftime("%Y/%m/%d")
         try:
             nets = scrape_night_ah(slash)
@@ -1425,6 +1429,9 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
             keep_old = 0 <= gap <= 4
         except ValueError:
             keep_old = False
+    if keep_old and day8 and od and next_trade_date8(od) != day8:
+        # 舊值所屬交易日不符就不沿用（否則會把上一交易日的夜盤留住）
+        keep_old = False
     if keep_old:
         row = dict(old)
         if not row.get("tradeDate"):
