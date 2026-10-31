@@ -208,8 +208,9 @@ def main():
         "daily": daily,
         "week": week,
         "month": month,
-        "night": daily,
-        "day": daily,
+        # 2026-10-31 移除 night/day 兩份：它們原本就是 "night": daily, "day": daily，
+        # 三個欄位內容完全相同（sha 相同），白日傳了兩份、gzip 多花 350 KB。
+        # 前端 mergeDaily() 已有 fallback 到 daily，不再需要這兩個鏡像欄位。
     }
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")

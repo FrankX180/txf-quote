@@ -4215,7 +4215,12 @@
 
     function mergeDaily() {
       const by = {};
-      (dailyPack.night || []).concat(dailyPack.day || []).forEach((b) => {
+      // 舊版 payload 有 night/day 兩個與 daily 完全相同的鏡像欄位；
+      // 沒有時就回 daily，不再白傳兩份（2026-10-31）。
+      const nArr = dailyPack.night || [];
+      const dArr = dailyPack.day || [];
+      const src = (nArr.length || dArr.length) ? nArr.concat(dArr) : (dailyPack.daily || []);
+      src.forEach((b) => {
         const d = b.date || b.timestamp;
         if (!by[d]) {
           by[d] = Object.assign({}, b);
@@ -7540,7 +7545,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.41";
+        const VER = "3.42";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
