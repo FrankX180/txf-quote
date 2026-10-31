@@ -2030,6 +2030,8 @@ def main():
             "source": obj.get("source"),
             "h0": {k: h0.get(k) for k in keys},
             "night": {k: n.get(k) for k in ("date", "foreign", "trust", "dealer", "retail", "foreignDelta", "trustDelta", "dealerDelta", "retailDelta", "close")},
+            # 2026-10-31 補：nextNight 是獨立一列，不納入比對的話它變了也不會寫檔
+            "nextNight": {k: (obj.get("nextNight") or {}).get(k) for k in ("date", "tradeDate", "close", "foreignDelta", "trustDelta", "dealerDelta", "retailDelta")},
         }
 
     if OUT.exists():
