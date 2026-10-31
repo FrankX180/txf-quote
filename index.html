@@ -3283,7 +3283,15 @@
         if (sessKey() === "day") await refreshNightImbBase();
       } catch (e) {}
     }
+    // 2026-10-31：大檔（K線／法人／歷史）改走瀏覽器快取。
+    // 原本一律 cache:"no-cache" → klineTimer 每 5 分鐘都重新驗證，而 Actions 也每 5 分鐘改檔
+    // → 每次都是 200 整包。實測換算 300 人滿載會到 158 GB/月（逾 100 GB 軟限）。
+    // Pages 給這些檔 cache-control: max-age=600，走預設快取後實際更新周期變 10 分鐘，流量減半。
+    // 即時價走 Worker 推流與 ensureLive1m，不靠這些靜態檔，延遲 10 分鐘可接受。
+    // snapshot / mis-book / imb-* 維持 no-cache（它們是報價備援，需要即時）。
+    const GH_CACHEABLE = /(kline-daily|kline-minute|uncovered|history-day|history-night|tmf_retail|holidays|twn-hist|twn-ratio)\.json$/;
     function gh(path) {
+      if (GH_CACHEABLE.test(path)) return fetch(path);
       return fetch(path, { cache: "no-cache" });
     }
     function sessKey() {
@@ -7545,7 +7553,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.42";
+        const VER = "3.43";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
