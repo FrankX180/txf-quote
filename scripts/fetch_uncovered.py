@@ -1475,6 +1475,71 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
     return None
 
 
+def fetch_next_night(day_hist_date: str, base_row: dict | None = None):
+    """下一交易日已經開跑（或已結束）的夜盤段。沒有則 None。
+
+    週五 15:00 起的夜盤屬下週一交易日。日盤列還停在週五時，這一段要獨立列在
+    最上面，讓讀者看到「下一個交易日已經開始」；它不參與本交易日的 A+B=C 拆帳
+    （那是 night 欄位的事）。
+
+    2026-10-31 加：使用者指正——週五晚夜盤就是 11/2（一）的開始，
+    表格要能分別看出「前一夜盤段／當日日盤段／當日夜盤段」。
+    """
+    day8 = ymd8(day_hist_date)
+    if not day8:
+        return None
+    now = datetime.now(TZ)
+    cands = []
+    for k in range(0, 6):
+        d = now.date() - timedelta(days=k)
+        if d.weekday() == 6:
+            continue
+        if datetime.combine(d, datetime.min.time(), TZ) + timedelta(hours=15) > now:
+            continue
+        cands.append(d)
+    close = night_close_from_snap()
+    for d in cands:
+        d8 = d.strftime("%Y%m%d")
+        td = next_trade_date8(d8)
+        if not td or td <= day8:
+            continue  # 屬於已收盤的交易日 → 交給 night 欄位
+        try:
+            nets = scrape_night_ah(d.strftime("%Y/%m/%d"))
+        except Exception as e:
+            print("WARN next night ah", d8, e)
+            continue
+        if not nets:
+            continue
+        if abs(nets["foreign"]) + abs(nets["trust"]) + abs(nets["dealer"]) < 1e-9:
+            continue
+        _ns = datetime.combine(d, datetime.min.time(), TZ) + timedelta(hours=15)
+        live = _ns <= now < _ns + timedelta(hours=14)
+        nclose = close if (live and close is not None) else night_close_from_kline(d8)
+        row = {
+            "date": d8,
+            "tradeDate": td,
+            "session": "night",
+            "foreignDelta": nets["foreign"],
+            "trustDelta": nets["trust"],
+            "dealerDelta": nets["dealer"],
+            "retailDelta": nets["retail"],
+            "close": nclose,
+            "unitNote": "下一交易日已開始的夜盤段（未完成）",
+        }
+        if base_row:
+            row["foreign"] = round(float(base_row.get("foreign") or 0) + nets["foreign"], 2)
+            row["trust"] = round(float(base_row.get("trust") or 0) + nets["trust"], 2)
+            row["dealer"] = round(float(base_row.get("dealer") or 0) + nets["dealer"], 2)
+            row["retail"] = round(float(base_row.get("retail") or 0) + nets["retail"], 2)
+        else:
+            row["foreign"] = nets["foreign"]
+            row["trust"] = nets["trust"]
+            row["dealer"] = nets["dealer"]
+            row["retail"] = nets["retail"]
+        return row
+    return None
+
+
 def update_night_only() -> bool:
     """夜盤時段快路徑：只刷新 night 列，不重抓整包歷史（期交所請求量壓到 1 次）。"""
     if not OUT.exists():
@@ -1490,6 +1555,12 @@ def update_night_only() -> bool:
     day0 = hist[0]
     night = fetch_latest_night(day0.get("date"), day0)
     old_night = payload.get("night") or {}
+    try:
+        next_night = fetch_next_night(day0.get("date"), day0)
+    except Exception as e:
+        print("WARN night-only next", e)
+        next_night = None
+    old_next = payload.get("nextNight") or {}
 
     def _sig(n):
         n = n or {}
@@ -1499,13 +1570,14 @@ def update_night_only() -> bool:
                       "foreignDelta", "trustDelta", "dealerDelta", "retailDelta")
         )
 
-    if _sig(night) == _sig(old_night):
+    if _sig(night) == _sig(old_night) and _sig(next_night) == _sig(old_next):
         print("SKIP night unchanged", (night or {}).get("date"))
         return True
     payload["night"] = night
+    payload["nextNight"] = next_night
     payload["fetchedAt"] = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
     OUT.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    print("OK night", (night or {}).get("date"), "close", (night or {}).get("close"))
+    print("OK night", (night or {}).get("date"), "next", (next_night or {}).get("tradeDate"))
     return True
 
 
@@ -1896,21 +1968,26 @@ def main():
         night = fetch_latest_night(day0, history[0] if history else None)
     except Exception as e:
         print("WARN night", e)
-    # 完整交易日＝昨夜 + 今日日盤。夜盤(date=起始曆日)計入「次一交易日」，
-    # 只有當該交易日的日盤籌碼已公布（day0 >= date+1）才算被吸收、該列才拿掉。
-    # 2026-10-30 修：原本用 night.date == day0 判斷，會誤刪「今晚正在跑的那場」。
+    # 完整交易日＝前一夜盤段 + 今日日盤段。night 用來當 B（夜盤段），不能 absorbed 就丟。
+    # 只有「所屬交易日比 day0 還早」才算過期：例如 day0 已是 11/2，night 卻還停在屬 10/30 的場次。
+    # 2026-10-31 修：原本 day0 >= date+1 就丟，會把 10/29 夜盤（屬 10/30）丟掉，
+    # 導致 10/30 那組沒有夜盤段、A+B=C 只剩下 A。
     day0_8 = ymd8(day0)
     nd8 = ymd8(night.get("date")) if night else None
     if day0_8 and nd8:
-        try:
-            nxt8 = (datetime.strptime(nd8, "%Y%m%d").date() + timedelta(days=1)).strftime("%Y%m%d")
-        except ValueError:
-            nxt8 = None
-        if nxt8 and day0_8 >= nxt8:
-            print("DROP absorbed night", nd8, "day0", day0_8)
+        _td = next_trade_date8(nd8)
+        if _td and _td < day0_8:
+            print("DROP stale night", nd8, "tradeDate", _td, "day0", day0_8)
             night = None
     if night:
         sources.append("night_ah")
+    next_night = None
+    try:
+        next_night = fetch_next_night(day0, history[0] if history else None)
+    except Exception as e:
+        print("WARN next night", e)
+    if next_night:
+        sources.append("next_night_ah")
     # 寫檔前再併＋拒縮短：雲端日常 SSOT＝repo 長歷史，不靠本機 PG
     history = refuse_history_shrink(history, HIST_N)
     history = enrich_history_cum(history)
@@ -1925,6 +2002,7 @@ def main():
         "today": today,
         "history": history[:HIST_N],
         "night": night,
+        "nextNight": next_night,
     }
 
     def _chip_fingerprint(obj):

@@ -2293,10 +2293,31 @@
         ? String(night.tradeDate || night.date).replace(/\D/g, "")
         : "";
       const nightOk = !!(night && nightDate && day0 && nightTradeDate === day0 && night.close != null);
+      // 下一交易日已經開跑的夜盤段（週五晚 → 下週一）：獨立一列，不參與下面 A+B=C 拆帳
+      const nextNight = uncover.nextNight;
+      const nextNightDate = nextNight && (nextNight.tradeDate || nextNight.date)
+        ? String(nextNight.tradeDate || nextNight.date).replace(/\D/g, "")
+        : "";
+      const nextNightOk = !!(nextNight && nextNightDate && day0 && nextNightDate > day0 && nextNight.close != null);
       const bF = nightOk ? Number(night.foreignDelta || 0) : 0;
       const bT = nightOk ? Number(night.trustDelta || 0) : 0;
       const bD = nightOk ? Number(night.dealerDelta || 0) : 0;
       const bR = nightOk ? Number(night.retailDelta || 0) : 0;
+      // 下一交易日的夜盤段（尚未有日盤）排最上面：11/02(夜) → 10/30夜 → 10/30日 → 10/30
+      if (nextNightOk) {
+        splitRows.push({
+          date: nextNightDate,
+          session: "night",
+          close: nextNight.close,
+          // 基準＝本交易日（最新日盤）收盤，這是它開始前的價
+          _prevClose: hist[0] ? hist[0].close : null,
+          foreign: oiNetFlow ? Number(nextNight.foreignDelta || 0) : nextNight.foreign,
+          trust: oiNetFlow ? Number(nextNight.trustDelta || 0) : nextNight.trust,
+          dealer: oiNetFlow ? Number(nextNight.dealerDelta || 0) : nextNight.dealer,
+          retail: oiNetFlow ? Number(nextNight.retailDelta || 0) : nextNight.retail,
+          _splitRow: true,
+        });
+      }
       // 夜盤段在時間上先於今日日盤：夜 → 日 → 合計，由上往下讀就是發生順序
       if (nightOk) {
         splitRows.push({
@@ -2333,6 +2354,9 @@
       }
       if (splitRows.length) {
         oiRows = splitRows.concat(oiRows);
+        oiNote += nextNightOk
+          ? "；最上列＝下一交易日已開始的夜盤段（未完成）"
+          : "";
         oiNote += oiNetFlow
           ? "；上方兩列＝今日夜盤段＋今日日盤段，兩列相加＝下方同日合計（夜盤段＝前一晚 15:00 起的成交淨口）"
           : "；上方兩列＝今日夜盤段／日盤段拆分（夜盤段為前一晚成交後估水位）";
@@ -7516,7 +7540,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.38";
+        const VER = "3.39";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
