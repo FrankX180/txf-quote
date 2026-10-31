@@ -198,6 +198,12 @@ def main():
         else "ok"
     )
 
+    # 日K 只留最近 12 年（約 3000 筆）：6993 筆是 27 年，壓縮後白白多 100 KB，
+    # 而週K／月K 是獨立陣列、不受影響（周K 1406 筆、月K 167 筆全保留）。
+    # 2026-10-31：使用者同意瘦身 — 目標是壓 GitHub Pages 月流量。
+    DAILY_KEEP = 3000
+    daily_out = daily[-DAILY_KEEP:] if len(daily) > DAILY_KEEP else daily
+
     payload = {
         "fetchedAt": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
         "source": "moneydj daily/week + TAIFEX settlement month",
@@ -205,7 +211,8 @@ def main():
         "monthRule": "prev_settle+1d .. settle (inclusive); from 2013-01",
         "dailySessionNote": "MoneyDJ calendar daily OHLC; night-session inclusion not verified vs TAIFEX pure day",
         "volumeNote": vol_note,
-        "daily": daily,
+        "dailyKeep": len(daily_out),
+        "daily": daily_out,
         "week": week,
         "month": month,
         # 2026-10-31 移除 night/day 兩份：它們原本就是 "night": daily, "day": daily，
