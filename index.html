@@ -2307,7 +2307,7 @@
       if (nextNightOk) {
         splitRows.push({
           date: nextNightDate,
-          session: "night",
+          session: "nightpart",
           close: nextNight.close,
           // 基準＝本交易日（最新日盤）收盤，這是它開始前的價
           _prevClose: hist[0] ? hist[0].close : null,
@@ -7540,7 +7540,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.39";
+        const VER = "3.40";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
