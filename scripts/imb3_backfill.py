@@ -5,6 +5,12 @@
 上線當天（或 Worker 換版後）基準不完整，合併口數會遠小於實際成交量。
 本腳本用交易所逐筆資料，從該盤別開盤重算到現在，覆寫 imb3 並校正 imb3_cur 游標。
 
+⚠️ 2026-11-02 修正：
+- 游標必須用連續月別名（TXF1!／MXF1!／TMF1!），與 Worker 的查詢字串一致，否則 Worker 讀不到游標。
+- 不再先 DELETE 再寫（刪了但寫失敗會把資料清空）；改為純 ON CONFLICT 覆寫。
+- D1 單一語句最多 100 個 SQL 變數 → 每批 12 列 × 8 欄。
+- 總量看最後一分鐘的累計值，不可把每分鐘累計值再加總。
+
 用法：
   python scripts/imb3_backfill.py                 # 目前盤別
   python scripts/imb3_backfill.py --day 20261102 --session night
@@ -18,12 +24,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fubon_imb_fill as f  # noqa: E402
 
 ROOTS = [("TXF", 20), ("MXF", 5), ("TMF", 1)]  # 單位：1/20 大台口
-MONTHS = f.MONTHS
-
-
-def sym_of(root, day_key, session):
-    """近月合約：沿用 f.near_month_symbol 的第三個週三結算規則，換掉根代碼。"""
-    return f.near_month_symbol(day_key, session).replace("TXF", root, 1)
 
 
 def main():
@@ -44,11 +44,12 @@ def main():
         print("session not started", day_key, sess)
         return
 
-    tok = f.get_token("TXF1!")
+    tok = f._login_exchange()
     per = {}
     curs = []
     for root, w in ROOTS:
-        sym = sym_of(root, day_key, sess)
+        sym = f.near_month_symbol(day_key, sess).replace("TXF", root, 1)
+        alias = root + "1!"
         try:
             trades = f.fetch_trades(tok, sym, sess)
         except Exception as e:  # noqa: BLE001
@@ -56,48 +57,51 @@ def main():
             continue
         trades = [x for x in trades if start_ms <= x["time"] / 1000.0 <= end_ms]
         cum = f.minute_cum(trades, start_ms, end_ms)
+        vol = sum((x.get("size") or 0) for x in trades)
         for t, (inn, outv) in cum.items():
             p = per.setdefault(t, [0, 0])
             p[0] += inn * w
             p[1] += outv * w
-        last_serial = max((x.get("serial") or 0) for x in trades) if trades else 0
-        if cum:
-            last_t = max(cum)
-            fin_in, fin_out = cum[last_t]
-        else:
-            fin_in = fin_out = 0
-        vol = sum((x.get("size") or 0) for x in trades)
-        curs.append((sym, last_serial, fin_in * w, fin_out * w))
+        lt = max(cum) if cum else None
+        fin = cum[lt] if lt else (0, 0)
+        serial = max((x.get("serial") or 0) for x in trades) if trades else 0
+        curs.append((alias, serial, int(fin[0] * w), int(fin[1] * w)))
         print("OK", sym, "trades", len(trades), "vol", vol,
-              "in20", round(fin_in * w), "out20", round(fin_out * w))
+              "in20", int(fin[0] * w), "out20", int(fin[1] * w),
+              "taiex_gross", round((fin[0] + fin[1]) * w / 20, 1))
 
     if not per:
         print("nothing to write")
         return
 
-    # 用實際成交計算出的最後價位方向為準，重新寫入當日序列（覆寫本腳本管的 day/session）
-    f.d1("DELETE FROM imb3 WHERE day_key=? AND session=?", [day_key, sess])
-    rows = []
-    for t in sorted(per):
-        inn, outv = per[t]
-        rows.append((day_key, sess, int(t), outv - inn, inn, outv, int(now.timestamp() * 1000)))
-    for i in range(0, len(rows), 25):
-        vals = ",".join("('%s','%s',%d,%d,%d,%d,%d)" % r for r in rows[i:i + 25])
-        f.d1("INSERT INTO imb3 (day_key, session, t, d20, in20, out20, n, ts) VALUES " + vals +
-             " ON CONFLICT(day_key, session, t) DO UPDATE SET d20=excluded.d20, in20=excluded.in20, out20=excluded.out20, ts=excluded.ts")
+    lt = max(per)
+    tin, tout = per[lt]
+    print("LAST_BAR gross_taiex", round((tin + tout) / 20, 1),
+          "net_taiex", round((tout - tin) / 20, 1), "minutes", len(per))
 
-    for sym, serial, in20, out20 in curs:
+    rows = [(day_key, sess, int(t), int(v[1] - v[0]), int(v[0]), int(v[1]), 0,
+             int(now.timestamp() * 1000)) for t, v in sorted(per.items())]
+    B = 12  # D1：單句最多 100 個綁定變數，12 × 8 = 96
+    for i in range(0, len(rows), B):
+        chunk = rows[i:i + B]
+        ph = ",".join(["(?,?,?,?,?,?,?,?)"] * len(chunk))
+        flat = [x for r in chunk for x in r]
+        f.d1(
+            "INSERT INTO imb3 (day_key, session, t, d20, in20, out20, n, ts) VALUES " + ph +
+            " ON CONFLICT(day_key, session, t) DO UPDATE SET d20=excluded.d20, in20=excluded.in20, "
+            "out20=excluded.out20, ts=excluded.ts",
+            flat,
+        )
+    print("inserted", len(rows))
+
+    for alias, serial, in20, out20 in curs:
         f.d1(
             "INSERT INTO imb3_cur (day_key, session, sym, serial, in20, out20, last_px, last_side, upd) "
             "VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(day_key, session, sym) DO UPDATE SET "
             "serial=excluded.serial, in20=excluded.in20, out20=excluded.out20, upd=excluded.upd",
-            [day_key, sess, sym, serial, in20, out20, None, None, int(now.timestamp() * 1000)],
+            [day_key, sess, alias, serial, in20, out20, None, None, int(now.timestamp() * 1000)],
         )
-
-    tin = sum(v[0] for v in per.values())
-    tout = sum(v[1] for v in per.values())
-    print("WROTE", len(rows), "minute bars; in20", round(tin), "out20", round(tout),
-          "net_taiex", round((tout - tin) / 20, 1), "gross_taiex", round((tout + tin) / 20, 1))
+    print("cur upserted", [c[0] for c in curs])
 
 
 if __name__ == "__main__":
