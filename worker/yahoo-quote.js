@@ -1088,6 +1088,101 @@ async function appendImb(env, rows, nowMs) {
   return { ok: true, dayKey, sess, d, slot };
 }
 
+// ── 大小微台內外盤（2026-11-02 老公指定）──
+// 為何不用 quote 的 totalBidMatch／totalAskMatch：實測 TXF 2026-11-02 日盤 vol 52,064、bid 38,869、ask 38,716，
+// 兩者相加是成交量的 1.5 倍（那是買方／賣方委託各自的成交筆數，每筆雙邊各計一次），不是內外盤口數。
+// 唯一可行：抳 trades 逐筆，用 bid/ask（夾在中間用 tick rule）分類，再換算 1/20 大台口（TXF×20、MXF×5、TMF×1）。
+const FUGLE_MD = "https://api.fugle.tw/marketdata/v1.0/futopt/intraday/";
+const IMB3_SYMS = [["TXF1!", 20], ["MXF1!", 5], ["TMF1!", 1]];
+const IMB3_PAGE = 500;
+const IMB3_MAX_PAGES = 4;
+
+async function ensureImb3Schema(db) {
+  await db.prepare("CREATE TABLE IF NOT EXISTS imb3 (day_key TEXT NOT NULL, session TEXT NOT NULL, t INTEGER NOT NULL, d20 REAL NOT NULL, in20 REAL NOT NULL, out20 REAL NOT NULL, n INTEGER, ts INTEGER, PRIMARY KEY (day_key, session, t))").run();
+  await db.prepare("CREATE TABLE IF NOT EXISTS imb3_cur (day_key TEXT NOT NULL, session TEXT NOT NULL, sym TEXT NOT NULL, serial REAL NOT NULL, in20 REAL NOT NULL, out20 REAL NOT NULL, last_px REAL, last_side INTEGER, upd INTEGER, PRIMARY KEY (day_key, session, sym))").run();
+}
+
+async function fubonToken(env) {
+  try {
+    const row = await env.IMB_DB.prepare("SELECT tok FROM fubon_tok WHERE id = 1").first();
+    return row && row.tok ? row.tok : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// 內外盤方向：成交價打到賣價＝外盤（+1）、打到買價＝內盤（-1）、夾在中間用比上一筆漲跌
+function imb3Side(px, bid, ask, prevPx, prevSide) {
+  if (ask && px >= ask) return 1;
+  if (bid && px <= bid) return -1;
+  if (prevPx != null && px !== prevPx) return px > prevPx ? 1 : -1;
+  return prevSide || 0;
+}
+
+// 每分鐘跑一次：每一檔只抓最新頁（由新到舊），用 serial 去重與續接
+async function syncImb3(env, nowMs) {
+  if (!env.IMB_DB) return { ok: false, reason: "no-db" };
+  const sess = sessionOf(nowMs);
+  if (!sess) return { ok: false, reason: "closed" };
+  const tok = await fubonToken(env);
+  if (!tok) return { ok: false, reason: "no-token" };
+  const dayKey = tradingDayKey(nowMs);
+  await ensureImb3Schema(env.IMB_DB);
+  const qs = sess === "night" ? "session=afterhours" : "";
+  let tin = 0, tout = 0, added = 0, pages = 0, err = null;
+  for (let i = 0; i < IMB3_SYMS.length; i++) {
+    const sym = IMB3_SYMS[i][0], w = IMB3_SYMS[i][1];
+    const cur = await env.IMB_DB.prepare(
+      "SELECT serial, in20, out20, last_px, last_side FROM imb3_cur WHERE day_key=? AND session=? AND sym=?"
+    ).bind(dayKey, sess, sym).first();
+    let serial = cur ? Number(cur.serial) : 0;
+    let in20 = cur ? Number(cur.in20) : 0;
+    let out20 = cur ? Number(cur.out20) : 0;
+    let lastPx = cur && cur.last_px != null ? Number(cur.last_px) : null;
+    let lastSide = cur && cur.last_side != null ? Number(cur.last_side) : 0;
+    for (let p = 0; p < IMB3_MAX_PAGES; p++) {
+      const u = FUGLE_MD + "trades/" + encodeURIComponent(sym) + "?limit=" + IMB3_PAGE + "&offset=" + (p * IMB3_PAGE) + (qs ? "&" + qs : "");
+      let res;
+      try {
+        res = await fetch(u, { headers: { "X-SDK-TOKEN": tok, "User-Agent": "txf-imb3/1" } });
+      } catch (e) { err = "fetch"; break; }
+      if (res.status === 401 || res.status === 403) return { ok: false, reason: "token-expired" };
+      if (!res.ok) { err = "http-" + res.status; break; }
+      let arr = [];
+      try { arr = ((await res.json()) || {}).data || []; } catch (e) { err = "json"; break; }
+      pages++;
+      if (!arr.length) break;
+      const fresh = arr.filter((x) => x && typeof x.serial === "number" && x.serial > serial);
+      if (!fresh.length) break;
+      fresh.sort((a, b) => (a.time - b.time) || (a.serial - b.serial));
+      for (const x of fresh) {
+        const side = imb3Side(x.price, x.bid, x.ask, lastPx, lastSide);
+        lastPx = x.price;
+        if (side) lastSide = side;
+        const v = (Number(x.size) || 0) * w;
+        if (side > 0) out20 += v;
+        else if (side < 0) in20 += v;
+        if (x.serial > serial) serial = x.serial;
+        added++;
+      }
+      if (fresh.length < arr.length) break; // 已接到上次的邊界
+      if (arr.length < IMB3_PAGE) break;    // 到底了
+    }
+    await env.IMB_DB.prepare(
+      "INSERT INTO imb3_cur (day_key, session, sym, serial, in20, out20, last_px, last_side, upd) VALUES (?,?,?,?,?,?,?,?,?) " +
+      "ON CONFLICT(day_key, session, sym) DO UPDATE SET serial=excluded.serial, in20=excluded.in20, out20=excluded.out20, last_px=excluded.last_px, last_side=excluded.last_side, upd=excluded.upd"
+    ).bind(dayKey, sess, sym, serial, in20, out20, lastPx, lastSide, nowMs).run();
+    tin += in20;
+    tout += out20;
+  }
+  const slot = minuteSlot(nowMs);
+  await env.IMB_DB.prepare(
+    "INSERT INTO imb3 (day_key, session, t, d20, in20, out20, n, ts) VALUES (?,?,?,?,?,?,?,?) " +
+    "ON CONFLICT(day_key, session, t) DO UPDATE SET d20=excluded.d20, in20=excluded.in20, out20=excluded.out20, n=excluded.n, ts=excluded.ts"
+  ).bind(dayKey, sess, slot, tout - tin, tin, tout, added, nowMs).run();
+  return { ok: true, dayKey, sess, in20: tin, out20: tout, added, pages, err };
+}
+
 async function loadPack(env, dayKey) {
   const empty = { dayKey, day: [], night: [], updatedAt: null };
   if (!env.IMB_DB) return empty;
@@ -1866,6 +1961,41 @@ export default {
         });
       }
     }
+    if (kind === "imb3") {
+      const now3 = Date.now();
+      const day3 = (url.searchParams.get("day") || "").replace(/-/g, "") || tradingDayKey(now3);
+      try {
+        await ensureImb3Schema(env.IMB_DB);
+        const q3 = await env.IMB_DB.prepare(
+          "SELECT session, t, d20, in20, out20, n, ts FROM imb3 WHERE day_key=? ORDER BY t ASC"
+        ).bind(day3).all();
+        const dArr = [], nArr = [];
+        let upd = null;
+        for (const r of q3.results || []) {
+          const bar = { t: r.t, d: r.d20, in: r.in20, out: r.out20, n: r.n, ts: r.ts };
+          if (r.session === "day") dArr.push(bar); else nArr.push(bar);
+          if (!upd || r.ts > upd) upd = r.ts;
+        }
+        return jsonResp(
+          {
+            dayKey: day3,
+            day: dArr,
+            night: nArr,
+            unit: "1/20-taiex",
+            updatedAt: upd ? new Date(upd).toISOString() : null,
+            source: "d1-imb3",
+          },
+          200,
+          {
+            "Cache-Control": "public, max-age=5",
+            "CDN-Cache-Control": "public, max-age=5",
+            "Cloudflare-CDN-Cache-Control": "public, max-age=5",
+          }
+        );
+      } catch (e) {
+        return jsonResp({ ok: false, error: String(e && e.message || e) }, 500, { "Cache-Control": "no-store" });
+      }
+    }
     if (kind === "imb" || kind === "px1m") {
       const isPrice = kind === "px1m";
       const now = Date.now();
@@ -2094,6 +2224,12 @@ export default {
       (async () => {
         if (isTradeSession) {
           await pollAndStore(env, { chart: needChart });
+          try {
+            const r3 = await syncImb3(env, nowMs);
+            if (!r3.ok) console.log("imb3 skip", r3.reason);
+          } catch (e) {
+            console.error("imb3 failed", String((e && e.message) || e));
+          }
         }
         try {
           const healRes = await maybeHealGithub(env, "cron-stale");
