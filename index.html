@@ -142,6 +142,8 @@
     }
     .oi tr.oi-split-row td {
       font-weight: 700;
+      /* 2026-11-02 老公指定：日盤／夜盤拆分兩列上米黃底色 */
+      background: #FFF6DC;
     }
     .oi-cbar-wrap {
       display: flex; flex-direction: column; align-items: stretch; gap: 1px;
@@ -7606,7 +7608,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.52";
+        const VER = "3.53";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
