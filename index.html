@@ -2361,11 +2361,10 @@
       if (splitRows.length) {
         oiRows = splitRows.concat(oiRows);
         oiNote += nextNightOk
-          ? "；最上列＝昨夜盤段（今日日盤尚未開盤）"
-          : "";
-        oiNote += oiNetFlow
-          ? "；上方兩列＝今日日盤段＋今日夜盤段（日盤在上），兩列相加＝下方同日合計（夜盤段＝前一晚 15:00 起的成交淨口）"
-          : "；上方兩列＝今日日盤段／夜盤段拆分（夜盤段為前一晚成交後估水位）";
+          ? "；最上列＝昨夜盤段（今日日盤尚未開盤），其下為上一交易日"
+          : (oiNetFlow
+              ? "；上方兩列＝今日日盤段＋今日夜盤段（日盤在上），兩列相加＝下方同日合計（夜盤段＝前一晚 15:00 起的成交淨口）"
+              : "；上方兩列＝今日日盤段／夜盤段拆分（夜盤段為前一晚成交後估水位）");
       }
       oiEl.innerHTML = oiBuildHistTable("oi", oiRows, oiKeys, oiLabs, oiNote);
 
@@ -7559,7 +7558,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.44";
+        const VER = "3.45";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
