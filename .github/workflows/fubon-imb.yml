@@ -16,6 +16,7 @@ on:
     branches: [main, master]
     paths:
       - "scripts/fubon_imb_fill.py"
+      - "scripts/imb3_backfill.py"
       - ".github/workflows/fubon-imb.yml"
 
 concurrency:
@@ -68,6 +69,18 @@ jobs:
           FUBON_CERT_PASS: ${{ secrets.FUBON_CERT_PASS }}
           CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
         run: python scripts/fubon_imb_fill.py --ensure-token
+      - name: Backfill imb3 from ticks (only on push / manual)
+        # 2026-11-02：Worker 的 syncImb3 只能從部署後開始累計，上線當天基準不完整。
+        # 這裡用逐筆從開盤重算一次，校正 imb3 與 imb3_cur；平日每 5 分鐘不必重跑（Worker 已續接）。
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+        continue-on-error: true
+        env:
+          FUBON_ID: ${{ secrets.FUBON_ID }}
+          FUBON_API_KEY: ${{ secrets.FUBON_API_KEY }}
+          FUBON_CERT_B64: ${{ secrets.FUBON_CERT_B64 }}
+          FUBON_CERT_PASS: ${{ secrets.FUBON_CERT_PASS }}
+          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+        run: python scripts/imb3_backfill.py
       - name: Fill imb gaps from Fubon trades
         env:
           FUBON_ID: ${{ secrets.FUBON_ID }}

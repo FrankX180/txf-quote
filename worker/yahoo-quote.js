@@ -1964,13 +1964,26 @@ export default {
     // 診断用（2026-11-02）：直接跑一次 syncImb3 並回傳結果，不落 D1 以外的副作用
     if (kind === "imb3-probe") {
       const hasTok = !!(await fubonToken(env));
+      let cur3 = null;
+      try {
+        const nowP = Date.now();
+        const skP = sessionOf(nowP);
+        const dkP = tradingDayKey(nowP);
+        await ensureImb3Schema(env.IMB_DB);
+        const qq = await env.IMB_DB.prepare(
+          "SELECT sym, serial, in20, out20, upd FROM imb3_cur WHERE day_key=? AND session=? ORDER BY sym"
+        ).bind(dkP, skP).all();
+        cur3 = qq.results;
+      } catch (e) {
+        cur3 = String((e && e.message) || e);
+      }
       let out = null;
       try {
         out = await syncImb3(env, Date.now());
       } catch (e) {
         out = { ok: false, error: String((e && e.message) || e) };
       }
-      return jsonResp({ hasToken: hasTok, result: out }, 200, { "Cache-Control": "no-store" });
+      return jsonResp({ hasToken: hasTok, cur: cur3, result: out }, 200, { "Cache-Control": "no-store" });
     }
     if (kind === "imb3") {
       const now3 = Date.now();
