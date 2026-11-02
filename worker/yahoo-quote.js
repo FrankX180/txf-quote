@@ -1175,6 +1175,10 @@ async function syncImb3(env, nowMs) {
     tin += in20;
     tout += out20;
   }
+  // 三檔全失敗（例如被 429 限流）時不得寫入 0 值污染序列
+  if (added === 0 && tin === 0 && tout === 0) {
+    return { ok: false, reason: err || "empty" };
+  }
   const slot = minuteSlot(nowMs);
   await env.IMB_DB.prepare(
     "INSERT INTO imb3 (day_key, session, t, d20, in20, out20, n, ts) VALUES (?,?,?,?,?,?,?,?) " +
@@ -1965,6 +1969,8 @@ export default {
     if (kind === "imb3-probe") {
       const hasTok = !!(await fubonToken(env));
       let cur3 = null;
+      let recent3 = null;
+      let cnt3 = null;
       try {
         const nowP = Date.now();
         const skP = sessionOf(nowP);
@@ -1974,6 +1980,14 @@ export default {
           "SELECT sym, serial, in20, out20, upd FROM imb3_cur WHERE day_key=? AND session=? ORDER BY sym"
         ).bind(dkP, skP).all();
         cur3 = qq.results;
+        const rr = await env.IMB_DB.prepare(
+          "SELECT session, t, in20, out20, n, ts FROM imb3 WHERE day_key=? ORDER BY t DESC LIMIT 12"
+        ).bind(dkP).all();
+        recent3 = rr.results;
+        const cc = await env.IMB_DB.prepare(
+          "SELECT session, COUNT(*) AS c, MIN(t) AS mn, MAX(t) AS mx FROM imb3 WHERE day_key=? GROUP BY session"
+        ).bind(dkP).all();
+        cnt3 = cc.results;
       } catch (e) {
         cur3 = String((e && e.message) || e);
       }
@@ -1983,7 +1997,7 @@ export default {
       } catch (e) {
         out = { ok: false, error: String((e && e.message) || e) };
       }
-      return jsonResp({ hasToken: hasTok, cur: cur3, result: out }, 200, { "Cache-Control": "no-store" });
+      return jsonResp({ hasToken: hasTok, cur: cur3, recent: recent3, counts: cnt3, result: out }, 200, { "Cache-Control": "no-store" });
     }
     if (kind === "imb3") {
       const now3 = Date.now();
