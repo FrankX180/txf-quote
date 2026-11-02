@@ -3279,13 +3279,22 @@
         const dk = imbDayKey();
         let pack = null;
         try {
-          const p3 = await fetch(LIVE + "?kind=imb3&day=" + dk, { cache: "default" }).then((r) =>
-            r.ok ? r.json() : null
-          );
-          const n3 = p3 ? (p3.day || []).length + (p3.night || []).length : 0;
-          if (n3 >= 5) {
-            pack = convImb3(p3);
-            imbFrom3 = true;
+          // 2026-11-02：夜盤的 day_key 前端（imbDayKey）與 Worker（tradingDayKey）可能不同 → 兩個都試
+          const keys = [dk];
+          try {
+            const dk2 = tradingDayKey();
+            if (dk2 && dk2 !== dk) keys.push(dk2);
+          } catch (e) {}
+          for (const k of keys) {
+            const p3 = await fetch(LIVE + "?kind=imb3&day=" + k, { cache: "default" }).then((r) =>
+              r.ok ? r.json() : null
+            );
+            const n3 = p3 ? (p3.day || []).length + (p3.night || []).length : 0;
+            if (n3 >= 5) {
+              pack = convImb3(p3);
+              imbFrom3 = true;
+              break;
+            }
           }
         } catch (e) {}
         if (!pack) {
@@ -7594,7 +7603,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.50";
+        const VER = "3.51";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
