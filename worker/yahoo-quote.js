@@ -1100,6 +1100,8 @@ const IMB3_MAX_PAGES = 4;
 async function ensureImb3Schema(db) {
   await db.prepare("CREATE TABLE IF NOT EXISTS imb3 (day_key TEXT NOT NULL, session TEXT NOT NULL, t INTEGER NOT NULL, d20 REAL NOT NULL, in20 REAL NOT NULL, out20 REAL NOT NULL, n INTEGER, ts INTEGER, PRIMARY KEY (day_key, session, t))").run();
   await db.prepare("CREATE TABLE IF NOT EXISTS imb3_cur (day_key TEXT NOT NULL, session TEXT NOT NULL, sym TEXT NOT NULL, serial REAL NOT NULL, in20 REAL NOT NULL, out20 REAL NOT NULL, last_px REAL, last_side INTEGER, upd INTEGER, PRIMARY KEY (day_key, session, sym))").run();
+  // 2026-11-02：品質欄位（ok／partial）——自動對帳發現差距過大時標記，前端可提示
+  try { await db.prepare("ALTER TABLE imb3 ADD COLUMN q TEXT").run(); } catch (e) {}
 }
 
 async function fubonToken(env) {
@@ -1134,7 +1136,7 @@ async function syncImb3(env, nowMs) {
   const dayKey = tradingDayKey(nowMs);
   await ensureImb3Schema(env.IMB_DB);
   const qs = sess === "night" ? "session=afterhours" : "";
-  let tin = 0, tout = 0, added = 0, pages = 0, err = null;
+  let tin = 0, tout = 0, added = 0, pages = 0, err = null, txGross = 0;
   for (let i = 0; i < IMB3_SYMS.length; i++) {
     const sym = IMB3_SYMS[i][0], w = IMB3_SYMS[i][1];
     const cur = await env.IMB_DB.prepare(
@@ -1179,17 +1181,31 @@ async function syncImb3(env, nowMs) {
     ).bind(dayKey, sess, sym, serial, in20, out20, lastPx, lastSide, nowMs).run();
     tin += in20;
     tout += out20;
+    if (i === 0) txGross = in20 + out20; // TXF 累計（1/20 大台口）→ 供自動對帳
   }
   // 三檔全失敗（例如被 429 限流）時不得寫入 0 值污染序列
   if (added === 0 && tin === 0 && tout === 0) {
     return { ok: false, reason: err || "empty" };
   }
+  // 2026-11-02 自動對帳：用期交所 MIS 的當盤總成交量當尺，比對 TXF 逐筆累計量。
+  // 差距 > 1% 就把這分鐘標 partial（不擋寫入，但讓前端能顯示「資料待確認」）。
+  let q = "ok";
+  let qDiff = 0;
+  try {
+    const mis = await fetchMisQuote();
+    const mv = mis && mis.vol;
+    if (mv > 0 && txGross > 0) {
+      const ours = txGross / 20;
+      qDiff = Math.round(ours - mv);
+      if (Math.abs(qDiff) / mv > 0.01) q = "partial";
+    }
+  } catch (e) {}
   const slot = minuteSlot(nowMs);
   await env.IMB_DB.prepare(
-    "INSERT INTO imb3 (day_key, session, t, d20, in20, out20, n, ts) VALUES (?,?,?,?,?,?,?,?) " +
-    "ON CONFLICT(day_key, session, t) DO UPDATE SET d20=excluded.d20, in20=excluded.in20, out20=excluded.out20, n=excluded.n, ts=excluded.ts"
-  ).bind(dayKey, sess, slot, tout - tin, tin, tout, added, nowMs).run();
-  return { ok: true, dayKey, sess, in20: tin, out20: tout, added, pages, err };
+    "INSERT INTO imb3 (day_key, session, t, d20, in20, out20, n, ts, q) VALUES (?,?,?,?,?,?,?,?,?) " +
+    "ON CONFLICT(day_key, session, t) DO UPDATE SET d20=excluded.d20, in20=excluded.in20, out20=excluded.out20, n=excluded.n, ts=excluded.ts, q=excluded.q"
+  ).bind(dayKey, sess, slot, tout - tin, tin, tout, added, nowMs, q).run();
+  return { ok: true, dayKey, sess, in20: tin, out20: tout, added, pages, err, q, qDiff };
 }
 
 async function loadPack(env, dayKey) {
@@ -2010,14 +2026,15 @@ export default {
       try {
         await ensureImb3Schema(env.IMB_DB);
         const q3 = await env.IMB_DB.prepare(
-          "SELECT session, t, d20, in20, out20, n, ts FROM imb3 WHERE day_key=? ORDER BY t ASC"
+          "SELECT session, t, d20, in20, out20, n, ts, q FROM imb3 WHERE day_key=? ORDER BY t ASC"
         ).bind(day3).all();
         const dArr = [], nArr = [];
         let upd = null;
+        let lastQ = null;
         for (const r of q3.results || []) {
-          const bar = { t: r.t, d: r.d20, in: r.in20, out: r.out20, n: r.n, ts: r.ts };
+          const bar = { t: r.t, d: r.d20, in: r.in20, out: r.out20, n: r.n, ts: r.ts, q: r.q || "ok" };
           if (r.session === "day") dArr.push(bar); else nArr.push(bar);
-          if (!upd || r.ts > upd) upd = r.ts;
+          if (!upd || r.ts > upd) { upd = r.ts; lastQ = bar.q; }
         }
         return jsonResp(
           {
@@ -2025,6 +2042,7 @@ export default {
             day: dArr,
             night: nArr,
             unit: "1/20-taiex",
+            quality: lastQ || "ok",
             updatedAt: upd ? new Date(upd).toISOString() : null,
             source: "d1-imb3",
           },

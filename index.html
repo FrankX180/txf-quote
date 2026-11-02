@@ -1329,6 +1329,9 @@
     let imbBars = { night: [], day: [] };
     // 2026-11-02：內外盤是否已切到大小微台合併序列（true 時不扣前夜、離群門檻放寬）
     let imbFrom3 = false;
+    // 降級標示用：曾嘗試載入 imb3／最近一筆的品質旗標
+    let imb3Tried = false;
+    let imb3Quality = "ok";
     // 前一夜盤收盤內外盤差值；日盤顯示時扣除，得到乾淨日盤
     let nightImbBase = null; // { d, in, out, baseKey, forDay, t }
     // 當盤開高低追蹤（tick）；不依賴奇摩 stockList 的混盤 OHLC
@@ -1750,16 +1753,18 @@
         else paintImbBar(inn, outv, false);
         const net = outv - inn;
         const imb = $("imb");
+        // 2026-11-02：降級或對帳異常時在文字前標示，避免「看起來正常、實際只有大台」
+        const imbTag = (imb3Tried && !imbFrom3) ? "僅大台 · " : (imb3Quality === "partial" ? "待確認 · " : "");
         if (imb) {
           if (net > 0) {
             imb.className = "imb up";
-            imb.textContent = "外盤向上買超 +" + fmt(net) + " 口";
+            imb.textContent = imbTag + "外盤向上買超 +" + fmt(net) + " 口";
           } else if (net < 0) {
             imb.className = "imb dn";
-            imb.textContent = "內盤向下賣超 " + fmt(net) + " 口";
+            imb.textContent = imbTag + "內盤向下賣超 " + fmt(net) + " 口";
           } else {
             imb.className = "imb";
-            imb.textContent = "內外盤持平 0 口";
+            imb.textContent = imbTag + "內外盤持平 0 口";
           }
         }
       } else {
@@ -3261,7 +3266,7 @@
           out: (b.out || 0) / 20,
           ts: b.ts,
         }));
-      return { dayKey: p.dayKey, day: conv(p.day), night: conv(p.night), updatedAt: p.updatedAt };
+      return { dayKey: p.dayKey, day: conv(p.day), night: conv(p.night), updatedAt: p.updatedAt, quality: p.quality || "ok" };
     }
     function mergeImbSide(localArr, cloudArr) {
       const map = {};
@@ -3280,6 +3285,7 @@
         .map((k) => map[k]);
     }
     async function loadImbCloud() {
+      imb3Tried = true;
       try {
         const dk = imbDayKey();
         let pack = null;
@@ -3298,6 +3304,7 @@
             if (n3 >= 5) {
               pack = convImb3(p3);
               imbFrom3 = true;
+              imb3Quality = pack.quality || "ok";
               break;
             }
           }
