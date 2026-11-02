@@ -7564,7 +7564,9 @@
         }
       } catch (e) {}
       pollLive();
-      liveTimer = setInterval(pollLive, 5000);
+      // 2026-11-02：回到 15 秒。報價即時性由 MIS 推流（秒級）負責，這裡只是備援；
+      // 5 秒會讓每人每月請求從約 10 萬次變 30 萬次，換不到看得見的差別。
+      liveTimer = setInterval(pollLive, 15000);
       startMisWs();
       if (!ghHealTimer) {
         checkGhSnapshotStale();
@@ -7615,7 +7617,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.54";
+        const VER = "3.55";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
