@@ -1325,6 +1325,8 @@
     } catch (e) {}
     // 每分鐘 1 根：該分鐘內最後一次 5 秒的 外盤-內盤
     let imbBars = { night: [], day: [] };
+    // 2026-11-02：內外盤是否已切到大小微台合併序列（true 時不扣前夜、離群門檻放寬）
+    let imbFrom3 = false;
     // 前一夜盤收盤內外盤差值；日盤顯示時扣除，得到乾淨日盤
     let nightImbBase = null; // { d, in, out, baseKey, forDay, t }
     // 當盤開高低追蹤（tick）；不依賴奇摩 stockList 的混盤 OHLC
@@ -3057,7 +3059,7 @@
           prev &&
           b.t - prev.t > 0 &&
           b.t - prev.t <= 120000 &&
-          Math.abs((n(b.d) || 0) - (n(prev.d) || 0)) > 500
+          Math.abs((n(b.d) || 0) - (n(prev.d) || 0)) > (imbFrom3 ? 2500 : 500)
         )
           continue;
         out.push(b);
@@ -3124,7 +3126,9 @@
       }
       const d = outv - inn;
       // 離群丟棄（不可沿用前值：沿用會把基準凍住，真實大跳動後整場卡死）；缺口由 fillImbMinutes 補平
-      if (last && last.t !== slot && slot - last.t <= 120000 && Math.abs(d - (last.d || 0)) > 500) return;
+      // 2026-11-02：三檔合計後單分鐘跳動量級變大，門檻由 500 放寬到 2500（純大台時仍用 500）
+      const jumpLimit = imbFrom3 ? 2500 : 500;
+      if (last && last.t !== slot && slot - last.t <= 120000 && Math.abs(d - (last.d || 0)) > jumpLimit) return;
       if (last && last.t === slot) {
         last.d = d;
         last.in = inn;
@@ -3184,6 +3188,7 @@
       return true;
     }
     function dayImbBase() {
+      if (imbFrom3) return null; // 三檔合計已按 session 各自從 0 累計，不可再扣前夜
       if (sessKey() !== "day") return null;
       if (!nightImbBase || nightImbBase.forDay !== tradingDayKey()) return null;
       return nightImbBase;
@@ -3239,30 +3244,56 @@
       const arr = imbSeries();
       return arr.length ? arr[arr.length - 1] : null;
     }
+    // 2026-11-02 切換：內外盤改讀大小微台合併（Worker ?kind=imb3）。
+    // imb3 的 in/out/d 單位是 1/20 大台口 → 除以 20 換成大台等值口。
+    // imb3 當日點數不足（<5）時退回原本 Yahoo 大台序列（?kind=imb）。
+    function convImb3(p) {
+      const conv = (arr) =>
+        (arr || []).map((b) => ({
+          t: b.t,
+          d: (b.d || 0) / 20,
+          in: (b.in || 0) / 20,
+          out: (b.out || 0) / 20,
+          ts: b.ts,
+        }));
+      return { dayKey: p.dayKey, day: conv(p.day), night: conv(p.night), updatedAt: p.updatedAt };
+    }
     function mergeImbSide(localArr, cloudArr) {
       const map = {};
       (localArr || []).forEach((b) => {
         if (b && b.t != null) map[b.t] = b;
       });
+      // 切換後雲端是三檔逐筆真值，一律壓過本機 Yahoo 大台值（不比較 ts）
       (cloudArr || []).forEach((b) => {
         if (!b || b.t == null) return;
         const cur = map[b.t];
-        if (!cur || (b.ts || 0) >= (cur.ts || 0)) map[b.t] = b;
+        if (imbFrom3 || !cur || (b.ts || 0) >= (cur.ts || 0)) map[b.t] = b;
       });
       return Object.keys(map)
         .map(Number)
         .sort((a, b) => a - b)
         .map((k) => map[k]);
     }
-    // 2026-11-02：大小微台合併內外盤（Worker ?kind=imb3）仍在後台並行驗證，尚未切換。
-    // 老公要求：後台先做對、驗證可取代後才上線；驗證期間前端一律讀原本的 Yahoo 大台序列。
-    // 驗收通過後把這裡改回 imb3 優先即可（版控可逆）。
     async function loadImbCloud() {
       try {
         const dk = imbDayKey();
-        let pack = await fetch(LIVE + "?kind=imb&day=" + dk, { cache: "default" }).then((r) =>
-          r.ok ? r.json() : null
-        );
+        let pack = null;
+        try {
+          const p3 = await fetch(LIVE + "?kind=imb3&day=" + dk, { cache: "default" }).then((r) =>
+            r.ok ? r.json() : null
+          );
+          const n3 = p3 ? (p3.day || []).length + (p3.night || []).length : 0;
+          if (n3 >= 5) {
+            pack = convImb3(p3);
+            imbFrom3 = true;
+          }
+        } catch (e) {}
+        if (!pack) {
+          imbFrom3 = false;
+          pack = await fetch(LIVE + "?kind=imb&day=" + dk, { cache: "default" }).then((r) =>
+            r.ok ? r.json() : null
+          );
+        }
         const packEmpty =
           !pack ||
           (!(pack.night && pack.night.length) && !(pack.day && pack.day.length));
@@ -7563,7 +7594,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.49";
+        const VER = "3.50";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {

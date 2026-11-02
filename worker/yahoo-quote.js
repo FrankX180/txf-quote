@@ -1111,8 +1111,13 @@ async function fubonToken(env) {
   }
 }
 
-// 內外盤方向：成交價打到賣價＝外盤（+1）、打到買價＝內盤（-1）、夾在中間用比上一筆漲跌
+// 內外盤方向：成交價打到賣價＝外盤（+1）、打到買價＝內盤（-1）、夾在中間用比上一筆漲跌。
+// 2026-11-02 修：bid === ask（鎖漲跌停）時不可先命中 ask 全歸外盤，退回 tick rule。
 function imb3Side(px, bid, ask, prevPx, prevSide) {
+  if (bid && ask && bid === ask) {
+    if (prevPx != null && px !== prevPx) return px > prevPx ? 1 : -1;
+    return prevSide || 0;
+  }
   if (ask && px >= ask) return 1;
   if (bid && px <= bid) return -1;
   if (prevPx != null && px !== prevPx) return px > prevPx ? 1 : -1;
