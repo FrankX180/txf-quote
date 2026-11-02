@@ -3254,36 +3254,15 @@
         .sort((a, b) => a - b)
         .map((k) => map[k]);
     }
-    // 2026-11-02：內外盤改讀大小微台合併（Worker ?kind=imb3）。
-    // imb3 的 in/out/d 單位是 1/20 大台口 → 除以 20 換成大台等值口，餵給既有顯示與副圖邏輯。
-    // imb3 當日尚未累積（點數 < 5，如上線當天）時，退回原本 Yahoo 大台序列。
-    function convImb3(p) {
-      const conv = (arr) =>
-        (arr || []).map((b) => ({
-          t: b.t,
-          d: (b.d || 0) / 20,
-          in: (b.in || 0) / 20,
-          out: (b.out || 0) / 20,
-          ts: b.ts,
-        }));
-      return { dayKey: p.dayKey, day: conv(p.day), night: conv(p.night), updatedAt: p.updatedAt };
-    }
+    // 2026-11-02：大小微台合併內外盤（Worker ?kind=imb3）仍在後台並行驗證，尚未切換。
+    // 老公要求：後台先做對、驗證可取代後才上線；驗證期間前端一律讀原本的 Yahoo 大台序列。
+    // 驗收通過後把這裡改回 imb3 優先即可（版控可逆）。
     async function loadImbCloud() {
       try {
         const dk = imbDayKey();
-        let pack = null;
-        try {
-          const p3 = await fetch(LIVE + "?kind=imb3&day=" + dk, { cache: "default" }).then((r) =>
-            r.ok ? r.json() : null
-          );
-          const n3 = p3 ? (p3.day || []).length + (p3.night || []).length : 0;
-          if (n3 >= 5) pack = convImb3(p3);
-        } catch (e) {}
-        if (!pack) {
-          pack = await fetch(LIVE + "?kind=imb&day=" + dk, { cache: "default" }).then((r) =>
-            r.ok ? r.json() : null
-          );
-        }
+        let pack = await fetch(LIVE + "?kind=imb&day=" + dk, { cache: "default" }).then((r) =>
+          r.ok ? r.json() : null
+        );
         const packEmpty =
           !pack ||
           (!(pack.night && pack.night.length) && !(pack.day && pack.day.length));
@@ -7584,7 +7563,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.47";
+        const VER = "3.48";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
