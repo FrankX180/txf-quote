@@ -2307,7 +2307,7 @@
       const bT = nightOk ? Number(night.trustDelta || 0) : 0;
       const bD = nightOk ? Number(night.dealerDelta || 0) : 0;
       const bR = nightOk ? Number(night.retailDelta || 0) : 0;
-      // 下一交易日的夜盤段（尚未有日盤）排最上面：11/02(夜) → 10/30夜 → 10/30日 → 10/30
+      // 清晨空窗（05:15–08:44）時，今晨收盤的夜盤段（上一營業日晚間起跑）排最上面，其下才接上一交易日
       if (nextNightOk) {
         splitRows.push({
           date: nextNightDate,
@@ -2320,6 +2320,8 @@
           dealer: oiNetFlow ? Number(nextNight.dealerDelta || 0) : nextNight.dealer,
           retail: oiNetFlow ? Number(nextNight.retailDelta || 0) : nextNight.retail,
           _splitRow: true,
+          // 它自成一天（今日還没日盤），與下一組之間要畫分隔線
+          _splitEnd: true,
         });
       }
       // 同一交易日組內由上往下＝日盤 → 夜盤 → 合計（2026-11-02 老公定案）。
@@ -2361,7 +2363,7 @@
       if (splitRows.length) {
         oiRows = splitRows.concat(oiRows);
         oiNote += nextNightOk
-          ? "；最上列＝昨夜盤段（今日日盤尚未開盤），其下為上一交易日"
+          ? "；最上列＝今晨收盤的夜盤段（今日日盤尚未開盤），其下為上一交易日"
           : (oiNetFlow
               ? "；上方兩列＝今日日盤段＋今日夜盤段（日盤在上），兩列相加＝下方同日合計（夜盤段＝前一晚 15:00 起的成交淨口）"
               : "；上方兩列＝今日日盤段／夜盤段拆分（夜盤段為前一晚成交後估水位）");
@@ -7558,7 +7560,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.45";
+        const VER = "3.46";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
@@ -7594,6 +7596,17 @@
       if (o || lastKOpen) loadKline();
       lastKOpen = o;
     }, 300000);
+    // 2026-11-02：法人未平倉表的「清晨夜盤列」由台北時間閘門（05:15–08:44）決定，
+    // 但 klineTimer 在 05:10–08:29 不跑，頁面跨過邊界不會自動出現／消失違。
+    // 每分鐘比對閘門狀態，一變化就重載一次法人資料重畫。
+    let lastOiGate = null;
+    setInterval(() => {
+      const d = new Date(Date.now() + 8 * 3600 * 1000);
+      const hm = d.getUTCHours() * 100 + d.getUTCMinutes();
+      const gate = (hm >= 515 && hm < 845) ? "gap" : "open";
+      if (lastOiGate !== null && lastOiGate !== gate) loadUncover();
+      lastOiGate = gate;
+    }, 60000);
   </script>
 </body>
 </html>
