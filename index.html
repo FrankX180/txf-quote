@@ -2298,7 +2298,11 @@
       const nextNightDate = nextNight && (nextNight.tradeDate || nextNight.date)
         ? String(nextNight.tradeDate || nextNight.date).replace(/\D/g, "")
         : "";
-      const nextNightOk = !!(nextNight && nextNightDate && day0 && nextNightDate > day0 && nextNight.close != null);
+      // 老公定案（2026-11-02）：下一交易日的夜盤段只在「清晨空窗」顯示（05:15 夜盤收完～08:44 日盤未開）。
+      // 其餘時段（日盤中、日盤後、夜盤進行中）最上面一律是今日日盤，未完成的夜盤不插隊。
+      const _twHM = (() => { const d = new Date(Date.now() + 8 * 3600 * 1000); return d.getUTCHours() * 100 + d.getUTCMinutes(); })();
+      const nextNightOk = !!(nextNight && nextNightDate && day0 && nextNightDate > day0 && nextNight.close != null)
+        && _twHM >= 515 && _twHM < 845;
       const bF = nightOk ? Number(night.foreignDelta || 0) : 0;
       const bT = nightOk ? Number(night.trustDelta || 0) : 0;
       const bD = nightOk ? Number(night.dealerDelta || 0) : 0;
@@ -2318,7 +2322,26 @@
           _splitRow: true,
         });
       }
-      // 夜盤段在時間上先於今日日盤：夜 → 日 → 合計，由上往下讀就是發生順序
+      // 同一交易日組內由上往下＝日盤 → 夜盤 → 合計（2026-11-02 老公定案）。
+      // 日盤時間上晚於夜盤，排上面才符合「最新在最上」；合計列在 oiRows 首位接續其下。
+      if (day0 && baseDay.close != null) {
+        const cF = oiNetFlow ? (baseDay.foreignDelta != null ? Number(baseDay.foreignDelta) : oiDayDiff(hist, 0, "foreign")) : baseDay.foreign;
+        const cT = oiNetFlow ? oiDayDiff(hist, 0, "trust") : baseDay.trust;
+        const cD = oiNetFlow ? oiDayDiff(hist, 0, "dealer") : baseDay.dealer;
+        const cR = oiNetFlow ? (baseDay.retailDelta != null ? Number(baseDay.retailDelta) : oiDayDiff(hist, 0, "retail")) : baseDay.retail;
+        splitRows.push({
+          date: day0,
+          session: "daypart",
+          close: baseDay.close,
+          _splitRow: true,
+          _splitEnd: !nightOk,
+          _prevClose: hist[1] ? hist[1].close : null,
+          foreign: oiNetFlow ? (Number(cF || 0) - bF) : cF,
+          trust: oiNetFlow ? (Number(cT || 0) - bT) : cT,
+          dealer: oiNetFlow ? (Number(cD || 0) - bD) : cD,
+          retail: oiNetFlow ? (Number(cR || 0) - bR) : cR,
+        });
+      }
       if (nightOk) {
         splitRows.push({
           date: nightTradeDate || nightDate || day0,
@@ -2332,34 +2355,17 @@
           dealer: oiNetFlow ? bD : night.dealer,
           retail: oiNetFlow ? bR : night.retail,
           _splitRow: true,
-        });
-      }
-      if (day0 && baseDay.close != null) {
-        const cF = oiNetFlow ? (baseDay.foreignDelta != null ? Number(baseDay.foreignDelta) : oiDayDiff(hist, 0, "foreign")) : baseDay.foreign;
-        const cT = oiNetFlow ? oiDayDiff(hist, 0, "trust") : baseDay.trust;
-        const cD = oiNetFlow ? oiDayDiff(hist, 0, "dealer") : baseDay.dealer;
-        const cR = oiNetFlow ? (baseDay.retailDelta != null ? Number(baseDay.retailDelta) : oiDayDiff(hist, 0, "retail")) : baseDay.retail;
-        splitRows.push({
-          date: day0,
-          session: "daypart",
-          close: baseDay.close,
-          _splitRow: true,
           _splitEnd: true,
-          _prevClose: hist[1] ? hist[1].close : null,
-          foreign: oiNetFlow ? (Number(cF || 0) - bF) : cF,
-          trust: oiNetFlow ? (Number(cT || 0) - bT) : cT,
-          dealer: oiNetFlow ? (Number(cD || 0) - bD) : cD,
-          retail: oiNetFlow ? (Number(cR || 0) - bR) : cR,
         });
       }
       if (splitRows.length) {
         oiRows = splitRows.concat(oiRows);
         oiNote += nextNightOk
-          ? "；最上列＝下一交易日已開始的夜盤段（未完成）"
+          ? "；最上列＝昨夜盤段（今日日盤尚未開盤）"
           : "";
         oiNote += oiNetFlow
-          ? "；上方兩列＝今日夜盤段＋今日日盤段，兩列相加＝下方同日合計（夜盤段＝前一晚 15:00 起的成交淨口）"
-          : "；上方兩列＝今日夜盤段／日盤段拆分（夜盤段為前一晚成交後估水位）";
+          ? "；上方兩列＝今日日盤段＋今日夜盤段（日盤在上），兩列相加＝下方同日合計（夜盤段＝前一晚 15:00 起的成交淨口）"
+          : "；上方兩列＝今日日盤段／夜盤段拆分（夜盤段為前一晚成交後估水位）";
       }
       oiEl.innerHTML = oiBuildHistTable("oi", oiRows, oiKeys, oiLabs, oiNote);
 
@@ -7553,7 +7559,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.43";
+        const VER = "3.44";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
