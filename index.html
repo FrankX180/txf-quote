@@ -3114,6 +3114,9 @@
     /** 每 5 秒寫入；同一分鐘覆寫為最新差值 d=外-內 */
     function recordImb(sk, inn, outv, ts) {
       if (!sk) return;
+      // 2026-11-02：已切到三檔合併序列後，不得再讓報價帶回的 Yahoo 單一大台值寫進同一條序列
+      // （否則每 5 秒就把剛 merge 進來的三檔合計蓋掉，畫面永遠停在 Yahoo 口徑）
+      if (imbFrom3) return;
       const t = ts || Date.now();
       const slot = Math.floor(t / 60000) * 60000;
       const arr = imbBars[sk] || (imbBars[sk] = []);
@@ -7603,7 +7606,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.51";
+        const VER = "3.52";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
