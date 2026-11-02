@@ -57,6 +57,17 @@ jobs:
             unzip -o sdk.zip && rm sdk.zip
           fi
           pip install --quiet ./*.whl
+      - name: Ensure Fubon realtime token (for Worker imb3)
+        # 2026-11-02：Worker 的 imb3 每分鐘靠 D1 fubon_tok 打三檔 trades。
+        # 舊流程只在「有缺口」才換 token，沒缺口就不寫 → Worker 拿不到 token。這一步保證每 5 分鐘都有可用 token（有快取就只驗證）。
+        continue-on-error: true
+        env:
+          FUBON_ID: ${{ secrets.FUBON_ID }}
+          FUBON_API_KEY: ${{ secrets.FUBON_API_KEY }}
+          FUBON_CERT_B64: ${{ secrets.FUBON_CERT_B64 }}
+          FUBON_CERT_PASS: ${{ secrets.FUBON_CERT_PASS }}
+          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+        run: python scripts/fubon_imb_fill.py --ensure-token
       - name: Fill imb gaps from Fubon trades
         env:
           FUBON_ID: ${{ secrets.FUBON_ID }}

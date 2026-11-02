@@ -1961,6 +1961,17 @@ export default {
         });
       }
     }
+    // 診断用（2026-11-02）：直接跑一次 syncImb3 並回傳結果，不落 D1 以外的副作用
+    if (kind === "imb3-probe") {
+      const hasTok = !!(await fubonToken(env));
+      let out = null;
+      try {
+        out = await syncImb3(env, Date.now());
+      } catch (e) {
+        out = { ok: false, error: String((e && e.message) || e) };
+      }
+      return jsonResp({ hasToken: hasTok, result: out }, 200, { "Cache-Control": "no-store" });
+    }
     if (kind === "imb3") {
       const now3 = Date.now();
       const day3 = (url.searchParams.get("day") || "").replace(/-/g, "") || tradingDayKey(now3);

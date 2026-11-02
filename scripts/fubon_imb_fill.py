@@ -213,6 +213,11 @@ def minute_cum(trades, start_ms, end_ms):
 
 
 def main():
+    # 2026-11-02：--ensure-token 只負責確保 D1 有可用的行情 token（Worker 的 imb3 靠它），不補任何資料。
+    if "--ensure-token" in sys.argv:
+        tok = get_token("TXF1!")
+        print("TOKEN_ENSURE_OK len", len(tok))
+        return
     now = datetime.datetime.now(TPE)
     day_key, sess, start, end = session_window(now)
     if arg("--day"):
