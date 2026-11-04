@@ -1395,7 +1395,10 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
         # 2026-11-04 修正：期交所 AH 頁的 queryDate 是「夜盤所屬交易日」（＝day8），不是夜盤開始日 d。
         # 實測 queryDate=2026/11/04 才含 11/3 夜盤（25,113／23,835／59,043／59,314／94,298／88,440）；
         # 用 2026/11/03 會拿到 11/2 夜盤（外資 -2,038.5），等於整列錯位一天。
-        qdate = datetime.strptime(day8, "%Y%m%d").strftime("%Y/%m/%d") if day8 else slash
+        if not day8:
+            print("WARN night ah: day8 empty, skip")
+            continue
+        qdate = datetime.strptime(day8, "%Y%m%d").strftime("%Y/%m/%d")
         try:
             nets = scrape_night_ah(qdate)
         except Exception as e:
