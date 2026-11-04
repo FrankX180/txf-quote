@@ -50,6 +50,7 @@ def main():
     tok = f._login_exchange()
     per = {}
     curs = []
+    failed = []
     for root, w in ROOTS:
         sym = f.near_month_symbol(day_key, sess).replace("TXF", root, 1)
         alias = root + "1!"
@@ -57,6 +58,7 @@ def main():
             trades = f.fetch_trades(tok, sym, sess)
         except Exception as e:  # noqa: BLE001
             print("FETCH_FAIL", sym, str(e)[:80])
+            failed.append(root)
             continue
         trades = [x for x in trades if start_ms <= x["time"] / 1000.0 <= end_ms]
         cum = f.minute_cum(trades, start_ms, end_ms)
@@ -73,6 +75,10 @@ def main():
               "in20", int(fin[0] * w), "out20", int(fin[1] * w),
               "taiex_gross", round((fin[0] + fin[1]) * w / 20, 1))
 
+    if failed:
+        # 任一檔抓失敗就完全不寫：只寫部分盤別的累計會讓序列偏低，比不寫更糟
+        print("ABORT_WRITE fetch_failed", failed, "refuse partial write")
+        return
     if not per:
         print("nothing to write")
         return
