@@ -27,6 +27,9 @@ ROOTS = [("TXF", 20), ("MXF", 5), ("TMF", 1)]  # 單位：1/20 大台口
 
 
 def main():
+    if "--help" in sys.argv[1:] or "-h" in sys.argv[1:]:
+        print(__doc__)
+        return
     now = datetime.datetime.now(f.TPE)
     day_key, sess, start, end = f.session_window(now)
     if f.arg("--day"):
@@ -80,25 +83,29 @@ def main():
           "net_taiex", round((tout - tin) / 20, 1), "minutes", len(per))
 
     rows = [(day_key, sess, int(t), int(v[1] - v[0]), int(v[0]), int(v[1]), 0,
-             int(now.timestamp() * 1000)) for t, v in sorted(per.items())]
-    B = 12  # D1：單句最多 100 個綁定變數，12 × 8 = 96
+             int(now.timestamp() * 1000), "ok") for t, v in sorted(per.items())]
+    B = 11  # D1：單句最多 100 個綁定變數，11 × 9 = 99
     for i in range(0, len(rows), B):
         chunk = rows[i:i + B]
-        ph = ",".join(["(?,?,?,?,?,?,?,?)"] * len(chunk))
+        ph = ",".join(["(?,?,?,?,?,?,?,?,?)"] * len(chunk))
         flat = [x for r in chunk for x in r]
         f.d1(
-            "INSERT INTO imb3 (day_key, session, t, d20, in20, out20, n, ts) VALUES " + ph +
+            "INSERT INTO imb3 (day_key, session, t, d20, in20, out20, n, ts, q) VALUES " + ph +
             " ON CONFLICT(day_key, session, t) DO UPDATE SET d20=excluded.d20, in20=excluded.in20, "
-            "out20=excluded.out20, ts=excluded.ts",
+            "out20=excluded.out20, ts=excluded.ts, q=excluded.q",
             flat,
         )
     print("inserted", len(rows))
 
+    try:
+        f.d1("ALTER TABLE imb3_cur ADD COLUMN gap INTEGER DEFAULT 0")
+    except Exception:
+        pass
     for alias, serial, in20, out20 in curs:
         f.d1(
-            "INSERT INTO imb3_cur (day_key, session, sym, serial, in20, out20, last_px, last_side, upd) "
-            "VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(day_key, session, sym) DO UPDATE SET "
-            "serial=excluded.serial, in20=excluded.in20, out20=excluded.out20, upd=excluded.upd",
+            "INSERT INTO imb3_cur (day_key, session, sym, serial, in20, out20, last_px, last_side, upd, gap) "
+            "VALUES (?,?,?,?,?,?,?,?,?,0) ON CONFLICT(day_key, session, sym) DO UPDATE SET "
+            "serial=excluded.serial, in20=excluded.in20, out20=excluded.out20, upd=excluded.upd, gap=0",
             [day_key, sess, alias, serial, in20, out20, None, None, int(now.timestamp() * 1000)],
         )
     print("cur upserted", [c[0] for c in curs])

@@ -1,6 +1,6 @@
 const YAHOO =
   "https://tw.stock.yahoo.com/_td-stock/api/resource/" +
-  "StockServices.stockList;symbols=WTX%26,WCDF%26,WCCF%26";
+  "StockServices.stockList;symbols=WTX%26,WMT%26,WTM%26,WCDF%26,WCCF%26";
 const CHART1M =
   "https://tw.stock.yahoo.com/_td-stock/api/resource/" +
   "StockServices.chart;symbol=WTX%26;period=1m;range=1d";
@@ -1095,15 +1095,20 @@ async function appendImb(env, rows, nowMs) {
 const FUGLE_MD = "https://api.fugle.tw/marketdata/v1.0/futopt/intraday/";
 const IMB3_SYMS = [["TXF1!", 20], ["MXF1!", 5], ["TMF1!", 1]];
 const IMB3_PAGE = 500;
-const IMB3_MAX_PAGES = 4;
+const IMB3_MAX_PAGES = 6;
+
+const _imb3SchemaReady = new WeakSet();
 
 async function ensureImb3Schema(db) {
+  if (_imb3SchemaReady.has(db)) return;
   await db.prepare("CREATE TABLE IF NOT EXISTS imb3 (day_key TEXT NOT NULL, session TEXT NOT NULL, t INTEGER NOT NULL, d20 REAL NOT NULL, in20 REAL NOT NULL, out20 REAL NOT NULL, n INTEGER, ts INTEGER, PRIMARY KEY (day_key, session, t))").run();
   await db.prepare("CREATE TABLE IF NOT EXISTS imb3_cur (day_key TEXT NOT NULL, session TEXT NOT NULL, sym TEXT NOT NULL, serial REAL NOT NULL, in20 REAL NOT NULL, out20 REAL NOT NULL, last_px REAL, last_side INTEGER, upd INTEGER, PRIMARY KEY (day_key, session, sym))").run();
   // 2026-11-02：品質欄位（ok／partial）——自動對帳發現差距過大時標記，前端可提示
   try { await db.prepare("ALTER TABLE imb3 ADD COLUMN q TEXT").run(); } catch (e) {}
+  // 2026-11-04：持久化截斷標記（某檔曾超過分頁上限未接回時 gap=1，直到回填才歸 0）
+  try { await db.prepare("ALTER TABLE imb3_cur ADD COLUMN gap INTEGER DEFAULT 0").run(); } catch (e) {}
+  _imb3SchemaReady.add(db);
 }
-
 async function fubonToken(env) {
   try {
     const row = await env.IMB_DB.prepare("SELECT tok FROM fubon_tok WHERE id = 1").first();
@@ -1126,7 +1131,10 @@ function imb3Side(px, bid, ask, prevPx, prevSide) {
   return prevSide || 0;
 }
 
-// 每分鐘跑一次：每一檔只抓最新頁（由新到舊），用 serial 去重與續接
+// 每分鐘跑一次：每一檔只抓最新頁（由新到舊），用 prevSerial 去重與續接
+// 2026-11-04 修：不可在單頁迴圈內把 serial 更新為 p=0 的最大值，否則 p>=1（較舊頁）永遠 fresh=[] 提前 break，
+//   導致爆量時 MXF/TMF 只抓到第一頁 500 筆而漏單；改為收集完所有頁再一併按時間正序分類與更新 serial，
+//   且若抓滿 IMB3_MAX_PAGES 仍未接回 prevSerial（仍有斷層），將該分鐘標 q='partial'。
 async function syncImb3(env, nowMs) {
   if (!env.IMB_DB) return { ok: false, reason: "no-db" };
   const sess = sessionOf(nowMs);
@@ -1136,49 +1144,76 @@ async function syncImb3(env, nowMs) {
   const dayKey = tradingDayKey(nowMs);
   await ensureImb3Schema(env.IMB_DB);
   const qs = sess === "night" ? "session=afterhours" : "";
-  let tin = 0, tout = 0, added = 0, pages = 0, err = null, txGross = 0;
+  let tin = 0, tout = 0, added = 0, pages = 0, err = null, txGross = 0, truncated = false;
   for (let i = 0; i < IMB3_SYMS.length; i++) {
     const sym = IMB3_SYMS[i][0], w = IMB3_SYMS[i][1];
     const cur = await env.IMB_DB.prepare(
-      "SELECT serial, in20, out20, last_px, last_side FROM imb3_cur WHERE day_key=? AND session=? AND sym=?"
+      "SELECT serial, in20, out20, last_px, last_side, gap FROM imb3_cur WHERE day_key=? AND session=? AND sym=?"
     ).bind(dayKey, sess, sym).first();
-    let serial = cur ? Number(cur.serial) : 0;
+    const prevSerial = cur ? Number(cur.serial) : 0;
+    let serial = prevSerial;
     let in20 = cur ? Number(cur.in20) : 0;
     let out20 = cur ? Number(cur.out20) : 0;
     let lastPx = cur && cur.last_px != null ? Number(cur.last_px) : null;
     let lastSide = cur && cur.last_side != null ? Number(cur.last_side) : 0;
+    let symGap = cur && Number(cur.gap) ? 1 : 0;
+    const allFresh = [];
+    let symReachedBoundary = false;
+    let symErr = null;
     for (let p = 0; p < IMB3_MAX_PAGES; p++) {
       const u = FUGLE_MD + "trades/" + encodeURIComponent(sym) + "?limit=" + IMB3_PAGE + "&offset=" + (p * IMB3_PAGE) + (qs ? "&" + qs : "");
       let res;
       try {
         res = await fetch(u, { headers: { "X-SDK-TOKEN": tok, "User-Agent": "txf-imb3/1" } });
-      } catch (e) { err = "fetch"; break; }
+      } catch (e) { symErr = "fetch"; err = symErr; break; }
       if (res.status === 401 || res.status === 403) return { ok: false, reason: "token-expired" };
-      if (!res.ok) { err = "http-" + res.status; break; }
+      if (!res.ok) { symErr = "http-" + res.status; err = symErr; break; }
       let arr = [];
-      try { arr = ((await res.json()) || {}).data || []; } catch (e) { err = "json"; break; }
+      try { arr = ((await res.json()) || {}).data || []; } catch (e) { symErr = "json"; err = symErr; break; }
       pages++;
-      if (!arr.length) break;
-      const fresh = arr.filter((x) => x && typeof x.serial === "number" && x.serial > serial);
-      if (!fresh.length) break;
-      fresh.sort((a, b) => (a.time - b.time) || (a.serial - b.serial));
-      for (const x of fresh) {
-        const side = imb3Side(x.price, x.bid, x.ask, lastPx, lastSide);
-        lastPx = x.price;
-        if (side) lastSide = side;
-        const v = (Number(x.size) || 0) * w;
-        if (side > 0) out20 += v;
-        else if (side < 0) in20 += v;
-        if (x.serial > serial) serial = x.serial;
-        added++;
-      }
-      if (fresh.length < arr.length) break; // 已接到上次的邊界
-      if (arr.length < IMB3_PAGE) break;    // 到底了
+      if (!arr.length) { symReachedBoundary = true; break; }
+      const fresh = arr.filter((x) => x && typeof x.serial === "number" && x.serial > prevSerial);
+      if (!fresh.length) { symReachedBoundary = true; break; }
+      for (const x of fresh) allFresh.push(x);
+      if (fresh.length < arr.length) { symReachedBoundary = true; break; } // 已接到上次的邊界
+      if (arr.length < IMB3_PAGE) { symReachedBoundary = true; break; }    // 到底了
     }
-    await env.IMB_DB.prepare(
-      "INSERT INTO imb3_cur (day_key, session, sym, serial, in20, out20, last_px, last_side, upd) VALUES (?,?,?,?,?,?,?,?,?) " +
-      "ON CONFLICT(day_key, session, sym) DO UPDATE SET serial=excluded.serial, in20=excluded.in20, out20=excluded.out20, last_px=excluded.last_px, last_side=excluded.last_side, upd=excluded.upd"
-    ).bind(dayKey, sess, sym, serial, in20, out20, lastPx, lastSide, nowMs).run();
+    if (symErr) {
+      // 中途 HTTP／JSON 失敗（尚未接回 prevSerial）：不推進該商品的 serial 與累計值，讓下一分鐘重抓補齊，避免永久跳號
+      truncated = true;
+    } else {
+      if (!symReachedBoundary) {
+        symGap = 1;
+        truncated = true;
+      }
+      if (allFresh.length > 0) {
+        // offset 分頁跨頁邊界可能有重複 serial，先以 serial 去重再按時間正序分類
+        const seenSerial = new Set();
+        const uniq = [];
+        for (const x of allFresh) {
+          if (!seenSerial.has(x.serial)) {
+            seenSerial.add(x.serial);
+            uniq.push(x);
+          }
+        }
+        uniq.sort((a, b) => (Number(a.time) - Number(b.time)) || (a.serial - b.serial));
+        for (const x of uniq) {
+          const side = imb3Side(x.price, x.bid, x.ask, lastPx, lastSide);
+          lastPx = x.price;
+          if (side) lastSide = side;
+          const v = (Number(x.size) || 0) * w;
+          if (side > 0) out20 += v;
+          else if (side < 0) in20 += v;
+          if (x.serial > serial) serial = x.serial;
+          added++;
+        }
+      }
+      await env.IMB_DB.prepare(
+        "INSERT INTO imb3_cur (day_key, session, sym, serial, in20, out20, last_px, last_side, upd, gap) VALUES (?,?,?,?,?,?,?,?,?,?) " +
+        "ON CONFLICT(day_key, session, sym) DO UPDATE SET serial=excluded.serial, in20=excluded.in20, out20=excluded.out20, last_px=excluded.last_px, last_side=excluded.last_side, upd=excluded.upd, gap=excluded.gap"
+      ).bind(dayKey, sess, sym, serial, in20, out20, lastPx, lastSide, nowMs, symGap).run();
+    }
+    if (symGap) truncated = true;
     tin += in20;
     tout += out20;
     if (i === 0) txGross = in20 + out20; // TXF 累計（1/20 大台口）→ 供自動對帳
@@ -1187,9 +1222,21 @@ async function syncImb3(env, nowMs) {
   if (added === 0 && tin === 0 && tout === 0) {
     return { ok: false, reason: err || "empty" };
   }
+  // 2026-11-04 方案 A 安全網：富邦逐筆是備援，但它的游標若停在好幾小時前，
+  // 一次只能補 6 頁（3000 筆），算出來的累計值會遠小於 Yahoo 主線已經落地的值。
+  // 這種情況不准覆寫，否則前端曲線會倒退跳針。
+  try {
+    const prevRow = await env.IMB_DB.prepare(
+      "SELECT in20, out20 FROM imb3 WHERE day_key=? AND session=? ORDER BY t DESC LIMIT 1"
+    ).bind(dayKey, sess).first();
+    const prevSum = prevRow ? (Number(prevRow.in20) || 0) + (Number(prevRow.out20) || 0) : 0;
+    if (prevSum > 0 && tin + tout < prevSum * 0.95) {
+      return { ok: false, reason: "would-regress", prevSum: Math.round(prevSum), now: Math.round(tin + tout) };
+    }
+  } catch (e) {}
   // 2026-11-02 自動對帳：用期交所 MIS 的當盤總成交量當尺，比對 TXF 逐筆累計量。
-  // 差距 > 1% 就把這分鐘標 partial（不擋寫入，但讓前端能顯示「資料待確認」）。
-  let q = "ok";
+  // 2026-11-04 補：若任一商品抓滿 IMB3_MAX_PAGES 仍未接回 prevSerial（truncated），同樣標 partial。
+  let q = truncated ? "partial" : "ok";
   let qDiff = 0;
   try {
     const mis = await fetchMisQuote();
@@ -1206,6 +1253,102 @@ async function syncImb3(env, nowMs) {
     "ON CONFLICT(day_key, session, t) DO UPDATE SET d20=excluded.d20, in20=excluded.in20, out20=excluded.out20, n=excluded.n, ts=excluded.ts, q=excluded.q"
   ).bind(dayKey, sess, slot, tout - tin, tin, tout, added, nowMs, q).run();
   return { ok: true, dayKey, sess, in20: tin, out20: tout, added, pages, err, q, qDiff };
+}
+
+// ── 2026-11-04 方案 A（老公拍板）：內外盤主線改走 Yahoo 一次抓齊大小微台 ──
+// Yahoo StockServices 的 inMarket／outMarket 是期交所端「當盤開盤累計」的狀態值，
+// 爆量或斷線都不會漏單（富邦逐筆是增量流，斷一次就得靠回填補洞）。
+// 單位沿用 imb3 的「1/20 大台口」刻度：TXF×20 + MXF×5 + TMF×1。
+const IMB3_Y_SYMS = [["WTX&", 20], ["WMT&", 5], ["WTM&", 1]];
+
+// Yahoo 的 inMarket／outMarket 是「千口」小數（實測 33.191＝33,191 口），這裡一律換算成口。
+function imb3YNum(v) {
+  if (v == null || v === "") return null;
+  if (typeof v === "object" && v.raw != null) v = v.raw;
+  const n = Number(String(v).replace(/,/g, ""));
+  if (!Number.isFinite(n)) return null;
+  return Math.abs(n) < 1e6 ? Math.round(n * 1000) : Math.round(n);
+}
+
+// 日盤時 Yahoo 的 inMarket／outMarket 是「前一夜盤＋當日日盤」的全天累計，
+// 要扣掉同一交易日的前一夜盤末值，才會與夜盤一致地從 0 起算。
+async function imb3YahooNightBase(db, dayKey) {
+  try {
+    const row = await db
+      .prepare(
+        "SELECT in20, out20 FROM imb3 WHERE session='night' AND day_key < ? ORDER BY day_key DESC, t DESC LIMIT 1"
+      )
+      .bind(dayKey)
+      .first();
+    if (!row) return { in20: 0, out20: 0 };
+    return { in20: Number(row.in20) || 0, out20: Number(row.out20) || 0 };
+  } catch (e) {
+    return { in20: 0, out20: 0 };
+  }
+}
+
+async function syncImb3Yahoo(env, rows, nowMs) {
+  if (!env.IMB_DB) return { ok: false, reason: "no-db" };
+  const sess = sessionOf(nowMs);
+  if (!sess) return { ok: false, reason: "closed" };
+  const list = Array.isArray(rows) ? rows : [];
+  const wtx = list.find((x) => x && x.symbol === "WTX&");
+  // 來源日≠今日交易鍵＝假日殘值，一律不寫，改走富邦逐筆
+  if (!yahooBookFresh(wtx, nowMs)) {
+    const r = (await syncImb3(env, nowMs)) || {};
+    return Object.assign({}, r, { source: "fubon-fallback", attemptedFubon: true, yahooReason: "stale" });
+  }
+  let in20 = 0, out20 = 0, got = 0;
+  const missing = [];
+  for (const pair of IMB3_Y_SYMS) {
+    const sym = pair[0], w = pair[1];
+    const r = list.find((x) => x && x.symbol === sym);
+    const i0 = r ? imb3YNum(r.inMarket) : null;
+    const o0 = r ? imb3YNum(r.outMarket) : null;
+    if (i0 == null || o0 == null || i0 + o0 <= 0) { missing.push(sym); continue; }
+    in20 += i0 * w;
+    out20 += o0 * w;
+    got++;
+  }
+  // 任一檔缺值（未開盤／欄位停更）→ 退回已修好分頁的富邦逐筆，不寫半套
+  if (got < IMB3_Y_SYMS.length) {
+    const r = (await syncImb3(env, nowMs)) || {};
+    return Object.assign({}, r, { source: "fubon-fallback", attemptedFubon: true, yahooMissing: missing });
+  }
+  const dayKey = tradingDayKey(nowMs);
+  await ensureImb3Schema(env.IMB_DB);
+  let q = "ok";
+  if (sess === "day") {
+    const base = await imb3YahooNightBase(env.IMB_DB, dayKey);
+    const baseSum = base.in20 + base.out20;
+    if (baseSum > 0) {
+      if (in20 + out20 >= baseSum) {
+        in20 -= base.in20;
+        out20 -= base.out20;
+      } else {
+        // 累計值還沒追上基期＝Yahoo 剛換盤或基期異常，寧可晚一分鐘也不寫暴增值
+        return { ok: false, reason: "base-gt-now", dayKey, sess };
+      }
+    } else {
+      // 查不到前一夜盤基期（Worker 昨夜沒跑到、或表被清）：不能靜默把全天累計寫進日盤，標待確認
+      q = "partial";
+    }
+  }
+  if (in20 + out20 <= 0) return { ok: false, reason: "yahoo-empty" };
+  // 同一盤別內累計值必須單調不減；掉了＝Yahoo 端換盤或抖動，標 partial 讓前端顯示待確認
+  try {
+    const prev = await env.IMB_DB.prepare(
+      "SELECT in20, out20 FROM imb3 WHERE day_key=? AND session=? AND t<? ORDER BY t DESC LIMIT 1"
+    ).bind(dayKey, sess, minuteSlot(nowMs)).first();
+    const pv = prev ? (Number(prev.in20) || 0) + (Number(prev.out20) || 0) : 0;
+    if (pv > 0 && in20 + out20 < pv * 0.999) q = "partial";
+  } catch (e) {}
+  const slot = minuteSlot(nowMs);
+  await env.IMB_DB.prepare(
+    "INSERT INTO imb3 (day_key, session, t, d20, in20, out20, n, ts, q) VALUES (?,?,?,?,?,?,?,?,?)" +
+    " ON CONFLICT(day_key, session, t) DO UPDATE SET d20=excluded.d20, in20=excluded.in20, out20=excluded.out20, n=excluded.n, ts=excluded.ts, q=excluded.q"
+  ).bind(dayKey, sess, slot, out20 - in20, in20, out20, 0, nowMs, q).run();
+  return { ok: true, source: "yahoo", dayKey, sess, in20, out20, q, got };
 }
 
 async function loadPack(env, dayKey) {
@@ -1331,6 +1474,15 @@ async function pollAndStore(env, opts) {
       }
 
       out.imb = await appendImb(env, rows, nowMs);
+      // 2026-11-04 方案 A（老公拍板）：主線改用 Yahoo 一次抓齊大小微台（WTX&+WMT&+WTM&）寫入 imb3。
+      // Yahoo 的 inMarket/outMarket 是期交所端開盤累計總值（狀態值），永遠不漏單；
+      // 舊的富邦逐筆 syncImb3() 留作「Yahoo 缺值才自動切換」的備援。
+      // 一定要自己吃錯：imb3 寫入失敗不可拖垮同一個 try 裡的即時報價（out.px）。
+      try {
+        out.imb3y = await syncImb3Yahoo(env, rows, nowMs);
+      } catch (e) {
+        out.imb3y = { ok: false, reason: "throw", error: String((e && e.message) || e) };
+      }
       const w = extractWtx(rows);
       out.px = await appendPricePx(env, w && w.px, nowMs, "quote");
     } catch (e) {
@@ -2284,12 +2436,23 @@ export default {
     ctx.waitUntil(
       (async () => {
         if (isTradeSession) {
-          await pollAndStore(env, { chart: needChart });
+          // 方案 A：pollAndStore 內已走 Yahoo 主線（失敗自動退回富邦逐筆），
+          // 只有它整段沒寫成（例如 Yahoo backoff 提前 return）才補跑富邦，避免兩條路互相覆蓋同一分鐘。
+          let imb3Ok = false;
           try {
-            const r3 = await syncImb3(env, nowMs);
-            if (!r3.ok) console.log("imb3 skip", r3.reason);
+            const pr = await pollAndStore(env, { chart: needChart });
+            // syncImb3Yahoo 內部 fallback 時已經跑過富邦（attemptedFubon），cron 不重跑第二遍
+            imb3Ok = !!(pr && pr.imb3y && (pr.imb3y.ok || pr.imb3y.attemptedFubon));
           } catch (e) {
-            console.error("imb3 failed", String((e && e.message) || e));
+            console.error("poll failed", String((e && e.message) || e));
+          }
+          if (!imb3Ok) {
+            try {
+              const r3 = await syncImb3(env, nowMs);
+              if (!r3.ok) console.log("imb3 skip", r3.reason);
+            } catch (e) {
+              console.error("imb3 failed", String((e && e.message) || e));
+            }
           }
         }
         try {

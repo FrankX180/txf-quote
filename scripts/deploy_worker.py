@@ -23,19 +23,69 @@ NAME = "txf-yahoo"
 DB_NAME = "txf-imb"
 
 
+CF_MODE = "key"  # "key" = Global API Key（X-Auth-Email＋X-Auth-Key）；"token" = API Token（Bearer）
+
+
+def _secret_lookup(names):
+    """在 secrets 檔找指定鍵。支援三種寫法：KEY=VALUE／| KEY | VALUE |／鍵名單獨一行下一行是值。
+    先掃 KEY=VALUE 全檔（最不易截斷），再掃表格，最後才是單獨一行。"""
+    if not SECRETS.exists():
+        return None, None
+    lines = SECRETS.read_text(encoding="utf-8", errors="replace").splitlines()
+    wants = [n.upper() for n in names]
+    for want in wants:
+        for line in lines:
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            for sep in ("=", ":"):
+                if sep not in s:
+                    continue
+                k, v = s.split(sep, 1)
+                if k.strip().strip("*`- ").strip().upper() == want and v.strip():
+                    val = v.strip().strip("`").strip()
+                    if val and not val.startswith("|"):
+                        return want, val
+    for want in wants:
+        for line in lines:
+            s = line.strip()
+            if not s.startswith("|"):
+                continue
+            cells = [c.strip().strip("`").strip() for c in s.strip("|").split("|")]
+            if len(cells) >= 2 and cells[0].upper() == want and cells[1]:
+                return want, cells[1]
+    for want in wants:
+        for i, line in enumerate(lines):
+            s = line.strip()
+            if s.strip("*`- ").strip().upper() != want:
+                continue
+            if i + 1 < len(lines):
+                nxt = lines[i + 1].strip()
+                if nxt and not nxt.startswith("#"):
+                    return want, nxt.strip("`").strip()
+    return None, None
+
+
 def cf_key():
+    global CF_MODE
     key = (
         os.environ.get("CLOUDFLARE_API_KEY")
         or os.environ.get("CF_API_KEY")
         or ""
     ).strip()
     if key:
+        CF_MODE = "key"
         return key
-    if SECRETS.exists():
-        lines = SECRETS.read_text(encoding="utf-8").splitlines()
-        for i, line in enumerate(lines):
-            if line.strip().upper() == "CLOUDFLARE API KEY" and i + 1 < len(lines):
-                return lines[i + 1].strip()
+    tok = (os.environ.get("CLOUDFLARE_API_TOKEN") or "").strip()
+    if tok:
+        CF_MODE = "token"
+        return tok
+    name, val = _secret_lookup([
+        "CLOUDFLARE_API_KEY", "CLOUDFLARE API KEY", "CLOUDFLARE_API_TOKEN",
+    ])
+    if val:
+        CF_MODE = "token" if "TOKEN" in (name or "") else "key"
+        return val
     raise SystemExit(
         "no CF key (set CLOUDFLARE_API_KEY env var, or provide a local secrets file)"
     )
@@ -43,7 +93,10 @@ def cf_key():
 
 def call(method, url, data=None, headers=None, raw=None):
     key = cf_key()
-    h = {"X-Auth-Email": EMAIL, "X-Auth-Key": key}
+    if CF_MODE == "token":
+        h = {"Authorization": "Bearer " + key}
+    else:
+        h = {"X-Auth-Email": EMAIL, "X-Auth-Key": key}
     if headers:
         h.update(headers)
     body = raw
