@@ -664,7 +664,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">3.58</div>
+      <div class="ver foot-right" id="verFoot">3.59</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -5118,7 +5118,15 @@
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         const labX = Math.max(14, padL / 2 - 2);
-        ctx.fillText("內外盤", labX, imbTop + imbH / 2);
+        const labY = imbTop + imbH / 2;
+        // 副圖高度夠才寫兩行；第二行說明這條線是幾檔合計（老公 2026-11-05 要求）
+        const twoLine = imbH >= 34;
+        ctx.fillText("內外盤", labX, twoLine ? labY - 7 : labY);
+        if (twoLine) {
+          ctx.font = "9px sans-serif";
+          ctx.fillStyle = "#6b7280";
+          ctx.fillText(imbFrom3 ? "大+小+微" : "僅大台", labX, labY + 8);
+        }
         ctx.restore();
 
         ctx.strokeStyle = "#e5e7eb";
@@ -7617,7 +7625,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.58";
+        const VER = "3.59";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
