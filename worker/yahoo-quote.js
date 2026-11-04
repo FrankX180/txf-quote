@@ -1296,8 +1296,10 @@ async function syncImb3Yahoo(env, rows, nowMs) {
   const wtx = list.find((x) => x && x.symbol === "WTX&");
   // 來源日≠今日交易鍵＝假日殘值，一律不寫，改走富邦逐筆
   if (!yahooBookFresh(wtx, nowMs)) {
-    const r = (await syncImb3(env, nowMs)) || {};
-    return Object.assign({}, r, { source: "fubon-fallback", attemptedFubon: true, yahooReason: "stale" });
+    // 2026-11-05：備援改為不寫入。富邦逐筆自己分類會比官方多約 2%，
+    // 一旦它插進 Yahoo 序列，累計值就跳升、下一分鐘 Yahoo 回來又掉下去
+    // （實測造成 01:51→01:52 的斷崖）。寧可少一分鐘，也不要污染整條累計曲線。
+    return { ok: false, reason: "yahoo-stale", skippedWrite: true };
   }
   let in20 = 0, out20 = 0, got = 0;
   const missing = [];
@@ -1313,8 +1315,8 @@ async function syncImb3Yahoo(env, rows, nowMs) {
   }
   // 任一檔缺值（未開盤／欄位停更）→ 退回已修好分頁的富邦逐筆，不寫半套
   if (got < IMB3_Y_SYMS.length) {
-    const r = (await syncImb3(env, nowMs)) || {};
-    return Object.assign({}, r, { source: "fubon-fallback", attemptedFubon: true, yahooMissing: missing });
+    // 同上：不拿富邦補寫，避免兩種口徑混進同一條累計
+    return { ok: false, reason: "yahoo-missing", yahooMissing: missing, skippedWrite: true };
   }
   const dayKey = tradingDayKey(nowMs);
   await ensureImb3Schema(env.IMB_DB);
@@ -2439,23 +2441,15 @@ export default {
     ctx.waitUntil(
       (async () => {
         if (isTradeSession) {
-          // 方案 A：pollAndStore 內已走 Yahoo 主線（失敗自動退回富邦逐筆），
-          // 只有它整段沒寫成（例如 Yahoo backoff 提前 return）才補跑富邦，避免兩條路互相覆蓋同一分鐘。
-          let imb3Ok = false;
+          // 方案 A：pollAndStore 內已走 Yahoo 主線。
+          // 2026-11-05：Yahoo 缺值時不再用富邦補寫（口徑差 ~2%，插進累計會造成跳升後又回落），
+          // 失敗就跳過這一分鐘，等下一輪 Yahoo 自己回來。
           try {
             const pr = await pollAndStore(env, { chart: needChart });
-            // syncImb3Yahoo 內部 fallback 時已經跑過富邦（attemptedFubon），cron 不重跑第二遍
-            imb3Ok = !!(pr && pr.imb3y && (pr.imb3y.ok || pr.imb3y.attemptedFubon));
+            const r3 = pr && pr.imb3y;
+            if (r3 && !r3.ok) console.log("imb3 skip", r3.reason);
           } catch (e) {
             console.error("poll failed", String((e && e.message) || e));
-          }
-          if (!imb3Ok) {
-            try {
-              const r3 = await syncImb3(env, nowMs);
-              if (!r3.ok) console.log("imb3 skip", r3.reason);
-            } catch (e) {
-              console.error("imb3 failed", String((e && e.message) || e));
-            }
           }
         }
         try {
