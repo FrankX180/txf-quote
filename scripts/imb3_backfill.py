@@ -99,7 +99,8 @@ def main():
 
     try:
         f.d1("ALTER TABLE imb3_cur ADD COLUMN gap INTEGER DEFAULT 0")
-    except Exception:
+    except (SystemExit, Exception):
+        # f.d1 失敗時 raise SystemExit（BaseException），只寫 except Exception 攔不到會直接中止腳本
         pass
     for alias, serial, in20, out20 in curs:
         f.d1(
