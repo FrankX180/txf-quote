@@ -1089,6 +1089,7 @@ async function appendImb(env, rows, nowMs) {
 }
 
 // ── 大小微台內外盤（2026-11-02 老公指定）──
+// 2026-11-05 現況：本函式已降級為「手動回填／最後手段」，主線是下面的 syncImb3Yahoo。
 // 為何不用 quote 的 totalBidMatch／totalAskMatch：實測 TXF 2026-11-02 日盤 vol 52,064、bid 38,869、ask 38,716，
 // 兩者相加是成交量的 1.5 倍（那是買方／賣方委託各自的成交筆數，每筆雙邊各計一次），不是內外盤口數。
 // 唯一可行：抳 trades 逐筆，用 bid/ask（夾在中間用 tick rule）分類，再換算 1/20 大台口（TXF×20、MXF×5、TMF×1）。
@@ -1475,8 +1476,10 @@ async function pollAndStore(env, opts) {
 
       out.imb = await appendImb(env, rows, nowMs);
       // 2026-11-04 方案 A（老公拍板）：主線改用 Yahoo 一次抓齊大小微台（WTX&+WMT&+WTM&）寫入 imb3。
-      // Yahoo 的 inMarket/outMarket 是期交所端開盤累計總值（狀態值），永遠不漏單；
-      // 舊的富邦逐筆 syncImb3() 留作「Yahoo 缺值才自動切換」的備援。
+      // Yahoo 的 inMarket/outMarket 是期交所端開盤累計總值（狀態值），永遠不漏單。
+      // 2026-11-05 更正宣稱：富邦逐筆 syncImb3() 仍留著，但它**不是隨時可用的保險**——
+      // 它靠 D1 的 fubon_tok，只有人工跑 scripts/imb3_backfill.py 時才會刷新；
+      // token 過期後 fallback 會直接 401。它的真實用途是「手動回填重建歷史序列」。
       // 一定要自己吃錯：imb3 寫入失敗不可拖垮同一個 try 裡的即時報價（out.px）。
       try {
         out.imb3y = await syncImb3Yahoo(env, rows, nowMs);
