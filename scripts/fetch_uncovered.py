@@ -1394,7 +1394,7 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
         _hol = set()
     cands = []
     if day_dt is not None:
-        for _k in range(1, 9):
+        for _k in range(1, 16):
             d = day_dt - timedelta(days=_k)
             if d.weekday() >= 5:
                 continue  # 週六日無夜盤
@@ -1427,6 +1427,10 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
         _ns = datetime.combine(d, datetime.min.time(), TZ) + timedelta(hours=15)
         _live_night = _ns <= now < _ns + timedelta(hours=14)
         nclose = close if (_live_night and close is not None) else night_close_from_kline(d8)
+        if nclose is None:
+            # Rumi N3：holidays.json 漏列平日休市日時，d 會被當成夜盤起跑日但 K 線查不到收盤，
+            # 前端 nightOk 失敗→整列靜默消失。至少留一行 log 可追。
+            print("WARN night close missing", d8)
         row = {
             "date": d8,
             "tradeDate": next_trade_date8(d8),
@@ -1515,7 +1519,7 @@ def fetch_next_night(day_hist_date: str, base_row: dict | None = None):
     except Exception:
         _hol = set()
     cands = []
-    for k in range(0, 9):
+    for k in range(0, 16):
         d = now.date() - timedelta(days=k)
         if d.weekday() >= 5:
             continue  # 週六日無夜盤（Rumi F1：原本只排除週日，週六會被誤選）
