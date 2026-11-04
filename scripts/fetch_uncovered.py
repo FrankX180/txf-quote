@@ -1366,6 +1366,9 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
         會讓「夜盤段＋日盤段＝合計」的拆帳對不上（使用者原話：夜盤空一千＋日盤空兩千＝三千）。
     """
     day8 = ymd8(day_hist_date)
+    if not day8:
+        print("WARN night ah: day8 empty, return None")
+        return None
     now = datetime.now(TZ)
     old = {}
     if OUT.exists():
@@ -1380,11 +1383,24 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
             day_dt = datetime.strptime(day8, "%Y%m%d").date()
         except ValueError:
             day_dt = None
-    # 夜盤段屬「次一交易日」，所以抓 day8 的前一曆日；遇週末（無夜盤）再往前找。
+    # 夜盤段屬「次一交易日」，所以抓 day8 的前一個「有夜盤的日曆日」。
+    # 2026-11-04 Rumi 審查 F1：原本只驗所屬交易日、沒排除週末與休市日，週一會取到週日：
+    # queryDate 用 day8 所以數字是對的，但 row.date=週日 → night_close_from_kline 查不到
+    # → close=None → 前端 nightOk 失敗 → 夜盤列消失、A+B=C 破功。
+    try:
+        from holiday_guard import load_holidays
+        _hol = load_holidays()
+    except Exception:
+        _hol = set()
     cands = []
     if day_dt is not None:
-        for _k in range(1, 5):
-            cands.append(day_dt - timedelta(days=_k))
+        for _k in range(1, 9):
+            d = day_dt - timedelta(days=_k)
+            if d.weekday() >= 5:
+                continue  # 週六日無夜盤
+            if d.strftime("%Y%m%d") in _hol:
+                continue  # 休市日無夜盤
+            cands.append(d)
     for d in cands:
         d8 = d.strftime("%Y%m%d")
         # 只接受「所屬交易日就是 day8」的場次：AH 局部失敗時不能退回前幾天的夜盤
@@ -1395,9 +1411,6 @@ def fetch_latest_night(day_hist_date: str, base_row: dict | None = None):
         # 2026-11-04 修正：期交所 AH 頁的 queryDate 是「夜盤所屬交易日」（＝day8），不是夜盤開始日 d。
         # 實測 queryDate=2026/11/04 才含 11/3 夜盤（25,113／23,835／59,043／59,314／94,298／88,440）；
         # 用 2026/11/03 會拿到 11/2 夜盤（外資 -2,038.5），等於整列錯位一天。
-        if not day8:
-            print("WARN night ah: day8 empty, skip")
-            continue
         qdate = datetime.strptime(day8, "%Y%m%d").strftime("%Y/%m/%d")
         try:
             nets = scrape_night_ah(qdate)
@@ -1496,11 +1509,18 @@ def fetch_next_night(day_hist_date: str, base_row: dict | None = None):
     if not day8:
         return None
     now = datetime.now(TZ)
+    try:
+        from holiday_guard import load_holidays
+        _hol = load_holidays()
+    except Exception:
+        _hol = set()
     cands = []
-    for k in range(0, 6):
+    for k in range(0, 9):
         d = now.date() - timedelta(days=k)
-        if d.weekday() == 6:
-            continue
+        if d.weekday() >= 5:
+            continue  # 週六日無夜盤（Rumi F1：原本只排除週日，週六會被誤選）
+        if d.strftime("%Y%m%d") in _hol:
+            continue  # 休市日無夜盤
         if datetime.combine(d, datetime.min.time(), TZ) + timedelta(hours=15) > now:
             continue
         cands.append(d)
@@ -1532,7 +1552,7 @@ def fetch_next_night(day_hist_date: str, base_row: dict | None = None):
             "dealerDelta": nets["dealer"],
             "retailDelta": nets["retail"],
             "close": nclose,
-            "unitNote": "下一交易日已開始的夜盤段（未完成）",
+            "unitNote": ("夜盤進行中（未完成）" if live else "上一營業日夜盤段（已收盤）"),
         }
         if base_row:
             row["foreign"] = round(float(base_row.get("foreign") or 0) + nets["foreign"], 2)
