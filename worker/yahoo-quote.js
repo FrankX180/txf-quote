@@ -12,6 +12,16 @@ const MIS_REFERER =
   "https://mis.taifex.com.tw/futures/RegularSession/EquityIndices/FuturesDomestic/";
 const MIS_MONTHS = "ABCDEFGHIJKL";  // MIS 月份字母 A=1月..L=12月（非期貨慣用碼）
 
+// ── 上游硬超時（2026-11-05）──
+// 原本對 Yahoo／期交所 MIS 完全沒有 timeout：上游一卡，請求就一路掛到 Cloudflare 邊緣
+// 自己斷線（實測 15～20 秒後回 http 000），前端因此卡在「載入中」。
+// 超時屬 I/O 等待，不吃免費方案的 10ms CPU 額度。
+const UPSTREAM_TIMEOUT_MS = 4000;   // Yahoo 總表／1 分 K／GitHub 檔案
+const MIS_TIMEOUT_MS = 2500;        // 期交所 MIS 單次嘗試（夜盤最多試兩個 MT）
+function fetchSignal(ms) {
+  try { return AbortSignal.timeout(ms); } catch (_) { return undefined; }
+}
+
 function misMonthScore(s) {
   const m = /^TXF([A-Z])(\d)-[MF]$/.exec(s || "");
   if (!m) return 9e9;
@@ -25,6 +35,9 @@ function misTimeIso(dateStr, timeStr) {
   const h = timeStr.slice(0, 2), mi = timeStr.slice(2, 4), s = timeStr.slice(4, 6);
   return y + "-" + mo + "-" + d + "T" + h + ":" + mi + ":" + s + "+08:00";
 }
+
+/** 最近一次成功的 root 報價（上游全滅時的最後防線；模組層，isolate 內有效）。 */
+let _lastRootGood = null;
 
 /** 取台指期近月即時報價；抓不到回 null。 */
 let _misDebug = "";
@@ -41,6 +54,7 @@ async function fetchMisQuote() {
           Origin: "https://mis.taifex.com.tw",
           Referer: MIS_REFERER,
         },
+        signal: fetchSignal(MIS_TIMEOUT_MS),
         body: JSON.stringify({
           MarketType: mt, SymbolType: "F", KindID: "1", CID: "", ExpireMonth: "", PageNo: 1,
         }),
@@ -75,7 +89,10 @@ async function fetchMisQuote() {
       }
       _misDebug += " MT" + mt + ":empty(RtCode=" + (j && j.RtCode) + ",n=" + ql.length + ")";
     } catch (e) {
-      _misDebug += " MT" + mt + ":ex(" + String((e && e.message) || e).slice(0, 100) + ")";
+      const nm = (e && e.name) || "";
+      _misDebug += (nm === "TimeoutError" || nm === "AbortError")
+        ? " MT" + mt + ":timeout(" + MIS_TIMEOUT_MS + "ms)"
+        : " MT" + mt + ":ex(" + String((e && e.message) || e).slice(0, 100) + ")";
     }
   }
   return null;
@@ -157,7 +174,7 @@ async function ensureHolidays() {
   const now = Date.now();
   if (_holidaySet && now - _holidayFetchedAt < 1 * 3600 * 1000) return; // 1h：颱風假 adhoc 早上寫入後要能當天生效
   try {
-    const r = await fetch(HOLIDAY_URL, { cf: { cacheTtl: 3600, cacheEverything: true } });
+    const r = await fetch(HOLIDAY_URL, { cf: { cacheTtl: 3600, cacheEverything: true }, signal: fetchSignal(UPSTREAM_TIMEOUT_MS) });
     if (!r.ok) return;
     const j = await r.json();
     const arr = Array.isArray(j) ? j : (j && (j.holidays || j.closed)) || [];
@@ -968,6 +985,7 @@ async function backfillChart1m(env, full = false) {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
           Referer: "https://tw.stock.yahoo.com/",
         },
+        signal: fetchSignal(UPSTREAM_TIMEOUT_MS),
       });
       if (!r.ok) {
         lastErr = "yahoo-chart-fail:" + r.status;
@@ -1404,6 +1422,7 @@ async function fetchYahooQuote() {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
       Referer: "https://tw.stock.yahoo.com/",
     },
+    signal: fetchSignal(UPSTREAM_TIMEOUT_MS),
   });
   const body = await r.text();
   return { ok: r.ok, status: r.status, body };
@@ -1619,6 +1638,7 @@ async function taifexPost(url, form, referer) {
       Origin: "https://www.taifex.com.tw",
       Referer: referer,
     },
+    signal: fetchSignal(UPSTREAM_TIMEOUT_MS),
     body,
   });
   if (!r.ok) throw new Error("taifex HTTP " + r.status);
@@ -2340,7 +2360,16 @@ export default {
     };
 
     if (kind === "1m") {
-      const r = await fetch(CHART1M, { headers: YH_HDR });
+      let r;
+      try {
+        r = await fetch(CHART1M, { headers: YH_HDR, signal: fetchSignal(UPSTREAM_TIMEOUT_MS) });
+      } catch (e) {
+        const nm = (e && e.name) || "";
+        return jsonResp({
+          ok: false,
+          error: (nm === "TimeoutError" || nm === "AbortError") ? "upstream-timeout" : String((e && e.message) || e).slice(0, 120),
+        }, 504, { "Cache-Control": "no-store" });
+      }
       const body = await r.text();
       return new Response(body, {
         status: r.status,
@@ -2356,10 +2385,18 @@ export default {
 
     // 報價（root）：Yahoo（五檔／相關）＋期交所 MIS（官方即時價）。
     // Yahoo 台指期夜盤常滯後或 IP 選擇性 5xx；用 MIS 即時價覆蓋，五檔仍取 Yahoo orderbook。
-    const [yRes, mis] = await Promise.all([
-      fetch(YAHOO, { headers: YH_HDR }),
-      fetchMisQuote(),
-    ]);
+    // 2026-11-05：Yahoo 逾時不再拖垮整條報價——超時視同「這輪沒有 Yahoo」，
+    // 仍由下方 MIS 官方價回答（前端最快 2.5～4 秒就有價，不再卡在載入中）。
+    const yP = Promise.resolve()
+      .then(() => fetch(YAHOO, { headers: YH_HDR, signal: fetchSignal(UPSTREAM_TIMEOUT_MS) }))
+      .catch((e) => ({
+        ok: false,
+        status: 0,
+        _timeout: String((e && e.name) || e),
+        json: async () => null,
+        text: async () => "",
+      }));
+    const [yRes, mis] = await Promise.all([yP, fetchMisQuote()]);
     let rows = null;
     if (yRes.ok) {
       try { rows = await yRes.json(); } catch (e) { rows = null; }
@@ -2398,9 +2435,24 @@ export default {
       }
     }
     if (!Array.isArray(rows)) {
+      // 兩條上游同時失效（Yahoo 超時／MIS 也抓不到）：退回最近一次成功的報價，
+      // 5 分鐘內有效。寧可晚幾秒，也不要讓前端卡在「載入中」。
+      if (_lastRootGood && nowMs - _lastRootGood.ts < 5 * 60 * 1000) {
+        return new Response(_lastRootGood.json, {
+          status: 200,
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            "Cache-Control": "public, max-age=0",
+            "CDN-Cache-Control": "public, max-age=5",
+            "Cloudflare-CDN-Cache-Control": "public, max-age=5",
+            "X-TXF-Stale": "1",
+            ...CORS,
+          },
+        });
+      }
       const body = await yRes.text().catch(() => "");
       return new Response(body, {
-        status: yRes.status,
+        status: yRes.status || 504,
         headers: {
           "content-type": "application/json; charset=utf-8",
           "Cache-Control": "public, max-age=0",
@@ -2410,7 +2462,10 @@ export default {
         },
       });
     }
-    return new Response(JSON.stringify(rows), {
+    const outJson = JSON.stringify(rows);
+    // 記住最後一次成功報價，供兩條上游同時失效時降級使用
+    _lastRootGood = { json: outJson, ts: nowMs };
+    return new Response(outJson, {
       status: 200,
       headers: {
         "content-type": "application/json; charset=utf-8",
