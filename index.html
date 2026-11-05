@@ -1203,7 +1203,19 @@
     // render() 開頭呼叫：把最新 MIS 五檔／成交價覆疊進 snap（Yahoo 為主源，MIS 為即時覆蓋）
     function applyMisOverlay() {
       obAged = false;
-      if (!snap) return;
+      if (!snap) {
+        // 2026-11-05：Worker 與 snapshot 都還沒回來時，期交所的即時推流其實已在跳，
+        // 但 snap 是 null → render() 取不到物件，整頁卡在「載入中」。
+        // 只在「完全沒有 snap」＋盤中＋該盤有新鮮官方價時造最小殼；
+        // 正常情況 snap 已存在，這段完全不執行（既有行為不動）。
+        const sk0 = sessKey();
+        const b0 = (sk0 === "day" || sk0 === "night") ? misBook[sk0] : null;
+        if (!marketOpen() || !b0 || !b0.f) return;
+        const age0 = Date.now() - b0.ts;
+        if (!(age0 >= 0) || age0 > 90000) return; // 只認 90 秒內的推流，不用隔夜舊值造殼
+        if (!(Number(b0.f.CLastPrice) > 0)) return;
+        snap = { day: {}, night: {} };
+      }
       const sk = sessKey();
       if (sk !== "day" && sk !== "night") return;
       const b = misBook[sk];
@@ -7625,7 +7637,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.63";
+        const VER = "3.64";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
