@@ -500,6 +500,8 @@
     .live.on { color: #16a34a; }
     .live.holiday-twn { color: #d97706; font-weight: 600; }
     .twnbasis { display: inline-block; margin-top: 2px; font-size: 11px; color: #9ca3af; font-weight: 400; letter-spacing: 0; }
+.twnage { display: inline-block; margin-left: 4px; padding: 0 4px; border-radius: 3px; font-size: 10px; font-weight: 400; color: #9ca3af; background: rgba(156,163,175,.14); }
+.twnage.stale { color: #f59e0b; background: rgba(245,158,11,.14); }
     .szbar { display: block; height: 14px; background: var(--dn); max-width: 100%; }
     .szbar.r { background: var(--up); margin-left: auto; }
     .foot {
@@ -1609,6 +1611,11 @@
           `${arrow(diff)} ${fmt(Math.abs(diff), 0)} (${diff >= 0 ? "+" : ""}${fmt(rate, 2)}%)`;
         if ($("stamp")) $("stamp").style.display = "none";
         if ($("live")) $("live").style.display = "none";
+        // 資料時間戳直接寫在畫面上（2026-11-06）：富台的免費來源沒有一個是全天候即時的，
+        // HiStock 分時約 30 秒一點但跨午夜會整條歸零，TV 延遲固定約 10 分。
+        // 不標示就會讓人以為看到的是「現在」，標了才知道自己在看幾分鐘前的價。
+        const srcAgeMin = freshest && freshest.ts ? Math.max(0, Math.round((Date.now() - freshest.ts) / 60000)) : null;
+        const srcStale = srcAgeMin != null && srcAgeMin > 15;
         if ($("sumline")) {
           $("sumline").style.display = "";
           $("sumline").innerHTML =
@@ -1616,6 +1623,9 @@
             `<div class="sumtxt">` +
             `預估台指 <b>${fmt(estOpen, 0)}</b> <span class="${cls(diff)}">${arrow(diff)} ${fmt(diff, 0)}(${fmt(rate, 2)}%)</span><br>` +
             `SGX富台現價 <b>${fmt(rtxNow, 2)}</b>` +
+            (srcAgeMin != null
+              ? `<span class="twnage${srcStale ? " stale" : ""}">${srcAgeMin} 分前</span>`
+              : "") +
             (twnRatioInfo
               ? `<br><span class="twnbasis">換算倍數 ${twnRatioInfo.ratio.toFixed(4)}</span>`
               : "") +
@@ -7637,7 +7647,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.65";
+        const VER = "3.66";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {

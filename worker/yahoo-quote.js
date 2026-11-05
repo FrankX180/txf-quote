@@ -400,7 +400,7 @@ const HEAL_GH_TWNMETA = "https://frankx180.github.io/txf-quote/data/twn-hist-met
 // 20 分＝來源 10 分延遲 + Pages 傳播 ~1 分 + 兩個檢查週期的餘裕。
 // 實測穩態：剛補完 10～13 分、接近門檻約 20 分（＝約每 10 分鐘補一次，屬預期節奏不是異常）。
 // dispatch 本身還有 HEAL_MIN_INTERVAL_MS（8 分）上限，實際不會高於 1 次／8 分。
-const HEAL_TWN_STALE_MS = 20 * 60 * 1000; // 台股休市日（含颱風假）：富台是唯一價格來源，維持較密
+const HEAL_TWN_STALE_MS = 10 * 60 * 1000; // 台股休市日（含颱風假）：富台是唯一價格來源；TV 本身延遲約 10 分，抓更密也追不上那 10 分，但能把堆疊從 20～30 分壓到 10～20 分
 const HEAL_TWN_STALE_IDLE_MS = 30 * 60 * 1000; // 台股交易日：台指自己有資料，富台只需累積比值樣本
 const HEAL_TWN_CHECK_MS = 2 * 60 * 1000;
 // 同一根 bar 的重送間隔：實際由 triggerGithubWorkflow 的 HEAL_MIN_INTERVAL_MS（8 分）兜底，
