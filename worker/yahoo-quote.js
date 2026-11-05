@@ -2073,6 +2073,53 @@ async function handleTwnQuote(request, env, ctx) {
   }
 }
 
+async function handleTwnWg(request, env, ctx) {
+  // 玩股網富台（id 就是 "stwn&"）：1 分 K 序列。
+  // 2026-11-06 實測：延遲約 4~5 分，且跨午夜仍有資料（HiStock 分時在 23:59 就凍結）。
+  // 這是「休市日凌晨」唯一比 TradingView（10~20 分）更新鮮的免費源。
+  const url = new URL(request.url);
+  const cacheKey = new Request(url.origin + "/?kind=twnwg", request);
+  const cache = caches.default;
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+  try {
+    const twNow = new Date(Date.now() + 8 * 3600 * 1000);
+    const midnight = Date.UTC(twNow.getUTCFullYear(), twNow.getUTCMonth(), twNow.getUTCDate()) - 8 * 3600 * 1000;
+    const src = "https://www.wantgoo.com/global/stwn&/historical-realtimeprice-pricemin1-tradedate?tradeDate=" + midnight;
+    const r = await fetch(src, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://www.wantgoo.com/global/stwn&",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "X-Requested-With": "XMLHttpRequest",
+      },
+      cf: { cacheTtl: 0 },
+    });
+    if (!r.ok) return jsonResp({ ok: false, reason: "wantgoo-" + r.status }, 200, { "Cache-Control": "no-store" });
+    const j = await r.json();
+    const data = (j && j.data) || [];
+    const bars = [];
+    for (const b of data) {
+      const t = Number(b && b.time), v = Number(b && b.close);
+      if (Number.isFinite(t) && Number.isFinite(v) && v > 0) bars.push([t, v]);
+    }
+    const out = jsonResp({
+      ok: bars.length > 0,
+      source: "wantgoo",
+      symbol: "STWN&",
+      bars,
+      updatedAt: new Date().toISOString(),
+    }, 200, {
+      "Cache-Control": "public, max-age=0, s-maxage=30",
+      "CDN-Cache-Control": "public, max-age=30",
+    });
+    ctx.waitUntil(cache.put(cacheKey, out.clone()));
+    return out;
+  } catch (e) {
+    return jsonResp({ ok: false, reason: String((e && e.message) || e).slice(0, 160) }, 200, { "Cache-Control": "no-store" });
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
     if (request.method === "OPTIONS") {
@@ -2087,6 +2134,10 @@ export default {
 
     if (kind === "twn") {
       return handleTwnQuote(request, env, ctx);
+    }
+
+    if (kind === "twnwg") {
+      return handleTwnWg(request, env, ctx);
     }
 
     if (kind === "ping") {
