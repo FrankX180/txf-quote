@@ -85,8 +85,46 @@ def fetch_bars_retry(attempts=3, timeout=25):
     raise last
 
 
+WG_URL = "https://www.wantgoo.com/global/stwn{amp}/historical-realtimeprice-pricemin1-tradedate?tradeDate={td}"
+
+
+def fetch_wantgoo():
+    """玩股網富台 1 分 K。實測 2026-11-06 02:26：最後一根 02:22（延遲 4~5 分），
+    且跨午夜仍有資料（HiStock 分時 23:59 就凍結）。
+    從國外 IP（GitHub Actions）可能被擋，失敗一律回 [] 不影響主流程。"""
+    import urllib.request
+
+    tw = datetime.now(TZ)
+    td = int(tw.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
+    url = WG_URL.format(amp=chr(38), td=td)
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://www.wantgoo.com/global/stwn" + chr(38),
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "X-Requested-With": "XMLHttpRequest",
+    })
+    with urllib.request.urlopen(req, timeout=20) as r:
+        j = json.loads(r.read().decode("utf-8", "replace"))
+    out = []
+    for b in (j.get("data") or []):
+        t = int(b.get("time") or 0) // 1000
+        c = float(b.get("close") or 0)
+        if t > 0 and c > 0:
+            out.append((t, c))
+    return out
+
+
 def main():
     bars = fetch_bars_retry()
+    # 玩股網（4~5 分延遲）比 TV（10~20 分）新鮮，同時間戳以它為準；失敗不影響主流程
+    try:
+        wg = fetch_wantgoo()
+        print("OK wantgoo bars=%d" % len(wg), flush=True)
+    except Exception as e:
+        wg = []
+        print("WARN wantgoo failed: %s"
+              % str(e).encode("ascii", "replace").decode(), flush=True)
     old = {}
     if OUT.exists():
         # 讀不回舊檔：把它改名留下（不删、可回溯）再繼續，不要 hard fail。
@@ -104,6 +142,9 @@ def main():
                 print("WARN old twn-hist unreadable (%s); rename failed (%s)" % (e, e2), flush=True)
             old = {}
     for t, c in bars:
+        if c > 0:
+            old[t] = c
+    for t, c in wg:
         if c > 0:
             old[t] = c
     cut = max(old) - KEEP_SEC

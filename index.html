@@ -1583,20 +1583,9 @@
         const hsRealTs = hsLastPt ? (hsNearNow ? hsRawTs : hsRawTs - HIS_K) : 0;
         // 絕對鮮度：超過 30 分的點不當現價（HiStock 整條凍結時就是這種情況）
         const hsFresh = !!hsLast && !!hsRealTs && Date.now() - hsRealTs <= 30 * 60 * 1000;
-        // 第三個來源（2026-11-06）：玩股網富台 1 分 K，約 4~5 分延遲、跨午夜仍有資料。
-        // HiStock 分時在 23:59 會凍結，所以凌晨時段就是靠這一條才有新鮮價。
-        const wgTail = (function () {
-          const B = (twnWg && Array.isArray(twnWg.bars)) ? twnWg.bars : [];
-          for (let i = B.length - 1; i >= 0; i--) {
-            const t = Number(B[i] && B[i][0]);
-            const v = Number(B[i] && B[i][1]);
-            if (Number.isFinite(t) && Number.isFinite(v) && v > 0) return { v: v, ts: t };
-          }
-          return null;
-        })();
-        const freshest = [histTail, wgTail, hsFresh ? { v: hsLast, ts: hsRealTs } : null]
-          .filter(Boolean)
-          .sort((a, b) => b.ts - a.ts)[0] || null;
+        const freshest = hsFresh && hsRealTs > ((histTail && histTail.ts) || 0)
+          ? { v: hsLast, ts: hsRealTs }
+          : histTail;
         const rtxNow = (freshest && freshest.v) || Number(gas.rtxNow || twnData.latestPrice) || 0;
         const estOpen = Math.round(rtxNow * mult);
         // 漲跌基準＝台指最近一次成交價（休市時 q().CLastPrice 就是最後收盤）。
@@ -2625,7 +2614,6 @@
     }
 
     let twnData = null;
-    let twnWg = null;
     // 富台 1 分 K 存檔（scripts/fetch_twn_hist.py → data/twn-hist.json）：補 HiStock 只留約一個半盤的缺口
     let twnHist = null;
     let twnMultiFetchAt = 0;
@@ -2699,16 +2687,7 @@
     async function fetchTwnQuote() {
       try {
         await Promise.all([loadTwnRatio(), loadTwnHist()]);
-        const [res, wgRes] = await Promise.all([
-          fetch(LIVE + "?kind=twn", { cache: "no-cache" }),
-          fetch(LIVE + "?kind=twnwg", { cache: "no-cache" }).catch(() => null),
-        ]);
-        if (wgRes && wgRes.ok) {
-          try {
-            const w = await wgRes.json();
-            if (w && w.ok) twnWg = w;
-          } catch (_) {}
-        }
+        const res = await fetch(LIVE + "?kind=twn", { cache: "no-cache" });
         if (!res.ok) return null;
         const j = await res.json();
         if (j && j.ok) {
@@ -7668,7 +7647,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.67";
+        const VER = "3.68";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
