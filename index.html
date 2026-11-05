@@ -2400,7 +2400,7 @@
         bigRows,
         ["top10", "top10Spec", "pc", "vix"],
         bigLabs,
-        "十大／特法＝前十大帳戶、僅近月（TX+小台/4+微台/20），已受投信部位抵銷；P/C%／VIX 不換算；點表頭開關 K 線副圖（最多兩個）"
+        "十大／特法＝大額淨未平倉（官方 TX+小台/4）；P/C%／VIX 不換算；點表頭開關 K 線副圖（最多兩個）"
       );
 
       const sw = $("oiSimpleSw");
@@ -7625,7 +7625,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.60";
+        const VER = "3.61";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
