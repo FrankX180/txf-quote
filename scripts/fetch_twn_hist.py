@@ -65,8 +65,28 @@ def fetch_bars(timeout=25):
             pass
 
 
+def fetch_bars_retry(attempts=3, timeout=25):
+    # 單次連線太脆：2026-11-05 16:08Z 一次 TV 沒回 timescale_update（25 秒空等）就整個 job 失敗、
+    # 寄失敗信給老公。TV 是公開未授權端點，偶發不給資料是常態，重試兩次即可吃掉。
+    # 連兩次以上失敗才視為真異常（仍 exit 1，不吞掉資料缺口）。
+    last = None
+    for i in range(1, attempts + 1):
+        try:
+            bars = fetch_bars(timeout=timeout)
+            if bars:
+                return bars
+            raise RuntimeError("TV returned 0 bars")
+        except Exception as e:
+            last = e
+            print("WARN TV attempt %d/%d failed: %s"
+                  % (i, attempts, str(e).encode("ascii", "replace").decode()), flush=True)
+            if i < attempts:
+                time.sleep(i * 5)
+    raise last
+
+
 def main():
-    bars = fetch_bars()
+    bars = fetch_bars_retry()
     old = {}
     if OUT.exists():
         # 讀不回舊檔：把它改名留下（不删、可回溯）再繼續，不要 hard fail。
