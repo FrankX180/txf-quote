@@ -400,7 +400,8 @@ const HEAL_GH_TWNMETA = "https://frankx180.github.io/txf-quote/data/twn-hist-met
 // 20 分＝來源 10 分延遲 + Pages 傳播 ~1 分 + 兩個檢查週期的餘裕。
 // 實測穩態：剛補完 10～13 分、接近門檻約 20 分（＝約每 10 分鐘補一次，屬預期節奏不是異常）。
 // dispatch 本身還有 HEAL_MIN_INTERVAL_MS（8 分）上限，實際不會高於 1 次／8 分。
-const HEAL_TWN_STALE_MS = 20 * 60 * 1000;
+const HEAL_TWN_STALE_MS = 20 * 60 * 1000; // 台股休市日（含颱風假）：富台是唯一價格來源，維持較密
+const HEAL_TWN_STALE_IDLE_MS = 30 * 60 * 1000; // 台股交易日：台指自己有資料，富台只需累積比值樣本
 const HEAL_TWN_CHECK_MS = 2 * 60 * 1000;
 // 同一根 bar 的重送間隔：實際由 triggerGithubWorkflow 的 HEAL_MIN_INTERVAL_MS（8 分）兜底，
 // 這裡的 4 分只是多一層早退（尾巴不前進時最多 1 次／8 分，≈180 次／日，打不爆 API 額度）。
@@ -529,7 +530,10 @@ function twnSgxOpen(ms) {
   if (hm >= 1500) return true; // 夜盤
   return false; // 13:45–15:00 休
 }
-// 富台 1 分 K 缺口修復：檔案內容的尾端 bar 超過 45 分沒動就 dispatch twn-hist.yml。
+// 富台 1 分 K 缺口修復：檔案內容的尾端 bar 超過門檻沒動就 dispatch twn-hist.yml。
+// 門檻兩段（2026-11-06）：台股休市日 20 分、交易日 30 分。原固定 20 分讓交易日也每 10 分抓一次，
+// 一天約 140 個 commit 在推 235KB 的 JSON；每次抓都是 4000 根全量、本來就會自己補洞，
+// 降頻只影響檔案新鮮度，不會漏資料。
 // 不用 Last-Modified／ETag：Pages 任何一次部署（例如行情快照）都會把它們刷新，
 // 檔案內容其實沒變，會被誤判成「很新」。只看內容裡最後一根的 timestamp。
 // 台指休市（含颱風假）也要跑，因為 SGX 照常交易；
@@ -557,6 +561,9 @@ async function twnTailMs() {
 async function maybeHealTwn(env) {
   const now = Date.now();
   if (!twnSgxOpen(now)) return { ok: false, reason: "sgx-closed", skipped: true };
+  // 台股休市日富台是唯一價格來源（前端休市模擬走勢要用最新點），交易日則只是背景補樣本
+  await ensureHolidays();
+  const staleMs = isHolidayMs(now) ? HEAL_TWN_STALE_MS : HEAL_TWN_STALE_IDLE_MS;
   const lastCheck = await getHealState(env, "last_twn_check");
   // D1 讀不到就不動手（fail-closed），寧可缺一次也不要繞過節流狂打
   if (lastCheck && lastCheck.err) return { ok: false, reason: "db-unreadable", skipped: true };
@@ -568,7 +575,7 @@ async function maybeHealTwn(env) {
     const tailMs = await twnTailMs();
     if (!tailMs) return { ok: false, reason: "no-tail", skipped: true };
     const age = now - tailMs;
-    if (age < HEAL_TWN_STALE_MS) return { ok: true, fresh: true, ageMs: age, skipped: true };
+    if (age < staleMs) return { ok: true, fresh: true, ageMs: age, staleMs, skipped: true };
     // 同一根 bar 已送過且未超過重試間隔 → 不再打（防穩態自我觸發）
     const prev = await getHealState(env, "last_twn_dispatch");
     if (prev && prev.err) return { ok: false, reason: "db-unreadable", skipped: true };
@@ -2321,7 +2328,9 @@ export default {
               lastDispatch: twnDispatch,
               tailMs: twnTail || 0,
               tailAgeMs: twnTail ? Date.now() - twnTail : null,
-              staleMs: HEAL_TWN_STALE_MS,
+              staleMs: isHolidayMs(Date.now()) ? HEAL_TWN_STALE_MS : HEAL_TWN_STALE_IDLE_MS,
+              staleMsHoliday: HEAL_TWN_STALE_MS,
+              staleMsIdle: HEAL_TWN_STALE_IDLE_MS,
             },
             logs,
             at: new Date().toISOString(),
