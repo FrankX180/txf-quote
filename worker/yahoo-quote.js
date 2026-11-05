@@ -102,6 +102,8 @@ const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
   "Access-Control-Allow-Headers": "*",
+  // 降級標記（X-TXF-Stale）是自訂 header，跨域要 expose 前端才讀得到
+  "Access-Control-Expose-Headers": "X-TXF-Stale",
 };
 
 function jsonResp(obj, status, extra) {
@@ -2368,7 +2370,7 @@ export default {
         return jsonResp({
           ok: false,
           error: (nm === "TimeoutError" || nm === "AbortError") ? "upstream-timeout" : String((e && e.message) || e).slice(0, 120),
-        }, 504, { "Cache-Control": "no-store" });
+        }, 504, { "Cache-Control": "no-store", "CDN-Cache-Control": "no-store", "Cloudflare-CDN-Cache-Control": "no-store" });
       }
       const body = await r.text();
       return new Response(body, {
