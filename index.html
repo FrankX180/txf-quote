@@ -2372,6 +2372,8 @@
           // 台指期連續交易，日盤 08:45 開盤接的是今晨 05:00 夜盤收盤；用前一交易日日盤收盤當基準，
           // 會把整段夜盤跌幅算進日盤（11/06 例：夜盤 41,915→38,936 跌 2,979，日盤 38,936→39,786 其實漲 850，
           // 舊算法卻顯示 −2,150）。改後 A（日盤段）＋B（夜盤段）＝C（今日合計）仍成立，夜盤列基準不動。
+          // 例外：nightOk 為 false（uncovered.json 還沒有今晨夜盤段，例如日盤剛開或夜盤資料缺）時，
+          // 退回 hist[1].close 也就是前一交易日日盤收盤；寧可暫用舊口徑，也不讓漲跌留空。
           _prevClose: (nightOk && night.close != null) ? Number(night.close) : (hist[1] ? hist[1].close : null),
           foreign: oiNetFlow ? (Number(cF || 0) - bF) : cF,
           trust: oiNetFlow ? (Number(cT || 0) - bT) : cT,
@@ -7651,7 +7653,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.69";
+        const VER = "3.70";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
