@@ -2022,6 +2022,19 @@ def main():
         sources.append("next_night_ah")
     # 寫檔前再併＋拒縮短：雲端日常 SSOT＝repo 長歷史，不靠本機 PG
     history = refuse_history_shrink(history, HIST_N)
+    # 2026-11-06：前端「今日日盤段」的漲跌基準＝今晨夜盤收盤。但夜盤 15:00 一換段，
+    # night 就變成下一交易日的，今晨那段收盤會消失，日盤漲跌會在傍晚前後從 +850 跳回舊口徑。
+    # 趁 night 還屬於 day0 時把收盤釘在 history[0].nightClose，前端優先讀它（沒有才退回 night.close）。
+    if night and history:
+        try:
+            _nd8 = ymd8(night.get("date"))
+            _ntd8 = next_trade_date8(_nd8) if _nd8 else None
+            if _ntd8 and day0_8 and _ntd8 == day0_8 and night.get("close") is not None:
+                history[0]["nightClose"] = night.get("close")
+            elif history[0].get("nightClose") is None:
+                print("INFO nightClose missing day0=%s night=%s" % (day0_8, _nd8))
+        except Exception as e:
+            print("WARN nightClose", e)
     history = enrich_history_cum(history)
     payload = {
         "fetchedAt": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
@@ -2056,6 +2069,7 @@ def main():
             "top10Spec",
             "pc",
             "vix",
+            "nightClose",
         )
         return {
             "date": obj.get("date"),
