@@ -1602,7 +1602,20 @@ def update_night_only() -> bool:
                       "foreignDelta", "trustDelta", "dealerDelta", "retailDelta")
         )
 
-    if _sig(night) == _sig(old_night) and _sig(next_night) == _sig(old_next):
+    # 2026-11-06：夜盤時段只走這條快路徑（整包流程不執行），今晨夜盤收盤就永遠
+    # 釣不進 history[0].nightClose（前端日盤段漲跌的備援基準）。這裡補做並納入變化判斷。
+    nc_changed = False
+    try:
+        _d0 = ymd8(day0.get("date"))
+        _nd = ymd8((night or {}).get("date"))
+        if _d0 and _nd and next_trade_date8(_nd) == _d0 and (night or {}).get("close") is not None:
+            if day0.get("nightClose") != night.get("close"):
+                day0["nightClose"] = night.get("close")
+                nc_changed = True
+    except Exception as e:
+        print("WARN nightClose night-only", e)
+
+    if (not nc_changed) and _sig(night) == _sig(old_night) and _sig(next_night) == _sig(old_next):
         print("SKIP night unchanged", (night or {}).get("date"))
         return True
     payload["night"] = night
