@@ -1,23 +1,23 @@
 {
-  "fetchedAt": "2026-11-07 01:43:33",
+  "fetchedAt": "2026-11-07 01:54:33",
   "source": "yahoo tw.stock StockServices.stockList WTX& WCDF& WCCF&",
   "session": "night",
   "night": {
     "SymbolID": "WTX&",
     "DispCName": "台指期近一",
     "DispEName": "WTX&",
-    "CLastPrice": "40123",
+    "CLastPrice": "40047",
     "COpenPrice": "39742",
     "CHighPrice": "40845",
     "CLowPrice": "39129",
     "CCeilPrice": "43617",
     "CFloorPrice": "35687",
     "CRefPrice": "39652",
-    "CDiff": "471",
-    "CDiffRate": "1.19",
-    "CTotalVolume": "65092",
+    "CDiff": "395",
+    "CDiffRate": "1.00",
+    "CTotalVolume": "65989",
     "CDate": "20261106",
-    "CTime": "014332",
+    "CTime": "015432",
     "inMarket": "27076",
     "outMarket": "27503",
     "marketStatus": "close",
@@ -86,16 +86,16 @@
     {
       "symbol": "WCDF&",
       "name": "台積電期貨近一",
-      "last": "2168",
-      "diff": "35",
-      "rate": "1.64"
+      "last": "2160",
+      "diff": "27",
+      "rate": "1.27"
     },
     {
       "symbol": "WCCF&",
       "name": "聯電期貨近一",
-      "last": "89.9",
-      "diff": "-2.1",
-      "rate": "-2.28"
+      "last": "89.8",
+      "diff": "-2.2",
+      "rate": "-2.39"
     }
   ]
 }
