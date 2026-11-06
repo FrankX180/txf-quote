@@ -2334,6 +2334,12 @@
       const _twHM = (() => { const d = new Date(Date.now() + 8 * 3600 * 1000); return d.getUTCHours() * 100 + d.getUTCMinutes(); })();
       const nextNightOk = !!(nextNight && nextNightDate && day0 && nextNightDate > day0 && nextNight.close != null)
         && _twHM >= 515 && _twHM < 845;
+      // 日盤段的漲跌基準：今晨夜盤收盤。night 還屬於今日時直接取；夜盤 15:00 換段後
+      // night 已換成下一交易日的，讀資料層釘住的 history[0].nightClose（fetch_uncovered.py 寫入）。
+      const dayBaseNight = (nightOk && night.close != null)
+        ? Number(night.close)
+        : (hist[0] && hist[0].nightClose != null ? Number(hist[0].nightClose) : null);
+      const dayPrev = dayBaseNight != null ? dayBaseNight : (hist[1] ? hist[1].close : null);
       const bF = nightOk ? Number(night.foreignDelta || 0) : 0;
       const bT = nightOk ? Number(night.trustDelta || 0) : 0;
       const bD = nightOk ? Number(night.dealerDelta || 0) : 0;
@@ -2371,15 +2377,9 @@
           // 老公定案（2026-11-06）：日盤漲跌要看「相對夜盤收盤」，不是相對前一交易日日盤收盤。
           // 台指期連續交易，日盤 08:45 開盤接的是今晨 05:00 夜盤收盤；用前一交易日日盤收盤當基準，
           // 會把整段夜盤跌幅算進日盤（11/06 例：夜盤 41,915→38,936 跌 2,979，日盤 38,936→39,786 其實漲 850，
-          // 舊算法卻顯示 −2,150）。改後 A（日盤段）＋B（夜盤段）＝C（今日合計）仍成立，夜盤列基準不動。
-          // 例外：nightOk 為 false（夜盤 15:00 已換成下一交易日那段、或資料缺）時，優先讀 data 層
-          // 釘在 history[0].nightClose 的今晨夜盤收盤（fetch_uncovered.py 每日寫入），
-          // 最後才退回 hist[1].close（前一交易日日盤收盤）；寧可暫用舊口徑，也不讓漲跌留空。
-          _prevClose: (nightOk && night.close != null)
-            ? Number(night.close)
-            : (hist[0] && hist[0].nightClose != null
-              ? Number(hist[0].nightClose)
-              : (hist[1] ? hist[1].close : null)),
+          // 舊算法顯示 −2,129（簡模式 −2,150））。改後 A（日盤段）＋B（夜盤段）＝C（今日合計）仍成立。
+          // 基準一律用 dayPrev：night.close → history[0].nightClose → hist[1].close（取不到才退回）。
+          _prevClose: dayPrev,
           foreign: oiNetFlow ? (Number(cF || 0) - bF) : cF,
           trust: oiNetFlow ? (Number(cT || 0) - bT) : cT,
           dealer: oiNetFlow ? (Number(cD || 0) - bD) : cD,
@@ -2404,11 +2404,19 @@
       }
       if (splitRows.length) {
         oiRows = splitRows.concat(oiRows);
-        oiNote += nextNightOk
-          ? "；最上列＝今晨收盤的夜盤段（今日日盤尚未開盤），其下為上一交易日"
-          : (oiNetFlow
-              ? "；上方兩列＝今日日盤段＋今日夜盤段（日盤在上），日盤漲跌以夜盤收盤為基準、夜盤漲跌以前一交易日日盤收盤為基準，兩列相加＝下方同日合計（夜盤段＝前一晚 15:00 起的成交淨口）"
-              : "；上方兩列＝今日日盤段／夜盤段拆分（夜盤段為前一晚成交後估水位），日盤漲跌以夜盤收盤為基準、夜盤漲跌以前一交易日日盤收盤為基準");
+        // 說明文字必須跟實際列數一致：夜盤段未結算（nightOk=false）時只有日盤一列，
+        // 不能寫「上方兩列」；連 nightClose 都取不到時要講明用的是前一交易日收盤。
+        if (nextNightOk) {
+          oiNote += "；最上列＝今晨收盤的夜盤段（今日日盤尚未開盤），其下為上一交易日；日盤漲跌以今晨夜盤收盤為基準";
+        } else if (!nightOk) {
+          oiNote += dayBaseNight != null
+            ? "；今日夜盤段尚未結算，只有日盤段一列；日盤漲跌以今晨夜盤收盤為基準"
+            : "；今日夜盤段尚未結算，只有日盤段一列；日盤漲跌以前一交易日收盤為基準（今晨夜盤收盤尚未取得）";
+        } else {
+          oiNote += oiNetFlow
+            ? "；上方兩列＝今日日盤段＋今日夜盤段（日盤在上），日盤漲跌以夜盤收盤為基準、夜盤漲跌以前一交易日日盤收盤為基準，兩列相加＝下方同日合計（夜盤段＝前一晚 15:00 起的成交淨口）"
+            : "；上方兩列＝今日日盤段／夜盤段拆分（夜盤段為前一晚成交後估水位），日盤漲跌以夜盤收盤為基準、夜盤漲跌以前一交易日日盤收盤為基準";
+        }
       }
       oiEl.innerHTML = oiBuildHistTable("oi", oiRows, oiKeys, oiLabs, oiNote);
 
@@ -7658,7 +7666,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.71";
+        const VER = "3.72";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
