@@ -24,13 +24,11 @@ CHUNK_DAYS = 21
 RECENT_DAYS = 21
 MAX_WORKERS = 5
 
-# 2026-11-06 收緊（對齊 fetch_uncovered.py 2026-10-30 的做法）：預設走標準 CA 驗證。
-# 期交所憑證鏈可由標準 CA 驗證；只有經過 proxy 被中間人換憑證才會失效，
-# 那時才降級並印 WARN，不再預設關掉防護（籌碼資料被替換會看不出來）。
+# 2026-11-06 收緊：原本 check_hostname=False + CERT_NONE 等於對期交所關掉中間人防護，
+# 籌碼資料被替換也看不出來。改為標準 CA 驗證，且刻意 fail-closed：
+# 驗證失敗就讓它失敗，不自動降級——「驗證失敗就改用不驗證」正好是中間人攻擊的觸發路徑。
+# 真的因缺 intermediate 而失敗，正解是補 cafile，不是關驗證。
 ssl_context = ssl.create_default_context()
-ssl_context_insecure = ssl.create_default_context()
-ssl_context_insecure.check_hostname = False
-ssl_context_insecure.verify_mode = ssl.CERT_NONE
 
 HDR = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
@@ -130,25 +128,23 @@ def fetch_range_maps(start, end, proxies=None):
 
 
 def taifex_post(url, data, referer, proxy=None, timeout=90):
+    """抓期交所。刻意 fail-closed：憑證驗證失敗就讓它失敗，不自動降級。
+
+    2026-11-06：本來寫成「嚴格失敗就換 CERT_NONE 重抓一次」，但那正好是
+    中間人攻擊的觸發路徑（拒絕正確憑證 → 自動關掉驗證 → 偽造資料照樣寫入
+    data/tmf_retail.json 並 commit 上 Pages）。改為只留嚴格驗證。
+    """
     body = urllib.parse.urlencode(data).encode("utf-8")
     req = urllib.request.Request(url, data=body, headers={**HDR, "Referer": referer})
-    try:
-        return _taifex_send(req, proxy, timeout, ssl_context)
-    except ssl.SSLError as e:
-        print("WARN ssl strict failed, retry insecure:", e)
-        return _taifex_send(req, proxy, timeout, ssl_context_insecure)
-
-
-def _taifex_send(req, proxy, timeout, ctx):
     if proxy:
         opener = urllib.request.build_opener(
             urllib.request.ProxyHandler({"http": proxy, "https": proxy}),
-            urllib.request.HTTPSHandler(context=ctx),
+            urllib.request.HTTPSHandler(context=ssl_context),
         )
         with opener.open(req, timeout=timeout) as r:
             raw = r.read()
     else:
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+        with urllib.request.urlopen(req, timeout=timeout, context=ssl_context) as r:
             raw = r.read()
     for enc in ("cp950", "big5", "utf-8"):
         try:
