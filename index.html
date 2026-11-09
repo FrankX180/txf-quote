@@ -152,6 +152,10 @@
       letter-spacing: 0;
       margin-right: 2px;
     }
+    /* 2026-11-09 老公指定：合計列與第一個子列之間加一條灰色虛線 */
+    .oi tr.oi-tree-sep td {
+      border-top: 1px dashed #b0b4bb !important;
+    }
     .oi-cbar-wrap {
       display: flex; flex-direction: column; align-items: stretch; gap: 1px;
       min-width: 36px;
@@ -2225,7 +2229,7 @@
         // 用完整 rows 算前日（收合只顯示 10 天時，最底列仍要有漲跌幅）
         const prevClose = (r._prevClose != null) ? r._prevClose
           : ((i + 1 < rows.length && rows[i + 1]) ? rows[i + 1].close : null);
-        const trCls = (r._splitRow ? "oi-split-row" : "") + (r._splitEnd ? " oi-split-end" : "");
+        const trCls = (r._splitRow ? "oi-split-row" : "") + (r._splitEnd ? " oi-split-end" : "") + (r._treeSep ? " oi-tree-sep" : "");
         const dateLab = r._treeBranch
           ? `<span class="oi-branch">${r._treeBranch === "mid" ? "├─" : "└─"}</span>${oiTreeDate(r._labelDate || r.date, r.session)}`
           : oiShortDate(r._labelDate || r.date, r.session);
@@ -2436,8 +2440,8 @@
             _prevClose: oiRows[1].close,
           });
           const kids = [];
-          if (pRows.length) kids.push(Object.assign({}, pRows[0], { _treeBranch: dRows.length ? "mid" : "last", _splitEnd: false }));
-          if (dRows.length) kids.push(Object.assign({}, dRows[0], { _treeBranch: "last", _splitEnd: true }));
+          if (pRows.length) kids.push(Object.assign({}, pRows[0], { _treeBranch: dRows.length ? "mid" : "last", _splitEnd: false, _treeSep: true }));
+          if (dRows.length) kids.push(Object.assign({}, dRows[0], { _treeBranch: "last", _splitEnd: true, _treeSep: !pRows.length }));
           oiRows = [parent].concat(kids, oiRows.slice(1));
         } else {
           oiRows = splitRows.concat(oiRows);
@@ -7704,7 +7708,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.75";
+        const VER = "3.76";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
