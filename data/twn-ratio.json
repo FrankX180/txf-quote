@@ -1,9 +1,9 @@
 {
-  "updatedAt": "2026-11-09 14:50:35",
+  "updatedAt": "2026-11-09 14:58:31",
   "dayClose": 39652,
-  "ratio": 11.720025,
-  "txPx": 41568.0,
-  "twnPx": 3546.75,
-  "ratioSession": "day",
-  "ratioAt": "2026-11-09 13:36:32"
+  "ratio": 11.774588,
+  "txPx": 41423.0,
+  "twnPx": 3518.0,
+  "ratioSession": "night",
+  "ratioAt": "2026-11-09 14:58:31"
 }
