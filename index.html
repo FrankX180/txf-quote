@@ -166,7 +166,7 @@
     /* 2026-11-09 老公指定：合計列與第一個子列之間加一條灰色虛線
        （粗細／深度對齊日列下方那條 3px 實線的色系 #9ca3af，2026-11-09 20:4x 加深） */
     .oi tr.oi-tree-sep td {
-      border-top: 2px dashed #9ca3af !important;
+      border-top: 1px dashed #9ca3af !important;
     }
     .oi-cbar-wrap {
       display: flex; flex-direction: column; align-items: stretch; gap: 1px;
@@ -7744,7 +7744,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.80";
+        const VER = "3.81";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
