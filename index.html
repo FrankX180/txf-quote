@@ -152,6 +152,17 @@
       letter-spacing: 0;
       margin-right: 2px;
     }
+    /* 2026-11-09 老公指定：合計列可點擊收合子列（預設展開） */
+    .oi tr.oi-tree-parent td {
+      cursor: pointer;
+    }
+    .oi tr td .oi-tree-tog {
+      display: inline-block;
+      width: 10px;
+      color: #6b7280;
+      font-size: 11px;
+      line-height: 1;
+    }
     /* 2026-11-09 老公指定：合計列與第一個子列之間加一條灰色虛線
        （粗細／深度對齊日列下方那條 3px 實線的色系 #9ca3af，2026-11-09 20:4x 加深） */
     .oi tr.oi-tree-sep td {
@@ -778,6 +789,8 @@
     let oiCloseDelta = "pts"; // pts=漲跌點數｜pct=漲跌幅%
     let oiPick = { oi: null, big: null }; // 舊橫向柱已廢，固定 null
     let oiHistOpen = { oi: false, big: false };
+    // 2026-11-09 老公指定：樹狀合計列可點擊收合（預設展開），狀態記在記憶體，重繪不丟
+    let oiTreeClosed = {};
     try { oiSimple = localStorage.getItem("txfOiSimple") === "1"; } catch (e) {}
     try { oiNetFlow = localStorage.getItem("txfOiNetFlow") === "1"; } catch (e) {}
     try {
@@ -2233,8 +2246,13 @@
         const trCls = (r._splitRow ? "oi-split-row" : "") + (r._splitEnd ? " oi-split-end" : "") + (r._treeSep ? " oi-tree-sep" : "");
         const dateLab = r._treeBranch
           ? `<span class="oi-branch">${r._treeBranch === "mid" ? "├─" : "└─"}</span>${oiTreeDate(r._labelDate || r.date, r.session)}`
-          : oiShortDate(r._labelDate || r.date, r.session);
-        html += `<tr${trCls.trim() ? ` class="${trCls.trim()}"` : ''}><td>${dateLab}</td>${oiCloseCells(r.close, prevClose)}`;
+          : (r._treeParent
+            ? `<span class="oi-tree-tog">${r._treeCollapsed ? "▸" : "▾"}</span>${oiShortDate(r._labelDate || r.date, r.session)}`
+            : oiShortDate(r._labelDate || r.date, r.session));
+        const trAttr = r._treeParent
+          ? ` class="${(trCls + " oi-tree-parent").trim()}" data-oi-tree="${r._treeKey || ""}"`
+          : (trCls.trim() ? ` class="${trCls.trim()}"` : "");
+        html += `<tr${trAttr}><td>${dateLab}</td>${oiCloseCells(r.close, prevClose)}`;
         keys.forEach((k) => {
           if (k === "pc" || k === "vix") {
             const nv = r[k] == null ? null : Number(r[k]);
@@ -2435,14 +2453,21 @@
         // oiRows[1] 必須存在：history 只有一筆時，合計列沒有前日收盤可用，
         // 硬排到最上面會退回用子列收盤算漲跌（錯），所以退回舊版不套樹狀。
         if (!nextNightOk && oiRows[0] && oiRows[1] && (dRows.length || pRows.length)) {
+          const collapsed = !!oiTreeClosed[day0];
           const parent = Object.assign({}, oiRows[0], {
             _splitRow: true,
-            _splitEnd: false,
+            // 收合時由合計列自己收尾（畫 3px 分隔線），展開時分隔線落在最後一列子列
+            _splitEnd: collapsed,
+            _treeParent: true,
+            _treeCollapsed: collapsed,
+            _treeKey: day0,
             _prevClose: oiRows[1].close,
           });
           const kids = [];
-          if (pRows.length) kids.push(Object.assign({}, pRows[0], { _treeBranch: dRows.length ? "mid" : "last", _splitEnd: false, _treeSep: true }));
-          if (dRows.length) kids.push(Object.assign({}, dRows[0], { _treeBranch: "last", _splitEnd: true, _treeSep: !pRows.length }));
+          if (!collapsed) {
+            if (pRows.length) kids.push(Object.assign({}, pRows[0], { _treeBranch: dRows.length ? "mid" : "last", _splitEnd: false, _treeSep: true }));
+            if (dRows.length) kids.push(Object.assign({}, dRows[0], { _treeBranch: "last", _splitEnd: true, _treeSep: !pRows.length }));
+          }
           oiRows = [parent].concat(kids, oiRows.slice(1));
         } else {
           oiRows = splitRows.concat(oiRows);
@@ -7290,6 +7315,16 @@
       root.addEventListener("click", (e) => {
         const t = e.target && e.target.closest ? e.target : null;
         if (!t || !t.closest) return;
+        // 樹狀合計列：點一下收合／展開下面兩個子列（2026-11-09 老公指定）
+        const treeRow = t.closest("tr.oi-tree-parent");
+        if (treeRow) {
+          const key = treeRow.getAttribute("data-oi-tree") || "";
+          if (key) {
+            oiTreeClosed[key] = !oiTreeClosed[key];
+            renderOi();
+          }
+          return;
+        }
         const restore = t.closest("[data-oi-restore]");
         if (restore) {
           const panel = restore.getAttribute("data-oi-restore");
@@ -7302,8 +7337,7 @@
         }
         const more = t.closest("[data-oi-more]");
         if (more) {
-          const panel = more.getAttribute("data-oi-more");
-          if (panel && Object.prototype.hasOwnProperty.call(oiHistOpen, panel)) {
+          const panel = more.getAttribute("data-oi-more");          if (panel && Object.prototype.hasOwnProperty.call(oiHistOpen, panel)) {
             oiHistOpen[panel] = !oiHistOpen[panel];
             renderOi();
           }
@@ -7709,7 +7743,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.78";
+        const VER = "3.79";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
