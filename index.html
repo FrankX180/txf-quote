@@ -2227,8 +2227,8 @@
           : ((i + 1 < rows.length && rows[i + 1]) ? rows[i + 1].close : null);
         const trCls = (r._splitRow ? "oi-split-row" : "") + (r._splitEnd ? " oi-split-end" : "");
         const dateLab = r._treeBranch
-          ? `<span class="oi-branch">${r._treeBranch === "mid" ? "├─" : "└─"}</span>${oiTreeDate(r.date, r.session)}`
-          : oiShortDate(r.date, r.session);
+          ? `<span class="oi-branch">${r._treeBranch === "mid" ? "├─" : "└─"}</span>${oiTreeDate(r._labelDate || r.date, r.session)}`
+          : oiShortDate(r._labelDate || r.date, r.session);
         html += `<tr${trCls.trim() ? ` class="${trCls.trim()}"` : ''}><td>${dateLab}</td>${oiCloseCells(r.close, prevClose)}`;
         keys.forEach((k) => {
           if (k === "pc" || k === "vix") {
@@ -2405,6 +2405,9 @@
       if (nightOk) {
         splitRows.push({
           date: nightTradeDate || nightDate || day0,
+          // 2026-11-09 老公指定：這個夜盤段是「前一交易日晚上」起跑的（11/09 的夜盤段＝11/06 晚上），
+          // 標籤要掛前一交易日日期，不能掛今天（今天才顯示 06(夜) 而不是 09(夜)）。
+          _labelDate: hist[1] && hist[1].date ? hist[1].date : null,
           session: "nightpart",
           close: night.close,
           // 夜盤段時間上先於今日日盤 → 基準是前一交易日日盤收盤
@@ -7701,7 +7704,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.74";
+        const VER = "3.75";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
