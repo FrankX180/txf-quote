@@ -142,8 +142,15 @@
     }
     .oi tr.oi-split-row td {
       font-weight: 700;
-      /* 2026-11-02 老公指定：日盤／夜盤拆分兩列上米黃底色 */
+      /* 2026-11-02 老公指定：日盤／夜盤拆分兩列上米黃底色（2026-11-09 起合計列一起上色） */
       background: #FFF6DC;
+    }
+    /* 2026-11-09 老公指定：改成樹狀分支，子列前面加 ├─ ／ └─ */
+    .oi tr td .oi-branch {
+      color: #6b7280;
+      font-weight: 400;
+      letter-spacing: 0;
+      margin-right: 2px;
     }
     .oi-cbar-wrap {
       display: flex; flex-direction: column; align-items: stretch; gap: 1px;
@@ -1878,6 +1885,12 @@
       if (session === "nightpart") return base + "夜";
       return base;
     }
+    // 樹狀分支子列的日期：只留「日」＋(夜)／(日)，例：09(夜)
+    function oiTreeDate(ymd, session) {
+      const s = String(ymd || "").replace(/-/g, "");
+      if (s.length < 8) return s || "—";
+      return s.slice(6, 8) + ((session === "nightpart" || session === "night") ? "(夜)" : "(日)");
+    }
     function oiName(name) {
       return String(name || "")
         .replace("外資及陸資", "外")
@@ -2213,7 +2226,10 @@
         const prevClose = (r._prevClose != null) ? r._prevClose
           : ((i + 1 < rows.length && rows[i + 1]) ? rows[i + 1].close : null);
         const trCls = (r._splitRow ? "oi-split-row" : "") + (r._splitEnd ? " oi-split-end" : "");
-        html += `<tr${trCls.trim() ? ` class="${trCls.trim()}"` : ''}><td>${oiShortDate(r.date, r.session)}</td>${oiCloseCells(r.close, prevClose)}`;
+        const dateLab = r._treeBranch
+          ? `<span class="oi-branch">${r._treeBranch === "mid" ? "├─" : "└─"}</span>${oiTreeDate(r.date, r.session)}`
+          : oiShortDate(r.date, r.session);
+        html += `<tr${trCls.trim() ? ` class="${trCls.trim()}"` : ''}><td>${dateLab}</td>${oiCloseCells(r.close, prevClose)}`;
         keys.forEach((k) => {
           if (k === "pc" || k === "vix") {
             const nv = r[k] == null ? null : Number(r[k]);
@@ -2403,19 +2419,38 @@
         });
       }
       if (splitRows.length) {
-        oiRows = splitRows.concat(oiRows);
+        // 2026-11-09 老公定案：改成樹狀分支。合計列在上，其下掛 ├─夜盤段、└─日盤段（先夜後日）。
+        // 合計列沿用 oiRows[0]（今日合計）複製一份上色，並自帶 _prevClose，
+        // 否則會被下一列（夜盤子列）當成前日收盤而算錯漲跌。
+        const nRows = splitRows.filter((r) => r.session === "night");
+        const dRows = splitRows.filter((r) => r.session === "daypart");
+        const pRows = splitRows.filter((r) => r.session === "nightpart");
+        if (!nextNightOk && oiRows[0] && (dRows.length || pRows.length)) {
+          const parent = Object.assign({}, oiRows[0], {
+            _splitRow: true,
+            _splitEnd: false,
+            _treeParent: true,
+            _prevClose: oiRows[1] ? oiRows[1].close : null,
+          });
+          const kids = [];
+          if (pRows.length) kids.push(Object.assign({}, pRows[0], { _treeBranch: dRows.length ? "mid" : "last", _splitEnd: false }));
+          if (dRows.length) kids.push(Object.assign({}, dRows[0], { _treeBranch: "last", _splitEnd: true }));
+          oiRows = nRows.concat([parent], kids, oiRows.slice(1));
+        } else {
+          oiRows = splitRows.concat(oiRows);
+        }
         // 說明文字必須跟實際列數一致：夜盤段未結算（nightOk=false）時只有日盤一列，
         // 不能寫「上方兩列」；連 nightClose 都取不到時要講明用的是前一交易日收盤。
         if (nextNightOk) {
           oiNote += "；最上列＝今晨收盤的夜盤段（今日日盤尚未開盤），其下為上一交易日；日盤漲跌以今晨夜盤收盤為基準";
         } else if (!nightOk) {
           oiNote += dayBaseNight != null
-            ? "；今日夜盤段尚未結算，只有日盤段一列；日盤漲跌以今晨夜盤收盤為基準"
-            : "；今日夜盤段尚未結算，只有日盤段一列；日盤漲跌以前一交易日收盤為基準（今晨夜盤收盤尚未取得）";
+            ? "；今日夜盤段尚未結算，合計列下只掛日盤段一列；日盤漲跌以今晨夜盤收盤為基準"
+            : "；今日夜盤段尚未結算，合計列下只掛日盤段一列；日盤漲跌以前一交易日收盤為基準（今晨夜盤收盤尚未取得）";
         } else {
           oiNote += oiNetFlow
-            ? "；上方兩列＝今日日盤段＋今日夜盤段（日盤在上），日盤漲跌以夜盤收盤為基準、夜盤漲跌以前一交易日日盤收盤為基準，兩列相加＝下方同日合計（夜盤段＝前一晚 15:00 起的成交淨口）"
-            : "；上方兩列＝今日日盤段／夜盤段拆分（夜盤段為前一晚成交後估水位），日盤漲跌以夜盤收盤為基準、夜盤漲跌以前一交易日日盤收盤為基準";
+            ? "；最上列＝今日合計，其下 ├─夜盤段、└─日盤段；日盤漲跌以夜盤收盤為基準、夜盤漲跌以前一交易日日盤收盤為基準，兩列相加＝合計列（夜盤段＝前一晚 15:00 起的成交淨口）"
+            : "；最上列＝今日合計，其下 ├─夜盤段、└─日盤段拆分（夜盤段為前一晚成交後估水位），日盤漲跌以夜盤收盤為基準、夜盤漲跌以前一交易日日盤收盤為基準";
         }
       }
       oiEl.innerHTML = oiBuildHistTable("oi", oiRows, oiKeys, oiLabs, oiNote);
@@ -7666,7 +7701,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.72";
+        const VER = "3.73";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
