@@ -5,3 +5,7 @@ __pycache__/
 Backup/
 _commit_msg_*.txt
 _diag_*.txt
+# 本機 log：內含富邦/Fugle auth token、帳號名與行情請求全文，絕不可進公開 repo
+log/
+*.log
+shioaji.log
