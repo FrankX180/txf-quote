@@ -531,7 +531,7 @@ function twnSgxOpen(ms) {
   return false; // 13:45–15:00 休
 }
 // 富台 1 分 K 缺口修復：檔案內容的尾端 bar 超過門檻沒動就 dispatch twn-hist.yml。
-// 門檻兩段（2026-11-06）：台股休市日 20 分、交易日 30 分。原固定 20 分讓交易日也每 10 分抓一次，
+// 門檻兩段：台股休市日 10 分（HEAL_TWN_STALE_MS）、交易日 30 分（HEAL_TWN_STALE_IDLE_MS）；
 // 一天約 140 個 commit 在推 235KB 的 JSON；每次抓都是 4000 根全量、本來就會自己補洞，
 // 降頻只影響檔案新鮮度，不會漏資料。
 // 不用 Last-Modified／ETag：Pages 任何一次部署（例如行情快照）都會把它們刷新，

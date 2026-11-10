@@ -10,6 +10,10 @@
     python scripts/merge_twn_hist.py
 或本機測試：
     python scripts/merge_twn_hist.py --files a.json b.json
+
+注意：這是「聯集後套用與 fetch_twn_hist.py 相同的 14 天保留窗」（KEEP_SEC），
+不是無條件全量聯集——否則每次衝突都把超過 14 天的 bar 留下，檔案會單向長大，
+而下一輪 fetch 又會再裁一次。保留窗錨点與 fetch 一致：min(最後一根, 現在)。
 """
 import json
 import os
@@ -45,8 +49,11 @@ def _parse(raw):
 
 
 def load_stage(stage):
-    """stage: '2'（ours/upstream）或 '3'（theirs/本次 commit）。沒有該 stage 代表該側沒改過。"""
-    r = subprocess.run(["git", "show", "%s:%s" % (stage, BARS)],
+    """stage: '2'（ours/upstream）或 '3'（theirs/本次 commit）。沒有該 stage 代表該側沒改過。
+
+    注意 git 的語法是 `:<stage>:<path>`（前面有冒號）；寫成 `2:path` 會被當成 commit id＝2。
+    """
+    r = subprocess.run(["git", "show", ":%s:%s" % (stage, BARS)],
                        cwd=str(ROOT), capture_output=True)
     if r.returncode != 0 or not r.stdout:
         return {}

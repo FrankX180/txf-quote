@@ -61,16 +61,21 @@ def fetch_bars(timeout=25, url=None):
                 break
             # recv 是逐次計時：不把剩餘預算壓進 settimeout，單次 attempt 會爆到兩倍 timeout
             # （原註解宣稱 25 秒、實際可跑到 50 秒；Rumi 2026-11-10 審查）
-            ws.settimeout(max(0.5, min(remain, 10)))
+            # 寬限期間再收緊上限，否則 grace_until 只是迴圈頂端檢查、單次 recv 仍可阻塞 10 秒
+            cap = 10
+            if grace_until:
+                cap = min(cap, max(0.2, grace_until - time.time()))
+            ws.settimeout(max(0.2, min(remain, cap)))
             try:
                 d = ws.recv()
             except websocket.WebSocketTimeoutException:
                 continue
             if debug:
                 print("TVDBG %s" % repr(d[:300]).encode("ascii", "replace").decode(), flush=True)
-            # heartbeat 可能與其他訊息黏在同一個 frame，逐一抽出來回（只認「整包都是 heartbeat」會漏回）
-            for hb in re.finditer(r"~m~4~m~~h~(\d+)", d):
-                ws.send("~m~4~m~~h~%s" % hb.group(1))
+            # heartbeat 可能與其他訊息黏在同一個 frame，逐一抽出來回。
+            # 長度前綴不能寫死：心心計數到兩位數時 frame 會變成 ~m~5~m~~h~10。
+            for hb in re.finditer(r"~m~(\d+)~m~~h~(\d+)", d):
+                ws.send("~m~%s~m~~h~%s" % (hb.group(1), hb.group(2)))
             for part in re.split(r"~m~\d+~m~", d):
                 if not part.startswith("{"):
                     continue
