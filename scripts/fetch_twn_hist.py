@@ -53,13 +53,24 @@ def fetch_bars(timeout=25, url=None):
         ws.send(_msg("create_series", [cs, "sds_1", "s1", "sds_sym_1", "1", N_BARS, ""]))
         t0 = time.time()
         debug = os.environ.get("TV_DEBUG") == "1"
-        while time.time() - t0 < timeout:
-            d = ws.recv()
+        best = None
+        grace_until = 0.0
+        while True:
+            remain = timeout - (time.time() - t0)
+            if remain <= 0 or (grace_until and time.time() > grace_until):
+                break
+            # recv 是逐次計時：不把剩餘預算壓進 settimeout，單次 attempt 會爆到兩倍 timeout
+            # （原註解宣稱 25 秒、實際可跑到 50 秒；Rumi 2026-11-10 審查）
+            ws.settimeout(max(0.5, min(remain, 10)))
+            try:
+                d = ws.recv()
+            except websocket.WebSocketTimeoutException:
+                continue
             if debug:
                 print("TVDBG %s" % repr(d[:300]).encode("ascii", "replace").decode(), flush=True)
-            if d.startswith("~m~") and re.fullmatch(r"~m~\d+~m~~h~\d+", d):
-                ws.send(d)  # heartbeat echo
-                continue
+            # heartbeat 可能與其他訊息黏在同一個 frame，逐一抽出來回（只認「整包都是 heartbeat」會漏回）
+            for hb in re.finditer(r"~m~4~m~~h~(\d+)", d):
+                ws.send("~m~4~m~~h~%s" % hb.group(1))
             for part in re.split(r"~m~\d+~m~", d):
                 if not part.startswith("{"):
                     continue
@@ -69,7 +80,13 @@ def fetch_bars(timeout=25, url=None):
                 if j.get("m") == "timescale_update":
                     s = j["p"][1].get("sds_1", {}).get("s")
                     if s:
-                        return [(int(b["v"][0]), float(b["v"][4])) for b in s]
+                        got = [(int(b["v"][0]), float(b["v"][4])) for b in s]
+                        if best is None or len(got) >= len(best):
+                            best = got
+                        # 再收 1.5 秒：若 TV 把歷史拆成多則訊息，只取第一則會靜默截斷
+                        grace_until = time.time() + 1.5
+        if best:
+            return best
         raise RuntimeError("TV timeout: no bars")
     finally:
         try:
@@ -103,6 +120,20 @@ def fetch_bars_retry(attempts=3, timeout=25):
     raise last
 
 
+def _load_bars_from_git():
+    """本機舊檔讀不回時，從 git HEAD 取回同一份（CI 上「改名保留」會在 runner 結束時消失）。"""
+    import subprocess
+    try:
+        r = subprocess.run(["git", "show", "HEAD:data/twn-hist.json"],
+                           cwd=str(ROOT), capture_output=True, timeout=60)
+        if r.returncode != 0 or not r.stdout:
+            return {}
+        data = json.loads(r.stdout.decode("utf-8", "replace"))
+        return {int(t): float(c) for t, c in data.get("bars", [])}
+    except Exception:
+        return {}
+
+
 def main():
     bars = fetch_bars_retry()
     old = {}
@@ -114,17 +145,24 @@ def main():
             for t, c in json.loads(OUT.read_text(encoding="utf-8")).get("bars", []):
                 old[int(t)] = float(c)
         except Exception as e:
+            # 「改名保留」在 CI 上等於丟掉（runner 結束就沒了），而 commit 只帶新檔
+            # （4000 根約 2.8 天），14 天歷史會被静默縮水。先從 git HEAD 取回，再不行就讓 job 紅燈。
             bad = OUT.with_name(OUT.name + ".bad-" + datetime.now(TZ).strftime("%Y%m%d-%H%M%S"))
             try:
                 OUT.replace(bad)
-                print("WARN old twn-hist unreadable (%s); moved to %s" % (e, bad.name), flush=True)
-            except Exception as e2:
-                print("WARN old twn-hist unreadable (%s); rename failed (%s)" % (e, e2), flush=True)
-            old = {}
+            except Exception:
+                pass
+            old = _load_bars_from_git()
+            if old:
+                print("WARN local twn-hist unreadable (%s); recovered %d bars from git HEAD"
+                      % (e, len(old)), flush=True)
+            else:
+                raise RuntimeError("twn-hist unreadable and git HEAD unavailable: %s" % e)
     for t, c in bars:
         if c > 0:
             old[t] = c
-    cut = max(old) - KEEP_SEC
+    # 錨點取 min(最後一根, 現在)：TV 若吐未來時間戳，用 max() 會把合法歷史整段砍掉
+    cut = min(max(old), int(time.time())) - KEEP_SEC
     merged = sorted((t, c) for t, c in old.items() if t >= cut)
     out = {
         "updatedAt": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
