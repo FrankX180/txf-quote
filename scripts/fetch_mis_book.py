@@ -124,5 +124,6 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Exception as e:
+        # 原本 sys.exit(0) 讓 workflow 綠燈，舊五檔被前端當成「官方最後快照」繼續顯示
         print("fetch_mis_book error:", e)
-        sys.exit(0)
+        sys.exit(1)

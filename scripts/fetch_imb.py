@@ -46,8 +46,9 @@ def main():
         with urllib.request.urlopen(req, timeout=30) as r:
             pack = json.loads(r.read().decode())
     except Exception as e:
+        # 不可以「印完就 return」：workflow 會綠燈，而 imb-YYYYMMDD.json 永遠缺那一段
         print("FAIL imb", e)
-        return
+        raise SystemExit(1)
 
     DATA.mkdir(exist_ok=True)
     out = {

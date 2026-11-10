@@ -92,6 +92,10 @@ jobs:
           pip install --quiet websocket-client
           python scripts/fetch_mis_book.py
         continue-on-error: true
+      - name: Guard - fail when every source failed
+        # 上面九個抓取步驟都是 continue-on-error：沒有這道，全部失敗也會是綠燈，
+        # 使用者只會看到站上數字慢慢變舊（2026-11-10 審查 S12#7）。休市日由腳本自行豁免。
+        run: python scripts/quote_guard.py
       - name: Commit snapshot
         run: |
           set -euo pipefail
