@@ -72,8 +72,23 @@ async function fetchMisQuote() {
         .filter((x) => /^TXF[A-Z]\d-[MF]$/.test(x.SymbolID || ""))
         .sort((a, b) => misMonthScore(a.SymbolID) - misMonthScore(b.SymbolID));
       // 優先取「今日交易日」且有成交價者，避免另一盤殘值；再退而求其次
+      // 同一個曆日可能同時有日盤（13:45 收）與夜盤（15:00 起）兩筆，
+      // 只比 CDate 會在夜盤取到日盤收盤價（2026-11-10 審查）
+      const sesNow = sessionOf(Date.now());
+      const cMin = (x) => {
+        const t = String(x.CTime || "").padStart(6, "0");
+        return Number(t.slice(0, 2)) * 60 + Number(t.slice(2, 4));
+      };
+      const inSes = (x) => {
+        const m = cMin(x);
+        if (!Number.isFinite(m)) return false;
+        return sesNow === "day"
+          ? (m >= 8 * 60 + 45 && m <= 13 * 60 + 50)
+          : (m >= 15 * 60 || m <= 5 * 60 + 10);
+      };
       const pick =
-        cand.find((x) => x.CLastPrice && String(x.CDate) === todayKey) ||
+        cand.find((x) => x.CLastPrice && String(x.CDate) === todayKey && inSes(x)) ||
+        cand.find((x) => x.CLastPrice && inSes(x)) ||
         cand.find((x) => x.CLastPrice) ||
         null;
       if (pick) {
@@ -1192,7 +1207,9 @@ async function syncImb3(env, nowMs) {
       const u = FUGLE_MD + "trades/" + encodeURIComponent(sym) + "?limit=" + IMB3_PAGE + "&offset=" + (p * IMB3_PAGE) + (qs ? "&" + qs : "");
       let res;
       try {
-        res = await fetch(u, { headers: { "X-SDK-TOKEN": tok, "User-Agent": "txf-imb3/1" } });
+        res = await fetch(u, { headers: { "X-SDK-TOKEN": tok, "User-Agent": "txf-imb3/1" },
+          // 富邦一 hang，這個請求就拖到邊緣斷線（全檔唯一沒 timeout 的長鏈）
+          signal: fetchSignal(UPSTREAM_TIMEOUT_MS) });
       } catch (e) { symErr = "fetch"; err = symErr; break; }
       if (res.status === 401 || res.status === 403) return { ok: false, reason: "token-expired" };
       if (!res.ok) { symErr = "http-" + res.status; err = symErr; break; }
@@ -2031,7 +2048,9 @@ async function handleTwnQuote(request, env, ctx) {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           "Referer": "https://histock.tw/index-tw/TWN",
         },
-        cf: { cacheTtl: 5 }
+        cf: { cacheTtl: 5 },
+        // 富台是休市日唯一價格來源；全檔其他上游都有 timeout，這裡原本漏掉
+        signal: fetchSignal(UPSTREAM_TIMEOUT_MS)
       });
       if (hResp.ok) {
         const hJson = await hResp.json().catch(() => null);
@@ -2048,7 +2067,10 @@ async function handleTwnQuote(request, env, ctx) {
     } catch (_) {}
 
     const payload = {
-      ok: true,
+      // 抓失敗不再回 ok:true：前端 `if (j && j.ok) twnData = j` 會拿空殼蓋掉手上好好的資料，
+      // 而上一行 catch (_) {} 完全沒有訊號（2026-11-10 審查）
+      ok: points.length > 0,
+      reason: points.length > 0 ? undefined : "histock-unavailable",
       symbol: "TWN",
       name: "富台指 (SGX FTSE Taiwan)",
       latestPrice: latestPrice,
@@ -2116,7 +2138,11 @@ export default {
           });
         }
         if (url.searchParams.get("refresh") === "1") {
-          const st = await refreshTmfRetail(env, Number(url.searchParams.get("days") || 30));
+          // days 直接決定對期交所的迴圈次數（每圈 2 個 POST）；不夾上限就是
+          // 匿名 GET 換幾十個上游請求，最壞害 Worker 出口 IP 被 ban（2026-11-10 審查）
+          const daysRaw = Number(url.searchParams.get("days") || 30);
+          const days = Math.min(120, Math.max(1, Number.isFinite(daysRaw) ? Math.floor(daysRaw) : 30));
+          const st = await refreshTmfRetail(env, days);
           let payload = await loadTmfPayload(env);
           // 短歷史（雲端只補近段）時併入 GitHub 全史
           if (!payload || !payload.series || payload.series.length < 200) {
@@ -2174,6 +2200,10 @@ export default {
     }
     // 診断用（2026-11-02）：直接跑一次 syncImb3 並回傳結果，不落 D1 以外的副作用
     if (kind === "imb3-probe") {
+      // 這個端點會用富邦付費 token 打最多 3 檔×6 頁的上游並寫 D1；
+      // 沒帶 PROBE_KEY 就只讀不寫（2026-11-10 審查：匿名者可拿它燒配額）
+      const probeKey3 = String(env.PROBE_KEY || "");
+      const canSync3 = !!probeKey3 && url.searchParams.get("key") === probeKey3;
       const hasTok = !!(await fubonToken(env));
       let cur3 = null;
       let recent3 = null;
@@ -2198,11 +2228,13 @@ export default {
       } catch (e) {
         cur3 = String((e && e.message) || e);
       }
-      let out = null;
-      try {
-        out = await syncImb3(env, Date.now());
-      } catch (e) {
-        out = { ok: false, error: String((e && e.message) || e) };
+      let out = canSync3 ? null : { ok: false, skipped: "probe-key-required" };
+      if (canSync3) {
+        try {
+          out = await syncImb3(env, Date.now());
+        } catch (e) {
+          out = { ok: false, error: String((e && e.message) || e) };
+        }
       }
       return jsonResp({ hasToken: hasTok, cur: cur3, recent: recent3, counts: cnt3, result: out }, 200, { "Cache-Control": "no-store" });
     }
@@ -2280,7 +2312,10 @@ export default {
 
     if (kind === "heal") {
       try {
-        const force = url.searchParams.get("force") === "1";
+        const probeKey = String(env.PROBE_KEY || "");
+        // force 會跳過所有節流直接 dispatch workflow；沒有 PROBE_KEY 就只允許正常 heal
+        const force = url.searchParams.get("force") === "1"
+          && !!probeKey && url.searchParams.get("key") === probeKey;
         const reason = url.searchParams.get("reason") || "frontend-stale";
         let res;
         if (force) {
@@ -2348,7 +2383,9 @@ export default {
       await ensureHolidays();
       const wantChart = url.searchParams.get("chart") === "1";
       const res = await pollAndStore(env, wantChart ? { chart: true } : undefined);
-      return jsonResp({ ok: true, ...res, at: new Date().toISOString() }, 200, {
+      // 不要把失敗包成 ok:true：外部守護若只看 ok，上游全掛也會回報健康
+      const pollOk = !!res && !res.skipped && !res.skippedQuote && !res.reason;
+      return jsonResp({ ok: pollOk, ...res, at: new Date().toISOString() }, 200, {
         "Cache-Control": "no-store",
         "CDN-Cache-Control": "no-store",
         "Cloudflare-CDN-Cache-Control": "no-store",
@@ -2427,14 +2464,22 @@ export default {
       //（前端不讀這三欄，改由 1 分 K patchQuoteOHLC；見報價覆蓋契約 §3）。
       if (mis.vol != null) w.volume = String(mis.vol);
       const iso = misTimeIso(mis.date, mis.time);
-      if (iso) w.regularMarketTime = iso;
+      if (iso) {
+        // 覆寫前先留一份 Yahoo 自己的書時間：下面的 yahooBookFresh() 若讀被覆寫後的欄位，
+        // 等於拿自己剛寫進去的值當證據，這道「不送殘值五檔」的守門就永遠 pass
+        if (w._yahooOwnTime === undefined) w._yahooOwnTime = w.regularMarketTime;
+        w.regularMarketTime = iso;
+      }
     }
     const nowMs = Date.now();
     await ensureHolidays();
     if (Array.isArray(rows)) {
-      const wtx = rows.find((x) => x && x.symbol === "WTX&") || rows[0];
+      // 不退回 rows[0]：SymbolID 沒對上時 rows[0] 可能是別的契約（WMT&/WCDF&），
+      // 拿它當台指期會讓五檔、內外盤、1 分 K 全部寫錯
+      const wtx = rows.find((x) => x && x.symbol === "WTX&");
       if (wtx) {
-        if (!yahooBookFresh(wtx, nowMs)) {
+        const ownBookTime = wtx._yahooOwnTime !== undefined ? wtx._yahooOwnTime : wtx.regularMarketTime;
+        if (!yahooBookFresh({ regularMarketTime: ownBookTime }, nowMs)) {
           // 假日／來源日≠交易鍵：不把殘值五檔與內外盤送給前端 applyLive。
           delete wtx.orderbook;
           wtx.inMarket = null;

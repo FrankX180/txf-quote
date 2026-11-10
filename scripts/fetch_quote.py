@@ -251,7 +251,9 @@ def parse_mkt_time(d):
             return datetime.fromisoformat(t.replace("Z", "+00:00")).astimezone(TZ)
         except ValueError:
             pass
-    return datetime.now(TZ)
+    # 原本 return datetime.now(TZ) 會讓「解析失敗」變成「剛剛成交」，下游 book_fresh
+    # 因此把假日／停更的舊五檔當成今日真書（2026-11-10 審查）
+    return None
 
 
 def trading_day_key(dt=None):
@@ -346,8 +348,9 @@ def slim(d):
         "CDiff": fmt_num(diff),
         "CDiffRate": "" if rate is None else ("%.2f" % rate),
         "CTotalVolume": lots(d.get("volume")) or k_to_lots(d.get("volumeK")),
-        "CDate": dt.strftime("%Y%m%d"),
-        "CTime": dt.strftime("%H%M%S"),
+        # 時間解析不到就留空（下游 book_fresh 判 stale）；不可用現在時間冒充
+        "CDate": dt.strftime("%Y%m%d") if dt else "",
+        "CTime": dt.strftime("%H%M%S") if dt else "",
         "inMarket": k_to_lots(d.get("inMarket")),
         "outMarket": k_to_lots(d.get("outMarket")),
         "marketStatus": d.get("marketStatus") or "",

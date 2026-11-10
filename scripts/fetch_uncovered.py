@@ -49,7 +49,7 @@ MTX_DIV = 4.0
 TMF_DIV = 20.0
 TMF_JSON = ROOT / "data" / "tmf_retail.json"
 VIX_JSON = ROOT / "data" / "vix.json"
-PROXY_FILE = Path(r"E:\_Project\股票資料庫\_Data\webshare_proxies.txt")
+PROXY_FILE = Path(os.environ.get("TXF_PROXY_FILE") or r"E:\_Project\股票資料庫\_Data\webshare_proxies.txt")
 TAIFEX_MIS_VIX = "https://mis.taifex.com.tw/futures/api/getQuoteListVIX"
 OA_CODES = (
     ("臺股期貨", 1.0),

@@ -293,8 +293,13 @@ def main():
     else:
         n5, d5 = old.get("night_5m") or [], old.get("day_5m") or []
         n15, d15 = old.get("night_15m") or [], old.get("day_15m") or []
+    # 全部來源都失敗時不要更新 fetchedAt：前端 healIfStale 會因此以為檔案是新鮮的，
+    # 盤中就停在斷線前最後一根且沒有任何提示（2026-11-10 審查）
+    src_failed = not n1 and not d1
     payload = {
-        "fetchedAt": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
+        "fetchedAt": (old.get("fetchedAt") if src_failed and old.get("fetchedAt")
+                      else datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")),
+        "stale": bool(src_failed),
         "source": " / ".join(src),
         "contract": "WTX&",
         "night_1m": n1,

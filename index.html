@@ -689,7 +689,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">3.85</div>
+      <div class="ver foot-right" id="verFoot">3.86</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1036,7 +1036,8 @@
           if (cStamp && cStamp > sStamp) return; // 本機已有更新的就不倒退
           // 伺服器快照是「上一盤收盤」：書與價的時間都用快照時間，
           // 不能讓後續 frame 的 ts 冒充（否則舊收盤書會被當成新鮮）
-          const sTs = s.ts || Date.now();
+          // 缺快照時間就當過期：用 Date.now() 冒充會讓數天前的舊五檔通過新鮮度檢查
+          const sTs = Number(s.ts) || 0;
           misBook[sk] = { f: s.f, ts: sTs, sym: s.sym || "", date: s.f.CDate || "", pxTs: sTs, bookTs: sTs };
           changed = true;
         });
@@ -1588,7 +1589,10 @@
         const hsLast = hsLastPt ? hsLastPt.v : 0;
         // 倍數與折線同源：都走 twnRatioFor()（同一時刻配對，最近一組）
         const ratioLive = twnRatioFor();
-        const mult = ratioLive || Number(gas.ratioUsed || gas.ratio) || 11.4063;
+        const ratioReal = ratioLive || Number(gas.ratioUsed || gas.ratio) || 0;
+        // 沒有真比值才退到歷史常数，但必須在 UI 標出來（別讓假數字裝成真換算）
+        const mult = ratioReal || 11.4063;
+        window.__twnRatioFallback = !ratioReal;
         // 富台現價取「時間戳較新」的來源（2026-10-27）：HiStock 分時會整條凍結（00:59 後不再前進，
         // 先前直接拿 hsLast 當現價，存檔段更新了也永遠顯示凍結值）。HiStock 時戳固定超前 32h，先校正再比。
         const histTail = (function () {
@@ -1653,7 +1657,9 @@
               : "") +
             (twnRatioInfo
               ? `<br><span class="twnbasis">換算倍數 ${twnRatioInfo.ratio.toFixed(4)}</span>`
-              : "") +
+              : (window.__twnRatioFallback
+                ? `<br><span class="twnbasis">換算倍數 預設值（比值不可用）</span>`
+                : "")) +
             `</div>`;
         }
         document.body.classList.add("twn-est");
@@ -7010,8 +7016,10 @@
         if (Date.now() - mark < 300000) return;
         window.__txfClosedPollAt = Date.now();
         try {
-          const rows = await fetch(LIVE, { cache: "default" }).then((r) => r.json());
-          if (Array.isArray(rows) && rows.length) {
+          const resp = await fetch(LIVE, { cache: "default" });
+          const staleHdr = resp.headers.get("X-TXF-Stale") === "1";
+          const rows = await resp.json();
+          if (Array.isArray(rows) && rows.length && !staleHdr) {
             applyLive(rows);
             live = false;
             if ($("live")) {
@@ -7035,8 +7043,11 @@
       }
       try {
         // 前端只讀；D1 由 Worker Cron／本機 daemon 生產，避免每個分頁變成寫入者。
-        const rows = await fetch(LIVE, { cache: "default" }).then((r) => r.json());
-        if (Array.isArray(rows) && rows.length) applyLive(rows);
+        const resp = await fetch(LIVE, { cache: "default" });
+        // Worker 重播 5 分鐘前舊價時會帶 X-TXF-Stale；不看它就等於用舊價補一根新 K
+        const staleHdr = resp.headers.get("X-TXF-Stale") === "1";
+        const rows = await resp.json();
+        if (Array.isArray(rows) && rows.length && !staleHdr) applyLive(rows);
         // 約每 30 秒從雲端補齊完整當日分鐘柱（多人共用同一 R2）
         const mark = window.__txfImbCloudAt || 0;
         if (Date.now() - mark > 30000) {
@@ -7742,7 +7753,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.85";
+        const VER = "3.86";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {

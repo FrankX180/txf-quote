@@ -17,7 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data" / "tmf_retail.json"
-PROXY_FILE = Path(r"E:\_Project\股票資料庫\_Data\webshare_proxies.txt")
+PROXY_FILE = Path(os.environ.get("TXF_PROXY_FILE") or r"E:\_Project\股票資料庫\_Data\webshare_proxies.txt")
 TZ = timezone(timedelta(hours=8))
 HIST_N = 800
 CHUNK_DAYS = 21
