@@ -31,7 +31,7 @@ def _msg(m, p):
     return "~m~%d~m~%s" % (len(s), s)
 
 
-def fetch_bars(timeout=25):
+def fetch_bars(timeout=45):
     ws = websocket.create_connection(
         "wss://data.tradingview.com/socket.io/websocket",
         origin="https://www.tradingview.com", timeout=timeout)
@@ -65,10 +65,13 @@ def fetch_bars(timeout=25):
             pass
 
 
-def fetch_bars_retry(attempts=3, timeout=25):
+def fetch_bars_retry(attempts=3, timeout=45):
     # 單次連線太脆：2026-11-05 16:08Z 一次 TV 沒回 timescale_update（25 秒空等）就整個 job 失敗、
     # 寄失敗信給老公。TV 是公開未授權端點，偶發不給資料是常態，重試兩次即可吃掉。
     # 連兩次以上失敗才視為真異常（仍 exit 1，不吞掉資料缺口）。
+    # 2026-11-10 21:20/21:29/21:39（台北）連三次失敗，全部是 25 秒空等：TV 對「全新連線」的首個
+    # chart session 偶發要 30 秒以上才推 timescale_update，GitHub runner 每次都是新 IP＝每次都要付
+    # 首連成本；本機實測同一分鐘內 timeout=25 失敗、放寬後 0.9 秒拿到 4000 根 ⇒ 放寬單次等待。
     last = None
     for i in range(1, attempts + 1):
         try:
@@ -81,7 +84,7 @@ def fetch_bars_retry(attempts=3, timeout=25):
             print("WARN TV attempt %d/%d failed: %s"
                   % (i, attempts, str(e).encode("ascii", "replace").decode()), flush=True)
             if i < attempts:
-                time.sleep(i * 5)
+                time.sleep(3)
     raise last
 
 
