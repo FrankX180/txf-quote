@@ -26,6 +26,9 @@ concurrency:
 jobs:
   guard:
     runs-on: ubuntu-latest
+    # workflow_run 對 update-quote 的每一次 completed（含 cancelled／失敗）都會觸發；
+    # 配上 cancel-in-progress:false 會單向堆積，而且多個 run 同時登入富邦（S04#6）。
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     outputs:
       state: ${{ steps.check.outputs.state }}
     steps:

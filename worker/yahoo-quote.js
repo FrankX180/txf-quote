@@ -2392,7 +2392,9 @@ export default {
       const res = await pollAndStore(env, wantChart ? { chart: true } : undefined);
       // 不要把失敗包成 ok:true：外部守護若只看 ok，上游全掛也會回報健康。
       // 子項（imb／imb3y／px）失敗不會冒到頂層，所以逐項看 ok !== false（2026-11-10 審查 S04#8）
-      const subOk = (o) => !o || o.ok !== false;
+      // no-bar 是「這一分鐘沒有新成交」的正常狀況（深夜流動性低），不是失敗；
+      // 其他 reason 才算真失敗。imb／imb3y／px 的失敗不會冒到頂層，所以要逐項看。
+      const subOk = (o) => !o || o.ok !== false || o.reason === "no-bar";
       const pollOk = !!res && !res.skipped && !res.skippedQuote && !res.reason
         && subOk(res.imb) && subOk(res.imb3y) && subOk(res.px);
       return jsonResp({ ok: pollOk, ...res, at: new Date().toISOString() }, 200, {

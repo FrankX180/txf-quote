@@ -120,10 +120,17 @@ jobs:
             echo "push rejected; rebase retry ${i}"
             git fetch origin "${branch}"
             if ! git rebase "origin/${branch}"; then
-              # rebase 衝突：ours=遠端舊檔、theirs=本次 commit；要本次 data
+              # rebase 衝突：rebase 中 ours=upstream、theirs=本次 commit，要本次抓的 data。
+              # --theirs 對「上游新增、本次沒動」的路徑會報錯，用 || true 接住。
+              # --continue 失敗必須真紅燈：原本 `|| abort || true` 會把「衝突沒解完」
+              # 變成下一輪再撞一次，而且這一輪看起來是成功的（S04#4）。
               git checkout --theirs -- data || true
-              git add data || true
-              GIT_EDITOR=true git rebase --continue || git rebase --abort || true
+              git add data
+              if ! GIT_EDITOR=true git rebase --continue; then
+                git rebase --abort || true
+                echo "rebase could not continue; aborting this run" >&2
+                exit 1
+              fi
             fi
             sleep $((i * 2))
           done
