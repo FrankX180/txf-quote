@@ -689,7 +689,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">3.86</div>
+      <div class="ver foot-right" id="verFoot">3.87</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -1554,6 +1554,10 @@
     function saveRefPx(ref, date) {
       try {
         if (ref == null) return;
+        // draw() 被 MIS 推流拉到 4 次/秒；先便宜地節流，再談 localStorage 讀寫
+        const _nowRp = Date.now();
+        if (_nowRp - (window.__refPxAt || 0) < 5000) return;
+        window.__refPxAt = _nowRp;
         const sk = sessKey();
         const all = JSON.parse(localStorage.getItem(REFPX_KEY) || "{}");
         const cur = all && all[sk];
@@ -3837,7 +3841,12 @@
       last.low = Math.min(last.low, px);
       if (dVol) last.volume = (last.volume || 0) + dVol;
       if (tot != null) { lastTot = tot; lastTotAt = Date.now(); }
-      save1m();
+      // 每個 MIS frame 都 stringify 近萬根 bar 並 setItem 會阻塞主線程；30 秒寫一次就夠
+      const _nowSave1m = Date.now();
+      if (_nowSave1m - (window.__save1mAt || 0) > 30000) {
+        window.__save1mAt = _nowSave1m;
+        save1m();
+      }
     }
 
     function linePoints() {
@@ -6647,12 +6656,18 @@
       const doFit = !!forceFit || !kchart || sigChanged;
       // 一分圖棒數異常少：背景強制補雲端／奇摩後重畫（不重設使用者縮放）
       if (kInt === "1" && data.length < 20 && marketOpen()) {
-        ensureLive1m(true).then(function (ok) {
-          if (!ok || !kchart) return;
-          const d2 = klineData();
-          if (d2.length <= data.length) return;
-          preserveKView(function () { kchart.applyNewData(d2); });
-        });
+        // 繪圖路徑會每 250ms 跑一次；原本每次無節流打 ensureLive1m(true)，
+        // 盤前／資料缺時等於每秒 4 個 px1m（2026-11-10 審查）
+        const _nowK = Date.now();
+        if (_nowK - (window.__live1mForceAt || 0) > 60000) {
+          window.__live1mForceAt = _nowK;
+          ensureLive1m(true).then(function (ok) {
+            if (!ok || !kchart) return;
+            const d2 = klineData();
+            if (d2.length <= data.length) return;
+            preserveKView(function () { kchart.applyNewData(d2); });
+          });
+        }
       }
       if (!kchart) {
         kchart = klinecharts.init("khost", { styles: twStyles() });
@@ -7543,9 +7558,10 @@
       setTimeout(() => ensureLive1m(true), 8000);
       setTimeout(() => ensureLive1m(true), 20000);
       live1mTimer = setInterval(() => {
-        // 每 15 秒讀 D1 px1m；只有偵測到缺口才經 Worker 補 Yahoo chart。
-        ensureLive1m(true);
-      }, 15000);
+        // 只做「偵測」：force=false 讓無缺口時直接 return；有缺口才回源。
+        // 原本 15 秒 + force=true 等於每次都穿透 Worker 的 8 秒邊緣快取打 D1 全日全表（2026-11-10 審查）
+        ensureLive1m(false);
+      }, 60000);
     }
 
     async function loadKline() {
@@ -7684,7 +7700,9 @@
     async function checkGhSnapshotStale() {
       try {
         if (!marketOpen() || document.visibilityState !== "visible") return;
-        const r = await gh("data/snapshot.json");
+        // 走一般快取（Pages 對 json 給 max-age=600）：原本 cache:no-cache 15 秒一次
+        // 在 300 人×18.5 小時下約 96 GB/月，直接貼 Pages 100 GB 軟限（2026-11-10 審查）
+        const r = await fetch("data/snapshot.json", { cache: "default" });
         if (!r || !r.ok) return;
         const j = await r.json();
         if (j && j.fetchedAt) healIfStale(j.fetchedAt, "poll-snapshot");
@@ -7706,7 +7724,7 @@
       startMisWs();
       if (!ghHealTimer) {
         checkGhSnapshotStale();
-        ghHealTimer = setInterval(checkGhSnapshotStale, 15000);
+        ghHealTimer = setInterval(checkGhSnapshotStale, 120000);
       }
     }
     function stopPoll() {
@@ -7753,7 +7771,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.86";
+        const VER = "3.87";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
