@@ -689,7 +689,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">3.89</div>
+      <div class="ver foot-right" id="verFoot">3.90</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -994,7 +994,10 @@
       const firstWd = first.getDay(); // 0=日
       const firstWed = 1 + ((3 - firstWd + 7) % 7);
       const thirdWed = firstWed + 14;
-      if (now.getDate() > thirdWed) {
+      const hm = now.getHours() * 100 + now.getMinutes();
+      // 結算日當天 13:45 收盤後，近月已是次月契約；原本嚴格大於會讓結算日夜盤
+      // 整晚訂到「已結算」的當月契約，沒官方五檔（2026-11-10 審查 S01#4）
+      if (now.getDate() > thirdWed || (now.getDate() === thirdWed && hm >= 1345)) {
         m += 1;
         if (m > 12) { m = 1; y += 1; }
       }
@@ -3221,13 +3224,13 @@
         const hasN = Array.isArray(o.bars.night) && o.bars.night.length;
         const hasD = Array.isArray(o.bars.day) && o.bars.day.length;
         if (!hasN && !hasD) return;
-        // 有資料就用；空 dayKey 或對得上夜盤／日盤檔日即可
+        // 空 dayKey 或對得上夜盤／日盤檔日即可。不能因為「有夜盤 bars」就跳過日期檢查：
+        // 那條件會讓上一盤（甚至上周）的累計值被當成現值餵給横條（S18#1／S01#5）
         if (
           o.dayKey &&
           o.dayKey !== imbDayKey() &&
           o.dayKey !== tradingDayKey() &&
-          o.dayKey !== nightImbDayKey() &&
-          !hasN
+          o.dayKey !== nightImbDayKey()
         )
           return;
         imbBars = {
@@ -6861,7 +6864,9 @@
       return hm > 1345 && hm < 1458;
     }
     function applyLive(rows) {
-      const wtx = rows.find((x) => x.symbol === "WTX&") || rows[0];
+      // 不退回 rows[0]：WTX& 缺時那個位置可能是 WMT&／WCDF&，
+      // 成交價、五檔、總口數、內外盤整包會變成別的契約（2026-11-10 審查 S01#2）
+      const wtx = rows.find((x) => x && x.symbol === "WTX&");
       if (!wtx) return;
       const q0 = slimYahoo(wtx);
       const nowTs = Date.now();
@@ -7768,10 +7773,24 @@
     })();
     // 休市強制回最後一盤：session 是記憶體 UI 狀態，上次手切 day 會留到週末（2026-10-17：週六頂部誤讀日盤 47,242）
     session = liveSess();
+    // 開頁後原本不再重算盤別：14:58 進夜盤（或 08:45 進日盤）時，頂部報價、五檔、走勢
+    // 會整晚卡在上一盤（2026-11-10 審查 S01#1）。只在「盤別真的變了」時自動切，
+    // 不干擾使用者手動切換（手動切不會改變 liveSess 的值）。
+    (function watchSessionBoundary() {
+      let last = liveSess();
+      setInterval(function () {
+        try {
+          const now = liveSess();
+          if (now === last) return;
+          last = now;
+          if (now !== session && marketOpen()) setSession(now);
+        } catch (_) {}
+      }, 30000);
+    })();
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.89";
+        const VER = "3.90";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {

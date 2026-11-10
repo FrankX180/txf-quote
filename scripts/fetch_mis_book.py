@@ -35,7 +35,9 @@ def sym_base(now):
     y, m = now.year, now.month
     first_wd = (datetime(y, m, 1).weekday() + 1) % 7  # JS getDay: 0=日
     first_wed = 1 + ((3 - first_wd + 7) % 7)
-    if now.day > first_wed + 14:
+    third_wed = first_wed + 14
+    # 結算日當天 13:45 之後近月已是次月（與前端 misSymBase 同規則；S01#4）
+    if now.day > third_wed or (now.day == third_wed and now.hour * 100 + now.minute >= 1345):
         m += 1
         if m > 12:
             m, y = 1, y + 1
