@@ -5541,7 +5541,7 @@
         return;
       }
       const have = miniChart.getDataList ? miniChart.getDataList().length : 0;
-      if (have < bars.length - 1) {
+      if (have !== bars.length) {
         miniChart.applyNewData(bars);
         if (miniChart.resize) miniChart.resize();
         return;
@@ -7744,7 +7744,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.83";
+        const VER = "3.84";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
