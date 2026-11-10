@@ -25,8 +25,6 @@ jobs:
       - name: Install websocket-client
         run: pip install websocket-client==1.8.0
       - name: Fetch SGX TWN 1m history (TradingView)
-        env:
-          TV_DEBUG: "1"
         run: python scripts/fetch_twn_hist.py
       - name: Commit twn-hist
         run: |

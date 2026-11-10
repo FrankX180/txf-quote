@@ -31,9 +31,19 @@ def _msg(m, p):
     return "~m~%d~m~%s" % (len(s), s)
 
 
-def fetch_bars(timeout=45):
+# TradingView 的 WS 歷史資料端點會整組輪替：2026-11-10 22:05 實測 data.* 完全不再推
+# timescale_update（只回 session_id／series_loading／heartbeat，等到超時），同分鐘
+# prodata.* 0.8 秒、widgetdata.* 3.3 秒就回 4000 根。故改成清單，重試時逐個換端點。
+WS_URLS = [
+    "wss://prodata.tradingview.com/socket.io/websocket",
+    "wss://widgetdata.tradingview.com/socket.io/websocket",
+    "wss://data.tradingview.com/socket.io/websocket",
+]
+
+
+def fetch_bars(timeout=25, url=None):
     ws = websocket.create_connection(
-        os.environ.get("TV_WS_URL", "wss://data.tradingview.com/socket.io/websocket"),
+        url or os.environ.get("TV_WS_URL") or WS_URLS[0],
         origin="https://www.tradingview.com", timeout=timeout)
     cs = "cs_" + "".join(random.choices(string.ascii_lowercase, k=12))
     try:
@@ -68,24 +78,26 @@ def fetch_bars(timeout=45):
             pass
 
 
-def fetch_bars_retry(attempts=3, timeout=45):
+def fetch_bars_retry(attempts=3, timeout=25):
     # 單次連線太脆：2026-11-05 16:08Z 一次 TV 沒回 timescale_update（25 秒空等）就整個 job 失敗、
     # 寄失敗信給老公。TV 是公開未授權端點，偶發不給資料是常態，重試兩次即可吃掉。
     # 連兩次以上失敗才視為真異常（仍 exit 1，不吞掉資料缺口）。
-    # 2026-11-10 21:20/21:29/21:39（台北）連三次失敗，全部是 25 秒空等：TV 對「全新連線」的首個
-    # chart session 偶發要 30 秒以上才推 timescale_update，GitHub runner 每次都是新 IP＝每次都要付
-    # 首連成本；本機實測同一分鐘內 timeout=25 失敗、放寬後 0.9 秒拿到 4000 根 ⇒ 放寬單次等待。
+    # 2026-11-10 21:20 起連四次失敗，log 全部是 25 秒空等。曾誤判為「首連慢」而放寬到 45 秒，
+    # 結果 21:50 那輪仍三次空等 → 真正原因是 data.tradingview.com 這個端點不給歷史資料了。
+    # 現改成每次重試換一個端點（prodata → widgetdata → data），單次 25 秒就够。
     last = None
     for i in range(1, attempts + 1):
+        url = WS_URLS[(i - 1) % len(WS_URLS)]
         try:
-            bars = fetch_bars(timeout=timeout)
+            bars = fetch_bars(timeout=timeout, url=url)
             if bars:
+                print("OK endpoint=%s" % url, flush=True)
                 return bars
             raise RuntimeError("TV returned 0 bars")
         except Exception as e:
             last = e
-            print("WARN TV attempt %d/%d failed: %s"
-                  % (i, attempts, str(e).encode("ascii", "replace").decode()), flush=True)
+            print("WARN TV attempt %d/%d %s failed: %s"
+                  % (i, attempts, url, str(e).encode("ascii", "replace").decode()), flush=True)
             if i < attempts:
                 time.sleep(3)
     raise last
