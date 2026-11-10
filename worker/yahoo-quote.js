@@ -369,8 +369,10 @@ function looksLikeLiveQuote(rawW, nowMs) {
   return px != null && px > 10000 && vol != null && vol > 0;
 }
 
-// D1 表結構與複合索引已就緒；預設不跑重複 DDL 以防超出 10ms CPU 限制
-let _schemaEnsured = true;
+// D1 表結構與複合索引：每個 isolate 首次請求跑一次 DDL（IF NOT EXISTS 對已存在的表是 no-op）。
+// 初值必須 false：原本寫 true 等於「假設表已經存在」，一旦 binding 指到新的／空的 D1，
+// 所有寫入都會 no such table 被下面的空 catch 吞掉（2026-11-10 審查 S04#2）。
+let _schemaEnsured = false;
 async function ensureSchema(db, force = false) {
   if (!force && _schemaEnsured) return;
   if (!db) return;
@@ -465,7 +467,7 @@ function parseGhFetchedAt(s) {
 }
 async function fetchGhAgeMs() {
   try {
-    const r = await fetch(HEAL_GH_SNAPSHOT, { headers: { "Cache-Control": "no-cache" }, cf: { cacheTtl: 0, cacheEverything: false } });
+    const r = await fetch(HEAL_GH_SNAPSHOT, { headers: { "Cache-Control": "no-cache" }, cf: { cacheTtl: 0, cacheEverything: false }, signal: fetchSignal(UPSTREAM_TIMEOUT_MS) });
     if (!r.ok) return { ok: false, reason: "gh-fetch-" + r.status };
     const j = await r.json();
     const ts = parseGhFetchedAt(j.fetchedAt);
@@ -558,6 +560,7 @@ async function twnTailMs() {
   const opt = {
     headers: { "Cache-Control": "no-cache" },
     cf: { cacheTtl: 0, cacheEverything: false },
+    signal: fetchSignal(UPSTREAM_TIMEOUT_MS),
   };
   try {
     const m = await fetch(HEAL_GH_TWNMETA, opt);
@@ -621,6 +624,9 @@ async function maybeHealGithub(env, reason) {
   if (!sessionOf(now)) return { ok: false, reason: "closed", skipped: true };
   // GitHub Actions 約每 5 分鐘更新；每 5 分鐘最多檢查一次，避免 cron 空轉。
   const lastCheck = await getHealState(env, "last_gh_check");
+  // D1 讀不到時 fail-closed（與 maybeHealTwn 一致）：原本 Number(undefined)=NaN，
+  // `NaN < 300000` 恆 false，等於「不節流」而不是「不動手」（2026-11-10 審查 S04#11）
+  if (lastCheck && lastCheck.err) return { ok: false, reason: "db-unreadable", skipped: true };
   if (lastCheck && now - Number(lastCheck.ts) < 5 * 60 * 1000 && reason !== "frontend-stale" && reason !== "force") {
     return { ok: false, reason: "check-throttled", skipped: true };
   }
@@ -1750,7 +1756,7 @@ async function fetchTmfOpenApiLatest() {
       "https://openapi.taifex.com.tw/v1/MarketDataOfMajorInstitutionalTradersDetailsOfFuturesContractsBytheDate",
       { headers: hdr }
     ),
-    fetch("https://openapi.taifex.com.tw/v1/DailyMarketReportFut", { headers: hdr }),
+    fetch("https://openapi.taifex.com.tw/v1/DailyMarketReportFut", { headers: hdr, signal: fetchSignal(UPSTREAM_TIMEOUT_MS) }),
   ]);
   if (!instR.ok) throw new Error("openapi inst HTTP " + instR.status);
   if (!mktR.ok) throw new Error("openapi mkt HTTP " + mktR.status);
@@ -1887,6 +1893,7 @@ async function mergeSaveTmf(env, rows, meta) {
 async function importGithubTmf(env) {
   const r = await fetch("https://frankx180.github.io/txf-quote/data/tmf_retail.json", {
     headers: { "User-Agent": "txf-quote-worker/1.0", Accept: "application/json" },
+    signal: fetchSignal(UPSTREAM_TIMEOUT_MS),
   });
   if (!r.ok) throw new Error("github tmf HTTP " + r.status);
   const j = await r.json();
@@ -2383,8 +2390,11 @@ export default {
       await ensureHolidays();
       const wantChart = url.searchParams.get("chart") === "1";
       const res = await pollAndStore(env, wantChart ? { chart: true } : undefined);
-      // 不要把失敗包成 ok:true：外部守護若只看 ok，上游全掛也會回報健康
-      const pollOk = !!res && !res.skipped && !res.skippedQuote && !res.reason;
+      // 不要把失敗包成 ok:true：外部守護若只看 ok，上游全掛也會回報健康。
+      // 子項（imb／imb3y／px）失敗不會冒到頂層，所以逐項看 ok !== false（2026-11-10 審查 S04#8）
+      const subOk = (o) => !o || o.ok !== false;
+      const pollOk = !!res && !res.skipped && !res.skippedQuote && !res.reason
+        && subOk(res.imb) && subOk(res.imb3y) && subOk(res.px);
       return jsonResp({ ok: pollOk, ...res, at: new Date().toISOString() }, 200, {
         "Cache-Control": "no-store",
         "CDN-Cache-Control": "no-store",

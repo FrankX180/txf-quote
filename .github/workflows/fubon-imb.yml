@@ -61,7 +61,8 @@ jobs:
       - name: Ensure Fubon realtime token (for Worker imb3)
         # 2026-11-02：Worker 的 imb3 每分鐘靠 D1 fubon_tok 打三檔 trades。
         # 舊流程只在「有缺口」才換 token，沒缺口就不寫 → Worker 拿不到 token。這一步保證每 5 分鐘都有可用 token（有快取就只驗證）。
-        continue-on-error: true
+        # 2026-11-10：原本 continue-on-error: true → token 補給死掉也全綠（S04#7）。
+        # 這是 imb3 的唯一補給路，失敗就應該紅燈。
         env:
           FUBON_ID: ${{ secrets.FUBON_ID }}
           FUBON_API_KEY: ${{ secrets.FUBON_API_KEY }}

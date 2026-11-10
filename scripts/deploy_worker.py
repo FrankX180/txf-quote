@@ -211,6 +211,9 @@ def main():
             dom and dom.get("success"),
             (dom or {}).get("errors") or (dom or {}).get("result"),
         )
+        # 綁定失敗卻繼續往下，結果是部署「成功」但自訂網域沒生效（S04#1）
+        if not (dom and dom.get("success")):
+            raise SystemExit("domain binding failed: %s" % hid)
     print("OK d1", db_id)
     # Cron：每分鐘自打（CF 最短 1 分；真 5 秒另用本機守護）
     sched = call(
@@ -218,7 +221,11 @@ def main():
         f"https://api.cloudflare.com/client/v4/accounts/{AID}/workers/scripts/{NAME}/schedules",
         [{"cron": "* * * * *"}],
     )
-    print("cron", sched and sched.get("success"), (sched or {}).get("errors") or (sched or {}).get("result"))
+    cron_ok = bool(sched and sched.get("success"))
+    print("cron", cron_ok, (sched or {}).get("errors") or (sched or {}).get("result"))
+    # cron 沒設上＝Worker 的排程全部停擺，但 deploy 看起來是成功的（S04#1）
+    if not cron_ok:
+        raise SystemExit("cron schedule not applied")
 
 
 if __name__ == "__main__":

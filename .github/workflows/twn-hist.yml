@@ -56,13 +56,25 @@ jobs:
               echo "WARN rebase conflict; merging both sides by timestamp" >&2
               MERGE_PY=scripts/merge_twn_hist.py
               if [ ! -f "$MERGE_PY" ]; then
-                # 第一次部署時 upstream 還沒這支腳本（rebase 已 checkout 到 upstream），從本次 commit 取
-                git show "3:${MERGE_PY}" > /tmp/merge_twn_hist.py || true
+                # 第一次部署時 upstream 還沒這支腳本（rebase 已 checkout 到 upstream），從本次 commit 取。
+                # 注意：`|| true` 會讓失敗留下空檔，而 `python 空檔` 的 exit code 是 0，
+                # 等於「合併成功」把衝突標記推上去（2026-11-10 審查 S04#10）。所以驗大小。
+                if ! git show "3:${MERGE_PY}" > /tmp/merge_twn_hist.py 2>/dev/null || [ ! -s /tmp/merge_twn_hist.py ]; then
+                  git rebase --abort || true
+                  echo "cannot recover merge script from stage 3; aborting this run" >&2
+                  exit 1
+                fi
                 MERGE_PY=/tmp/merge_twn_hist.py
               fi
               if ! python "$MERGE_PY"; then
                 git rebase --abort || true
                 echo "merge failed; aborting this run" >&2
+                exit 1
+              fi
+              # 合併後必須可解析：有衝突標記就別 commit（寧可紅燈，也不要推壞 JSON）
+              if ! python -c "import json,sys;json.load(open('data/twn-hist.json',encoding='utf-8'))"; then
+                git rebase --abort || true
+                echo "merged twn-hist.json is not valid JSON; aborting" >&2
                 exit 1
               fi
               git add data/twn-hist.json data/twn-hist-meta.json

@@ -51,15 +51,27 @@ def main():
         raise SystemExit(1)
 
     DATA.mkdir(exist_ok=True)
+    day = pack.get("day") or []
+    night = pack.get("night") or []
+    path = DATA / ("imb-" + dk + ".json")
+    # Worker 的 loadPack 在 D1 異常時回 empty 且 HTTP 200；照寫會把 GitHub 上
+    # 還有資料的當日歸檔清空並 commit 上線（2026-11-10 審查 S04#9）
+    if not day and not night and path.exists():
+        try:
+            old = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            old = {}
+        if (old.get("day") or old.get("night")):
+            print("FAIL imb: worker empty but %s has data; keep old" % path.name, flush=True)
+            raise SystemExit(1)
     out = {
         "dayKey": pack.get("dayKey") or dk,
-        "day": pack.get("day") or [],
-        "night": pack.get("night") or [],
+        "day": day,
+        "night": night,
         "updatedAt": pack.get("updatedAt"),
         "fetchedAt": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
         "source": "worker r2",
     }
-    path = DATA / ("imb-" + dk + ".json")
     path.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
     # 最新指標
     (DATA / "imb-latest.json").write_text(
