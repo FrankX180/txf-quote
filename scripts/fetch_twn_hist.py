@@ -33,7 +33,7 @@ def _msg(m, p):
 
 def fetch_bars(timeout=45):
     ws = websocket.create_connection(
-        "wss://data.tradingview.com/socket.io/websocket",
+        os.environ.get("TV_WS_URL", "wss://data.tradingview.com/socket.io/websocket"),
         origin="https://www.tradingview.com", timeout=timeout)
     cs = "cs_" + "".join(random.choices(string.ascii_lowercase, k=12))
     try:
@@ -42,8 +42,11 @@ def fetch_bars(timeout=45):
         ws.send(_msg("resolve_symbol", [cs, "sds_sym_1", '={"symbol":"%s","session":"extended"}' % SYMBOL]))
         ws.send(_msg("create_series", [cs, "sds_1", "s1", "sds_sym_1", "1", N_BARS, ""]))
         t0 = time.time()
+        debug = os.environ.get("TV_DEBUG") == "1"
         while time.time() - t0 < timeout:
             d = ws.recv()
+            if debug:
+                print("TVDBG %s" % repr(d[:300]).encode("ascii", "replace").decode(), flush=True)
             if d.startswith("~m~") and re.fullmatch(r"~m~\d+~m~~h~\d+", d):
                 ws.send(d)  # heartbeat echo
                 continue
