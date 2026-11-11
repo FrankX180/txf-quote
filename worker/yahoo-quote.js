@@ -666,7 +666,7 @@ async function maybeHealChips(env) {
   const todayDash = `${p.y}-${p.mo}-${p.d}`;
   const todayYmd = `${p.y}${p.mo}${p.d}`;
   try {
-    const r = await fetch(HEAL_GH_UNCOVERED, { headers: { "Cache-Control": "no-cache" }, cf: { cacheTtl: 0, cacheEverything: false } });
+    const r = await fetch(HEAL_GH_UNCOVERED, { headers: { "Cache-Control": "no-cache" }, cf: { cacheTtl: 0, cacheEverything: false }, signal: fetchSignal(UPSTREAM_TIMEOUT_MS) });
     if (!r.ok) return { ok: false, reason: "gh-unc-fetch-" + r.status };
     const j = await r.json();
     const uncDate = String(j.date || "").replace(/\D/g, "");
