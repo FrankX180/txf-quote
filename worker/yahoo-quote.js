@@ -534,6 +534,9 @@ async function triggerGithubWorkflow(env, reason, opts) {
     return { ok, status: r.status, detail, via: "master" };
   } catch (e) {
     const msg = String((e && e.message) || e).slice(0, 300);
+    // 失敗也要記時間：否則 timeout／網路錯誤時 state 沒寫，下一分鐘立刻再 dispatch，
+    // 違反「實際不會高於 1 次／8 分」的原始設計（且 4 秒 timeout 讓這條路徑更常被走到）。
+    await setHealState(env, stateKey, now, "error:" + msg.slice(0, 60));
     await logHeal(env, reason || "", false, msg);
     return { ok: false, reason: msg };
   }
