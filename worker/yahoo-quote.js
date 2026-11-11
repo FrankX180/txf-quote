@@ -503,6 +503,8 @@ async function triggerGithubWorkflow(env, reason, opts) {
         "User-Agent": "txf-heal-worker/1.0",
       },
       body: JSON.stringify({ ref: "master" }),
+      // 與 fetchGhAgeMs 同一條規則：GitHub 掛住不回時不能無限等，否則整個 cron 卡死。
+      signal: fetchSignal(UPSTREAM_TIMEOUT_MS),
     });
     // GH returns 204 on success; 401/404/422 etc are errors
     const detail = `status ${r.status} ${await r.text().catch(()=>"")}`.slice(0, 400);
@@ -521,6 +523,7 @@ async function triggerGithubWorkflow(env, reason, opts) {
             "User-Agent": "txf-heal-worker/1.0",
           },
           body: JSON.stringify({ ref: "main" }),
+          signal: fetchSignal(UPSTREAM_TIMEOUT_MS),
         });
         const detail2 = `status ${r2.status} ${await r2.text().catch(()=>"")}`.slice(0, 400);
         const ok2 = r2.status === 204 || r2.status === 201 || r2.status === 200;
