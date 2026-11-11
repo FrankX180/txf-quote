@@ -689,7 +689,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">3.90</div>
+      <div class="ver foot-right" id="verFoot">3.91</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2381,11 +2381,13 @@
       const nextNightDate = nextNight && (nextNight.tradeDate || nextNight.date)
         ? String(nextNight.tradeDate || nextNight.date).replace(/\D/g, "")
         : "";
-      // 老公定案（2026-11-02）：下一交易日的夜盤段只在「清晨空窗」顯示（05:15 夜盤收完～08:44 日盤未開）。
-      // 其餘時段（日盤中、日盤後、夜盤進行中）最上面一律是今日日盤，未完成的夜盤不插隊。
+      // 老公定案（2026-11-02）：下一交易日的夜盤段只在「夜盤已收完」時顯示，未完成的不插隊。
+      // 2026-11-11 修：原本把窗口卡在 05:15–08:44，日盤一開就把今晨夜盤藏起來，整個白天
+      // （08:45–15:00）法人表看不到今天的任何數據——期交所日盤籌碼盤後才公布，白天本來只有夜盤段可用。
+      // 改成 05:15～15:00 都顯示（夜盤 05:00 已收完，資料完整）；15:00 後新夜盤開跑才不插隊。
       const _twHM = (() => { const d = new Date(Date.now() + 8 * 3600 * 1000); return d.getUTCHours() * 100 + d.getUTCMinutes(); })();
       const nextNightOk = !!(nextNight && nextNightDate && day0 && nextNightDate > day0 && nextNight.close != null)
-        && _twHM >= 515 && _twHM < 845;
+        && _twHM >= 515 && _twHM < 1500;
       // 日盤段的漲跌基準：今晨夜盤收盤。night 還屬於今日時直接取；夜盤 15:00 換段後
       // night 已換成下一交易日的，讀資料層釘住的 history[0].nightClose（fetch_uncovered.py 寫入）。
       const dayBaseNight = (nightOk && night.close != null)
@@ -2397,9 +2399,13 @@
       const bD = nightOk ? Number(night.dealerDelta || 0) : 0;
       const bR = nightOk ? Number(night.retailDelta || 0) : 0;
       // 清晨空窗（05:15–08:44）時，今晨收盤的夜盤段（上一營業日晚間起跑）排最上面，其下才接上一交易日
+      let nnRow = null;
       if (nextNightOk) {
-        splitRows.push({
-          date: nextNightDate,
+        // 顯示日期用「夜盤開始那一天」（nextNight.date），不是所屬交易日（tradeDate）。
+        // 10 日晚起的夜盤屬 11/11 交易日，但表上命名要和 09(夜) 同一套：標 10(夜)。
+        const nextNightShowDate = String(nextNight.date || nextNightDate).replace(/\D/g, "");
+        nnRow = {
+          date: nextNightShowDate || nextNightDate,
           session: "night",
           close: nextNight.close,
           // 基準＝本交易日（最新日盤）收盤，這是它開始前的價
@@ -2411,7 +2417,7 @@
           _splitRow: true,
           // 它自成一天（今日還没日盤），與下一組之間要畫分隔線
           _splitEnd: true,
-        });
+        };
       }
       // 同一交易日組內由上往下＝日盤 → 夜盤 → 合計（2026-11-02 老公定案）。
       // 日盤時間上晚於夜盤，排上面才符合「最新在最上」；合計列在 oiRows 首位接續其下。
@@ -2465,7 +2471,7 @@
         const pRows = splitRows.filter((r) => r.session === "nightpart");
         // oiRows[1] 必須存在：history 只有一筆時，合計列沒有前日收盤可用，
         // 硬排到最上面會退回用子列收盤算漲跌（錯），所以退回舊版不套樹狀。
-        if (!nextNightOk && oiRows[0] && oiRows[1] && (dRows.length || pRows.length)) {
+        if (oiRows[0] && oiRows[1] && (dRows.length || pRows.length)) {
           const collapsed = !!oiTreeClosed[day0];
           const parent = Object.assign({}, oiRows[0], {
             _splitRow: true,
@@ -2485,10 +2491,12 @@
         } else {
           oiRows = splitRows.concat(oiRows);
         }
+        // 今晨已收盤的夜盤段獨立放最上面（不屬於下面那組樹狀），自己帶分隔線。
+        if (nnRow) oiRows = [nnRow].concat(oiRows);
         // 說明文字必須跟實際列數一致：夜盤段未結算（nightOk=false）時只有日盤一列，
         // 不能寫「上方兩列」；連 nightClose 都取不到時要講明用的是前一交易日收盤。
         if (nextNightOk) {
-          oiNote += "；最上列＝今晨收盤的夜盤段（今日日盤尚未開盤），其下為上一交易日；日盤漲跌以今晨夜盤收盤為基準";
+          oiNote += "；最上列＝10 日夜盤段（今晨已收盤，屬下一個交易日；今日日盤籌碼盤後才公布），其下為上一交易日；日盤漲跌以今晨夜盤收盤為基準";
         } else if (!nightOk) {
           oiNote += dayBaseNight != null
             ? "；今日夜盤段尚未結算，合計列下只掛日盤段一列；日盤漲跌以今晨夜盤收盤為基準"
@@ -7790,7 +7798,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.90";
+        const VER = "3.91";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
