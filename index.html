@@ -518,6 +518,7 @@
     .up { color: var(--up); }
     .dn { color: var(--dn); }
     .flat { color: #111; }
+    .oi-unit { color: var(--up); font-weight: 800; }
     .note { font-size: 12px; color: var(--muted); margin-top: 10px; }
     .live { font-size: 11px; margin-left: 8px; color: #9ca3af; }
     .live.on { color: #16a34a; }
@@ -2356,11 +2357,11 @@
           dealer: oiDayDiff(hist, i, "dealer"),
           retail: r.retailDelta != null ? r.retailDelta : oiDayDiff(hist, i, "retail"),
         }));
-        oiNote = "單位：大台等值口（大台＋小台/4＋微台/20）；相對前一交易日未平倉淨額變化；點表頭開關 K 線副圖（最多兩個）";
+        oiNote = "<b class=\"oi-unit\">單位：大台等值口（大台＋小台/4＋微台/20）</b>；相對前一交易日未平倉淨額變化；點表頭開關 K 線副圖（最多兩個）";
       } else {
         oiKeys = ["foreign", "trust", "dealer", "retail"];
         oiRows = hist;
-        oiNote = "單位：大台等值口（大台＋小台/4＋微台/20）；數字為淨未平倉（多−空）；點表頭開關 K 線副圖（最多兩個）";
+        oiNote = "<b class=\"oi-unit\">單位：大台等值口（大台＋小台/4＋微台/20）</b>；數字為淨未平倉（多−空）；點表頭開關 K 線副圖（最多兩個）";
       }
       const night = uncover.night;
       const day0 = String((hist[0] && hist[0].date) || uncover.date || "").replace(/\D/g, "");
@@ -7825,7 +7826,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.93";
+        const VER = "3.94";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
