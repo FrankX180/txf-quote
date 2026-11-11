@@ -689,7 +689,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">3.91</div>
+      <div class="ver foot-right" id="verFoot">3.92</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2419,9 +2419,31 @@
           _splitEnd: true,
         };
       }
+      // 老公 2026-11-11 定案：10 日夜盤段掛在「11/11」那一組下面，
+      // 父列 11/11 先佔位（日盤籌碼盤後才公布）、子列 ├─10(夜) 有數字、└─11(日) 未開盤空白。
+      let nnGroup = null;
+      if (nextNightOk && nnRow) {
+        nnGroup = [
+          {
+            date: nextNightDate, session: "daytotal", close: null, _prevClose: null,
+            foreign: null, trust: null, dealer: null, retail: null,
+            _splitRow: true, _treeParent: true, _treeKey: nextNightDate, _treeCollapsed: false,
+          },
+          Object.assign({}, nnRow, {
+            _treeBranch: "mid",
+            _splitEnd: false,
+            _prevClose: hist[0] ? hist[0].close : null,
+          }),
+          {
+            date: nextNightDate, session: "daypart", close: null, _prevClose: nextNight.close,
+            foreign: null, trust: null, dealer: null, retail: null,
+            _splitRow: true, _treeBranch: "last", _splitEnd: true,
+          },
+        ];
+      }
       // 同一交易日組內由上往下＝日盤 → 夜盤 → 合計（2026-11-02 老公定案）。
       // 日盤時間上晚於夜盤，排上面才符合「最新在最上」；合計列在 oiRows 首位接續其下。
-      if (day0 && baseDay.close != null) {
+      if (!nextNightOk && day0 && baseDay.close != null) {
         const cF = oiNetFlow ? (baseDay.foreignDelta != null ? Number(baseDay.foreignDelta) : oiDayDiff(hist, 0, "foreign")) : baseDay.foreign;
         const cT = oiNetFlow ? oiDayDiff(hist, 0, "trust") : baseDay.trust;
         const cD = oiNetFlow ? oiDayDiff(hist, 0, "dealer") : baseDay.dealer;
@@ -2444,7 +2466,7 @@
           retail: oiNetFlow ? (Number(cR || 0) - bR) : cR,
         });
       }
-      if (nightOk) {
+      if (!nextNightOk && nightOk) {
         splitRows.push({
           date: nightTradeDate || nightDate || day0,
           // 2026-11-09 老公指定：這個夜盤段是「前一交易日晚上」起跑的（11/09 的夜盤段＝11/06 晚上），
@@ -2471,7 +2493,7 @@
         const pRows = splitRows.filter((r) => r.session === "nightpart");
         // oiRows[1] 必須存在：history 只有一筆時，合計列沒有前日收盤可用，
         // 硬排到最上面會退回用子列收盤算漲跌（錯），所以退回舊版不套樹狀。
-        if (oiRows[0] && oiRows[1] && (dRows.length || pRows.length)) {
+        if (!nextNightOk && oiRows[0] && oiRows[1] && (dRows.length || pRows.length)) {
           const collapsed = !!oiTreeClosed[day0];
           const parent = Object.assign({}, oiRows[0], {
             _splitRow: true,
@@ -2491,8 +2513,7 @@
         } else {
           oiRows = splitRows.concat(oiRows);
         }
-        // 今晨已收盤的夜盤段獨立放最上面（不屬於下面那組樹狀），自己帶分隔線。
-        if (nnRow) oiRows = [nnRow].concat(oiRows);
+        // （11/10 夜盤列已改由 nnGroup 包成 11/11 一組，在下面統一插到最上面）
         // 說明文字必須跟實際列數一致：夜盤段未結算（nightOk=false）時只有日盤一列，
         // 不能寫「上方兩列」；連 nightClose 都取不到時要講明用的是前一交易日收盤。
         if (nextNightOk) {
@@ -2506,6 +2527,12 @@
             ? "；最上列＝今日合計，其下 ├─夜盤段、└─日盤段；日盤漲跌以夜盤收盤為基準、夜盤漲跌以前一交易日日盤收盤為基準，兩列相加＝合計列（夜盤段＝前一晚 15:00 起的成交淨口）"
             : "；最上列＝今日合計，其下 ├─夜盤段、└─日盤段拆分（夜盤段為前一晚成交後估水位）；此模式三列都是水位，不可相加（相加只適用淨進出模式）；日盤漲跌以夜盤收盤為基準、夜盤漲跌以前一交易日日盤收盤為基準";
         }
+      }
+      // 老公 2026-11-11 定案：有今晨已收盤的夜盤段就把「11/11」這組建起來放最上面，
+      // 其下 ├─10(夜) 有數字、└─11(日) 未開盤空白；底下 11/10 只留合計單列、不再展開子列。
+      if (nnGroup) {
+        oiRows = nnGroup.concat(oiRows);
+        oiNote += "；最上列＝11/11（今日日盤籌碼盤後才公布），其下 ├─10(夜) 已收盤、└─11(日) 尚未開盤；底下 11/10 只留合計單列";
       }
       oiEl.innerHTML = oiBuildHistTable("oi", oiRows, oiKeys, oiLabs, oiNote);
 
@@ -7798,7 +7825,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.91";
+        const VER = "3.92";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
