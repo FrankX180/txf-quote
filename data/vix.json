@@ -1,13 +1,17 @@
 {
- "fetchedAt": "2026-11-12 16:17:18",
+ "fetchedAt": "2026-11-13 09:08:09",
  "source": "taifex_vix+mis",
  "unit": "VIXTWN",
  "note": "官網月檔僅近月，長歷史由本檔每日累積；不讀任何外部專案",
  "latest": {
-  "date": "2026-11-12",
-  "close": 40.28
+  "date": "2026-11-13",
+  "close": 40.1
  },
  "history": [
+  {
+   "date": "2026-11-13",
+   "close": 40.1
+  },
   {
    "date": "2026-11-12",
    "close": 40.28
