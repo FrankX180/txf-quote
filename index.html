@@ -4973,12 +4973,17 @@
       }
       if (run.length >= 2) runs.push(run);
 
-      const gUp = ctx.createLinearGradient(0, padT, 0, yFlat);
-      gUp.addColorStop(0, "rgba(211,47,47,0.32)");
-      gUp.addColorStop(1, "rgba(211,47,47,0.00)");
-      const gDn = ctx.createLinearGradient(0, yFlat, 0, padT + chP);
-      gDn.addColorStop(0, "rgba(27,138,62,0.00)");
-      gDn.addColorStop(1, "rgba(27,138,62,0.32)");
+      // 平盤未定（yFlat=null）時不建漸層：null 會被 Canvas 當成 0，整張圖會被單色（綠）塗滿
+      const gUp = yFlat == null ? null : ctx.createLinearGradient(0, padT, 0, yFlat);
+      if (gUp) {
+        gUp.addColorStop(0, "rgba(211,47,47,0.32)");
+        gUp.addColorStop(1, "rgba(211,47,47,0.00)");
+      }
+      const gDn = yFlat == null ? null : ctx.createLinearGradient(0, yFlat, 0, padT + chP);
+      if (gDn) {
+        gDn.addColorStop(0, "rgba(27,138,62,0.00)");
+        gDn.addColorStop(1, "rgba(27,138,62,0.32)");
+      }
 
       function areaPath(seg) {
         ctx.beginPath();
@@ -4988,7 +4993,7 @@
         ctx.closePath();
       }
       runs.forEach((seg) => {
-        if (twnSim) return;
+        if (twnSim || !gUp || !gDn) return; // 平盤基準未到＝不上色也不填色，避免灰線配整片綠被誤讀成跌勢
         ctx.save();
         ctx.beginPath();
         ctx.rect(padL, padT, w - padL - padR, Math.max(0, yFlat - padT));
@@ -7826,7 +7831,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.96";
+        const VER = "3.97";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
