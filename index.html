@@ -4144,8 +4144,18 @@
           daySpan < 2
             ? hist[sessKey()] || []
             : (hist.day || []).concat(hist.night || []);
+        // 當日看本盤：先把上一盤殘點濾掉，否則開盤第一筆 tick 會拿舊錨點比對而被誤擋（2026-11-16）
+        if (daySpan < 2) {
+          const sk0 = sessKey();
+          if (sessKindAt(Date.now()) === sk0) {
+            const openMs0 = sessionOpenAt();
+            pts = pts.filter((p) => p.time >= openMs0 - 60000 && barKindAt(p.time) === sk0);
+          }
+        }
         if (ticks.length) {
           const lastT = pts.length ? pts[pts.length - 1].time : 0;
+          // 大跳動候選：連續 3 筆彼此貼近且都偏離錨點 → 認定真實位移（顧問審查 2026-11-16）
+          let pending = null;
           ticks.forEach((h) => {
             const ts = h.ts;
             if (typeof ts !== "number") return;
@@ -4154,10 +4164,23 @@
             const px = h.px;
             if (px == null || !pxLooksLikeTxf(px)) return;
             const lastP = pts.length ? pts[pts.length - 1] : null;
-            // 跨場次一律擋（防日盤夜盤混價）；同場次放寬到 1200 點，夜盤 500 點急拉照畫（2026-11-16）
             if (lastP) {
-              const limit = barKindAt(ts) !== barKindAt(lastP.time) ? PX_SPIKE_PTS : PX_INSANE_PTS;
-              if (Math.abs(px - lastP.px) >= limit) return;
+              const crossSess = barKindAt(ts) !== barKindAt(lastP.time);
+              const limit = crossSess ? PX_SPIKE_PTS : PX_INSANE_PTS;
+              if (Math.abs(px - lastP.px) >= limit) {
+                if (crossSess) return; // 跨場次混價：一律不收
+                if (pending && ts - pending.ts <= 20000 && Math.abs(px - pending.px) <= limit / 4) {
+                  pending.n += 1;
+                  pending.px = px;
+                  pending.ts = ts;
+                  if (pending.n < 3) return;
+                } else {
+                  pending = { px, ts, n: 1 };
+                  return;
+                }
+              } else {
+                pending = null;
+              }
             }
             if (lastP && ts - lastP.time < 60000) {
               // 同一分鐘內就地更新，保留盤中高低點，折線才跟得上現價
@@ -7867,7 +7890,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.01";
+        const VER = "4.02";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
