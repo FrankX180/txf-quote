@@ -3532,7 +3532,9 @@
     // Pages 給這些檔 cache-control: max-age=600，走預設快取後實際更新周期變 10 分鐘，流量減半。
     // 即時價走 Worker 推流與 ensureLive1m，不靠這些靜態檔，延遲 10 分鐘可接受。
     // snapshot / mis-book / imb-* 維持 no-cache（它們是報價備援，需要即時）。
-    const GH_CACHEABLE = /(kline-daily|kline-minute|uncovered|history-day|history-night|tmf_retail|holidays|twn-hist|twn-ratio)\.json$/;
+    const GH_CACHEABLE = /(kline-daily|kline-minute|history-day|history-night|tmf_retail|holidays|twn-hist|twn-ratio)\.json$/;
+    // 2026-11-17：uncovered 從可快取清單移除——法人夜盤段每輪更新，10 分鐘 CDN 快取
+    // 會讓新寫入的 nextNight 整列看不到（新資料仍走 ETag 驗證，沒變不耗流量）。
     function gh(path) {
       if (GH_CACHEABLE.test(path)) return fetch(path);
       return fetch(path, { cache: "no-cache" });
@@ -7898,7 +7900,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.05";
+        const VER = "4.06";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
