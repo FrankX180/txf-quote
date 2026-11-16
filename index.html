@@ -1264,12 +1264,19 @@
       // 休市收斂（2026-11-16）：休市後 MIS 推流停、快照 ts 不再前進，若只認 25 秒新鮮，
       // 主價會卡在斷流前那一刻（例 13:36 的 40,938），五檔卻已是 13:45 收盤的官方書
       // （40,873/40,887，對應收盤 40,885）→ 畫面變成「價、書不同源，差 50 點」。
-      // 休市時官方快照是靜態定案值：只要不比現有價舊（CDate）就採用，讓價／書／時間戳三者同源。
+      // 休市時官方快照是靜態定案值，但只認「整筆時間戳（CDate+CTime）不比現有價舊」的那筆：
+      // 只比日期的話，同一天較早的快照（例 13:46 凍結期的 13:37 frame）會把已經更新的
+      // Yahoo 價蓋回去，又變成價格倒退。
       let allowPx = fresh;
       if (!allowPx && !marketOpen()) {
-        const curD = String(snap[sk].CDate || "");
-        const nD = String(f.CDate || "");
-        allowPx = !!nD && (!curD || nD >= curD) && n(f.CLastPrice) != null;
+        const stamp = function (o) {
+          const d = String((o && o.CDate) || "").replace(/\D/g, "");
+          const t = String((o && o.CTime) || "").replace(/\D/g, "").padStart(6, "0");
+          return d ? d + t : "";
+        };
+        const curS = stamp(snap[sk]);
+        const newS = stamp(f);
+        allowPx = !!newS && n(f.CLastPrice) != null && (!curS || newS >= curS);
       }
       // 價／時間：只在新鮮（或休市定案快照）時覆寫。WS 斷線空窗期間絕不用舊 MIS 價蓋掉 Yahoo 的新價
       // （否則價格與書一起變舊，bookStraddles 會因同源而攔不住）。
@@ -7841,7 +7848,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.98";
+        const VER = "3.99";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {

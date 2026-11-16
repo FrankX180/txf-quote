@@ -626,6 +626,52 @@ def _pg_connect():
     )
 
 
+def load_pg_tx_only(date8: str):
+    """TX 單一商品法人淨未平倉（口）——與券商 APP 同口徑。
+
+    為什麼要另存：data/uncovered.json 的 inst 是 TX+MTX/4+TMF/20 大台等值口，
+    券商 APP 顯示的是 TX 單一商品原始口數，兩者必然對不上（2026-11-12 老公貼截圖）。
+    這裡不改既有 inst，只多給一份 TX-only，前端兩個都顯示。
+    """
+    out = {"foreign": None, "trust": None, "dealer": None, "total": None}
+    ds = ymd8(date8) if date8 else None
+    if not ds or len(ds) != 8:
+        return out
+    conn = None
+    try:
+        conn = _pg_connect()
+        if not conn:
+            return out
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT investor_type, COALESCE(oi_long,0) - COALESCE(oi_short,0)
+            FROM futures_institutional
+            WHERE product = 'TX' AND trade_date = %s AND oi_long IS NOT NULL
+            """,
+            ("%s-%s-%s" % (ds[:4], ds[4:6], ds[6:8]),),
+        )
+        who = {"外資及陸資": "foreign", "外資": "foreign", "投信": "trust", "自營商": "dealer"}
+        hit = False
+        for inv, net in cur.fetchall():
+            k = who.get(str(inv or "").strip())
+            if not k:
+                continue
+            out[k] = round(float(net or 0), 2)
+            hit = True
+        if hit:
+            out["total"] = round(sum(float(out[k] or 0) for k in ("foreign", "trust", "dealer")), 2)
+    except Exception as e:
+        print("WARN tx_only", e)
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+    return out
+
+
 def load_pg_chip_maps(limit: int = HIST_N):
     """本機 PG 回填：法人未平倉／大額前十／P/C%／收盤參考。
 
@@ -2049,12 +2095,15 @@ def main():
         except Exception as e:
             print("WARN nightClose", e)
     history = enrich_history_cum(history)
+    tx_only = load_pg_tx_only(ymd8(date) or date)
     payload = {
         "fetchedAt": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
         "date": ymd_slash(date) if len(date) == 8 else date,
         "source": "+".join(sources),
         "unit": "tx_eq",
         "unitNote": "大台等值=TX+MTX/4+TMF/20；散戶=−(F+T+D)；PC/VIX/大額/收盤=期交所官網",
+        "txOnly": tx_only,
+        "txOnlyNote": "TX 單一商品法人淨未平倉（口），與券商 APP 同口徑",
         "inst": inst,
         "top": top,
         "today": today,
@@ -2087,6 +2136,9 @@ def main():
         return {
             "date": obj.get("date"),
             "source": obj.get("source"),
+            # 2026-11-15 補：txOnly 是獨立欄位（TX 單一商品口徑），不納入比對的話
+            # 舊檔沒這欄位時永遠 SKIP，新欄位就落不了地。
+            "txOnly": obj.get("txOnly"),
             "h0": {k: h0.get(k) for k in keys},
             "night": {k: n.get(k) for k in ("date", "foreign", "trust", "dealer", "retail", "foreignDelta", "trustDelta", "dealerDelta", "retailDelta", "close")},
             # 2026-10-31 補：nextNight 是獨立一列，不納入比對的話它變了也不會寫檔

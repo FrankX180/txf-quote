@@ -2,6 +2,25 @@
 
 # FuturesHTML（txf-quote）
 
+<!-- session-history:begin -->
+<!-- 本段由 E:\_PluginTools\AgentHome\Script\apply_session_history.py 維護；直接改這裡，下次重跑會被覆寫。-->
+## 對話歷史（需要時再查，不必每次開場跑）
+
+老公的習慣是「哪個話題就點哪個資料夾開對話」。這裡有依時間排序的對話索引，**知道去哪查就好，不要每次開場都把對話原文讀一遍**（容量太大）。
+
+**什麼時候查**：老公說「上次／之前／繼續／我們談過」、要接續某條研究或決策、或發現自己在憑印象猜舊結論時。
+
+1. 先看本資料夾的 `_對話索引.md`（時間、則數、檔名，不含內文），確認有哪幾條。
+2. 要摘要才跑（約 2 秒，抽最近 5 條的開頭與收尾）：
+   `& R:\PythonProgram\Python312\python.exe E:\_PluginTools\AgentHome\Script\folder_session_log.py --dir . --limit 5`
+
+3. 要細節才針對那一條 `.jsonl` 讀區段，一次只讀需要的那一條。
+4. `_對話索引.md` 可重跑覆蓋；索引不含對話內文（這個資料夾可能對外）。
+5. session 原文在 `C:\Users\AnyUser\.hanako\agents\<agent>\sessions\`，綁 agent 不綁資料夾；反查用 cwd（腳本已跨 7 個 agent＋子資料夾）。
+
+不用查的情況：純問答、單純貼資料、與本專案無關的閒聊——直接做事，不要為了儀式感去讀舊對話。
+<!-- session-history:end -->
+
 ## Purpose
 
 公開單頁**大台（TXF）**近月看盤站。前端 `index.html` 上 GitHub Pages；即時報價／1 分 K 走 Cloudflare Worker `wtx.blok.trading`（舊別名 `wtx.19850926.xyz`）；靜態 JSON 由 Actions 每 5 分寫入 `data/`。
