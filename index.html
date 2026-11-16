@@ -4218,15 +4218,22 @@
           const lastT = last.time || 0;
           if (lastT > now + 180000) {
             /* 未矯正的未來棒：不用現價覆蓋 */
-          } else if (Math.abs(livePx - last.px) >= (barKindAt(lastT) !== barKindAt(now) ? PX_SPIKE_PTS : PX_INSANE_PTS)) {
-            /* 跨場次混價或壞 tick：不縮尾（同場次急拉照樣接到尾端） */
+          } else if (
+            Math.abs(livePx - last.px) >=
+              (barKindAt(lastT) !== barKindAt(now) ? PX_SPIKE_PTS : PX_INSANE_PTS) &&
+            (barKindAt(lastT) !== barKindAt(now) || (window.__liveRejN || 0) < 3)
+          ) {
+            /* 跨場次混價永久不收；同場次連續 3 輪（約 45 秒）後改為接受，避免錨點凍結 */
+            window.__liveRejN = (window.__liveRejN || 0) + 1;
           } else if (Math.abs(now - lastT) < 120000) {
+            window.__liveRejN = 0;
             last.px = livePx;
             last.close = livePx;
             last.high = Math.max(last.high != null ? last.high : livePx, livePx);
             last.low = Math.min(last.low != null ? last.low : livePx, livePx);
             last.time = Math.max(lastT, now - 500);
           } else {
+            window.__liveRejN = 0;
             pts.push({
               px: livePx, vol: 0, time: now,
               open: livePx, high: livePx, low: livePx, close: livePx,
@@ -7890,7 +7897,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.02";
+        const VER = "4.03";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
