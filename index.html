@@ -1261,9 +1261,19 @@
       // 若用 frame 時間（b.ts）冒充，會把舊價回寫成主價。
       const pxAge = Date.now() - (typeof b.pxTs === "number" ? b.pxTs : 0);
       const fresh = pxAge <= MIS_FRESH_MS;
-      // 價／時間：只在新鮮時覆寫。WS 斷線空窗期間絕不用舊 MIS 價蓋掉 Yahoo 的新價
+      // 休市收斂（2026-11-16）：休市後 MIS 推流停、快照 ts 不再前進，若只認 25 秒新鮮，
+      // 主價會卡在斷流前那一刻（例 13:36 的 40,938），五檔卻已是 13:45 收盤的官方書
+      // （40,873/40,887，對應收盤 40,885）→ 畫面變成「價、書不同源，差 50 點」。
+      // 休市時官方快照是靜態定案值：只要不比現有價舊（CDate）就採用，讓價／書／時間戳三者同源。
+      let allowPx = fresh;
+      if (!allowPx && !marketOpen()) {
+        const curD = String(snap[sk].CDate || "");
+        const nD = String(f.CDate || "");
+        allowPx = !!nD && (!curD || nD >= curD) && n(f.CLastPrice) != null;
+      }
+      // 價／時間：只在新鮮（或休市定案快照）時覆寫。WS 斷線空窗期間絕不用舊 MIS 價蓋掉 Yahoo 的新價
       // （否則價格與書一起變舊，bookStraddles 會因同源而攔不住）。
-      if (fresh) {
+      if (allowPx) {
         ["CLastPrice", "CRefPrice", "CDiff", "CDiffRate", "CTotalVolume", "CTime", "CDate"].forEach(function (k) {
           if (f[k] != null && f[k] !== "") snap[sk][k] = f[k];
         });
@@ -7831,7 +7841,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "3.97";
+        const VER = "3.98";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) {
