@@ -4102,7 +4102,8 @@
       pts.sort((a, b) => a.time - b.time);
       pts = dropPxSpikes(pts, (p) => p.px, (p) => p.time);
 
-      // 當日走勢：夜盤折線圖節點降採樣為 3 分鐘，日盤維持 1 分鐘；最後一根即時保留
+      // 當日走勢：日夜盤都用 1 分鐘節點（夜盤原本降採樣 3 分鐘，2026-11-16 取消——
+      // 降採樣把尖峰削掉，跟富邦逐筆線對不上）；最後一根即時保留
       if (span <= 1 && pts.length > 3) {
         const dayPts = [];
         const nightPts = [];
@@ -4112,7 +4113,7 @@
         });
         if (nightPts.length > 2) {
           const sampledNight = [];
-          const stepMs = 3 * 60 * 1000;
+          const stepMs = 60 * 1000;
           let cur = null;
           nightPts.forEach((p, idx) => {
             const slot = Math.floor(p.time / stepMs) * stepMs;
@@ -7897,7 +7898,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.03";
+        const VER = "4.04";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
