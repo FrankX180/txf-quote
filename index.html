@@ -3043,6 +3043,7 @@
     }
     // 夜盤走勢千點垂直尖刺：Yahoo 未矯正完的未來棒、或日盤價被寫進夜盤根
     const PX_SPIKE_PTS = 400;
+    const PX_INSANE_PTS = 1200; // 同場次單筆跳動上限：超過視為壞 tick，不畫（2026-11-16）
     function pxLooksLikeTxf(px) {
       const x = +px;
       return Number.isFinite(x) && x >= 10000 && x <= 80000;
@@ -3062,8 +3063,7 @@
             Number.isFinite(t0) &&
             Number.isFinite(t) &&
             (t - t0) <= 15 * 60000 &&
-            Math.abs(p - p0) >= PX_SPIKE_PTS &&
-            barKindAt(t) !== barKindAt(t0)
+            Math.abs(p - p0) >= (barKindAt(t) !== barKindAt(t0) ? PX_SPIKE_PTS : PX_INSANE_PTS)
           ) {
             const nxt = a[i + 1];
             if (nxt && Math.abs(+getPx(nxt) - p0) < PX_SPIKE_PTS) continue; // 單點尖刺，丟中間
@@ -4154,8 +4154,11 @@
             const px = h.px;
             if (px == null || !pxLooksLikeTxf(px)) return;
             const lastP = pts.length ? pts[pts.length - 1] : null;
-            // 跨盤混價才擋；同盤急拉（夜盤 500 點很常見）必須照畫（2026-11-16）
-            if (lastP && Math.abs(px - lastP.px) >= PX_SPIKE_PTS && barKindAt(ts) !== barKindAt(lastP.time)) return;
+            // 跨場次一律擋（防日盤夜盤混價）；同場次放寬到 1200 點，夜盤 500 點急拉照畫（2026-11-16）
+            if (lastP) {
+              const limit = barKindAt(ts) !== barKindAt(lastP.time) ? PX_SPIKE_PTS : PX_INSANE_PTS;
+              if (Math.abs(px - lastP.px) >= limit) return;
+            }
             if (lastP && ts - lastP.time < 60000) {
               // 同一分鐘內就地更新，保留盤中高低點，折線才跟得上現價
               lastP.px = px;
@@ -4192,8 +4195,8 @@
           const lastT = last.time || 0;
           if (lastT > now + 180000) {
             /* 未矯正的未來棒：不用現價覆蓋 */
-          } else if (Math.abs(livePx - last.px) >= PX_SPIKE_PTS && barKindAt(lastT) !== barKindAt(now)) {
-            /* 跨盤混價：不縮尾（同盤急拉照樣接到尾端） */
+          } else if (Math.abs(livePx - last.px) >= (barKindAt(lastT) !== barKindAt(now) ? PX_SPIKE_PTS : PX_INSANE_PTS)) {
+            /* 跨場次混價或壞 tick：不縮尾（同場次急拉照樣接到尾端） */
           } else if (Math.abs(now - lastT) < 120000) {
             last.px = livePx;
             last.close = livePx;
@@ -7864,7 +7867,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.00";
+        const VER = "4.01";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
