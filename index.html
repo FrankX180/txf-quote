@@ -727,6 +727,8 @@
           source: u.source || "",
           today: u.today || null,
           night: u.night || null,
+          // 2026-11-17：localStorage 快取原本沒存 nextNight，開頁先畫時夜盤那列會缺（Rumi 審查）
+          nextNight: u.nextNight || null,
           history: (u.history || []).slice(0, 80),
         };
         localStorage.setItem(UNC_CACHE_KEY, JSON.stringify(slim));
@@ -7906,7 +7908,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.07";
+        const VER = "4.08";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
