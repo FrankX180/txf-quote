@@ -2550,7 +2550,13 @@
       // 其下 ├─10(夜) 有數字、└─11(日) 未開盤空白；底下 11/10 只留合計單列、不再展開子列。
       if (nnGroup) {
         oiRows = nnGroup.concat(oiRows);
-        oiNote += "；最上列＝11/11（今日日盤籌碼盤後才公布），其下 ├─10(夜) 已收盤、└─11(日) 尚未開盤；底下 11/10 只留合計單列";
+        // 2026-11-17：原本這段說明寫死「11/11、10(夜)、11(日)」，換日後整句變錯。
+        // 改成從 nextNight 的 date／tradeDate 動態組。
+        const _nnD8 = String((nextNight && nextNight.date) || "").replace(/\D/g, "");
+        const _nnT8 = String((nextNight && nextNight.tradeDate) || "").replace(/\D/g, "");
+        const _mmdd = (s) => (s.length >= 8 ? s.slice(4, 6) + "/" + s.slice(6, 8) : "");
+        const _dd = (s) => (s.length >= 8 ? String(+s.slice(6, 8)) : "");
+        oiNote += "；最上列＝" + _mmdd(_nnT8) + "（今日日盤籌碼盤後才公布），其下 ├─" + _dd(_nnD8) + "(夜) 已收盤、└─" + _dd(_nnT8) + "(日) 尚未開盤";
       }
       oiEl.innerHTML = oiBuildHistTable("oi", oiRows, oiKeys, oiLabs, oiNote);
 
@@ -7900,7 +7906,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.06";
+        const VER = "4.07";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
