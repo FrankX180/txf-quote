@@ -4881,6 +4881,141 @@
         }
       }
     }
+    // 空盤底圖（2026-11-18 老公要求）：資料還沒到位時不要整片白，先鋪價格格線／平盤虛線／時軸，
+    // 再把提示字疊在中央。基準價優先序＝當盤平盤（CRefPrice）→ 同盤快取平盤 → 當盤收盤 → 最新報價；
+    // 全都沒有就只鋪等距參考線、不標數字（不編造點數）。
+    function drawEmptyFrame(ctx, w, h, showImb, label) {
+      const imbH = showImb ? 52 : 0;
+      const imbGap = imbH ? 6 : 0;
+      const volH = showImb ? 44 : 0;
+      const padL = 48, padR = 33, padT = 10, padB = 22;
+      const cw = w - padL - padR;
+      const ch = h - padT - padB - imbH - imbGap;
+      const chP = Math.max(40, ch - volH);
+      const imbTop = padT + ch + imbGap;
+      const qx0 = q();
+      const so0 = sessOHLC();
+      // 平盤（CRefPrice）優先，但軸範圍要涵蓋最新價：否則空盤時基準線會偏在圖中央、看起來像失準
+      let base = n(qx0 && qx0.CRefPrice);
+      if (base == null) base = cachedRefPx();
+      const lastPx0 = n(qx0 && qx0.CLastPrice);
+      if (base == null && so0 && so0.c != null) base = so0.c;
+      if (base == null) base = lastPx0;
+      const refs = [base, lastPx0].filter((v) => v != null);
+      // 單日：貼齊本場開盤～收盤（與主圖同一套時軸）；多日：日曆跨度（無資料段可拼接，只能按日曆）
+      let t0, t1;
+      if (daySpan >= 2) {
+        const e = new Date();
+        t1 = e.getTime();
+        const s = new Date(e);
+        s.setDate(s.getDate() - (daySpan - 1));
+        s.setHours(8, 45, 0, 0);
+        t0 = s.getTime();
+      } else {
+        const range = sessRange([{ time: Date.now() }]);
+        t0 = range.t0;
+        t1 = range.t1;
+      }
+      const xAt = (t) => padL + ((t - t0) / Math.max(1, t1 - t0)) * cw;
+
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "#e5e7eb";
+      ctx.fillStyle = "#6b7280";
+      ctx.font = "11px sans-serif";
+      ctx.textAlign = "left";
+      if (refs.length) {
+        const mn = Math.floor((Math.min(...refs) - 150) / 100) * 100;
+        const mx = Math.ceil((Math.max(...refs) + 150) / 100) * 100;
+        const yAt = (p) => padT + (1 - (p - mn) / Math.max(100, mx - mn)) * chP;
+        let step = 100;
+        while ((mx - mn) / step > 5) step += 100;
+        for (let pv = mn; pv <= mx; pv += step) {
+          const y = Math.round(yAt(pv)) + 0.5;
+          ctx.beginPath();
+          ctx.moveTo(padL, y);
+          ctx.lineTo(w - padR, y);
+          ctx.stroke();
+          ctx.fillText(String(Math.round(pv)), 4, y + 4);
+        }
+        if (base != null) {
+          const yF = Math.round(yAt(base)) + 0.5;
+          ctx.setLineDash([5, 4]);
+          ctx.strokeStyle = "#9ca3af";
+          ctx.beginPath();
+          ctx.moveTo(padL, yF);
+          ctx.lineTo(w - padR, yF);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.strokeStyle = "#e5e7eb";
+          // 平盤標值：空盤時沒有折線與極值可讀，至少讓你看得出水平基準在哪個點位（畫在線上方右內側）
+          ctx.font = "10px sans-serif";
+          ctx.textAlign = "right";
+          ctx.textBaseline = "alphabetic";
+          ctx.fillStyle = "#9ca3af";
+          ctx.fillText("平盤 " + Math.round(base), w - padR - 4, yF + 11);
+          ctx.textAlign = "left";
+        }
+      } else {
+        for (let i = 0; i <= 4; i++) {
+          const y = Math.round(padT + (chP / 4) * i) + 0.5;
+          ctx.beginPath();
+          ctx.moveTo(padL, y);
+          ctx.lineTo(w - padR, y);
+          ctx.stroke();
+        }
+      }
+      // 時軸：本場開盤～收盤（單日）；多日不標小時（跟主圖一致，避免重疊）
+      const spanMs = t1 - t0;
+      const hours = spanMs / 3600000;
+      const hourStep = hours > 72 ? 12 : hours > 20 ? 4 : hours > 10 ? 2 : 1;
+      const hour0 = new Date(t0);
+      hour0.setMinutes(0, 0, 0);
+      if (hour0.getTime() < t0) hour0.setHours(hour0.getHours() + 1);
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#6b7280";
+      for (let t = hour0.getTime(); t <= t1; t += 3600000 * hourStep) {
+        const x = Math.round(xAt(t)) + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(x, padT);
+        ctx.lineTo(x, padT + chP);
+        ctx.stroke();
+        if (daySpan < 2) ctx.fillText(String(new Date(t).getHours()).padStart(2, "0"), x, h - 6);
+      }
+      if (volH > 0) {
+        ctx.strokeStyle = "rgba(148,163,184,0.45)";
+        ctx.beginPath();
+        ctx.moveTo(padL, padT + chP + 0.5);
+        ctx.lineTo(padL + cw, padT + chP + 0.5);
+        ctx.stroke();
+        ctx.fillStyle = "#cbd5e1";
+        ctx.font = "9px sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText("成交量", 4, padT + chP + volH / 2 + 3);
+      }
+      if (imbH > 0) {
+        ctx.strokeStyle = "#e5e7eb";
+        const zeroY = Math.round(imbTop + imbH / 2) + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(padL, zeroY);
+        ctx.lineTo(w - padR, zeroY);
+        ctx.stroke();
+      }
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = "13px sans-serif";
+      const tw0 = label ? ctx.measureText(label).width : 0;
+      const cx0 = padL + cw / 2;
+      const cy0 = padT + chP / 2;
+      if (label) {
+        ctx.fillStyle = "rgba(255,255,255,0.92)";
+        ctx.fillRect(cx0 - tw0 / 2 - 8, cy0 - 11, tw0 + 16, 22);
+        ctx.fillStyle = "#9ca3af";
+        ctx.fillText(label, cx0, cy0);
+      }
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+    }
+
     function draw(forceFit) {
       const lineOn = chartMode === "line";
       syncSideLayout();
@@ -4906,9 +5041,7 @@
       ctx.clearRect(0, 0, w, h);
       // 休市富台模式：資料未到前不畫舊夜盤殘圖，避免開頁閃一下舊資料
       if (isTwnSimWindow() && daySpan < 2 && !twnSim) {
-        ctx.fillStyle = "#9ca3af";
-        ctx.font = "14px sans-serif";
-        ctx.fillText("載入富台走勢中…", 16, h / 2);
+        drawEmptyFrame(ctx, w, h, showImb, "載入富台走勢中…");
         return;
       }
       let pts = linePoints();
@@ -4920,9 +5053,9 @@
         if (cut.length > 1) pts = cut;
       }
       if (pts.length < 1) {
-        ctx.fillStyle = "#9ca3af";
-        ctx.font = "14px sans-serif";
-        ctx.fillText("走勢累積中…", 16, h / 2);
+        // 老公 2026-11-18：夜盤 14:58 剛開、1 分 K 還沒進來時不要「走勢累積中」，
+        // 保持空白但要有底圖（價格格線／平盤虛線／時軸），不要整片白。
+        drawEmptyFrame(ctx, w, h, showImb, "");
         return;
       }
       const prices = pts.map((p) => p.px);
@@ -7908,7 +8041,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.08";
+        const VER = "4.09";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
