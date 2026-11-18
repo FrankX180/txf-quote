@@ -1,7 +1,7 @@
 {
-  "fetchedAt": "2026-11-18 13:41:34",
+  "fetchedAt": "2026-11-18 14:30:40",
   "source": "yahoo tw.stock StockServices.stockList WTX& WCDF& WCCF&",
-  "session": "day",
+  "session": "",
   "night": {
     "SymbolID": "WTX&",
     "DispCName": "台指期近一",
@@ -50,8 +50,8 @@
     "COpenPrice": "40950",
     "CHighPrice": "41071",
     "CLowPrice": "39385",
-    "CCeilPrice": "44012",
-    "CFloorPrice": "36010",
+    "CCeilPrice": "",
+    "CFloorPrice": "",
     "CRefPrice": "40011",
     "CDiff": "14",
     "CDiffRate": "0.03",
