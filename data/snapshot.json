@@ -1,5 +1,5 @@
 {
-  "fetchedAt": "2026-11-18 13:29:56",
+  "fetchedAt": "2026-11-18 13:41:34",
   "source": "yahoo tw.stock StockServices.stockList WTX& WCDF& WCCF&",
   "session": "day",
   "night": {
@@ -60,27 +60,27 @@
     "CTime": "132950",
     "inMarket": "41343",
     "outMarket": "40603",
-    "marketStatus": "open",
+    "marketStatus": "close",
     "CBidPrice1": "40023",
-    "CBidSize1": "119",
+    "CBidSize1": "79",
     "CAskPrice1": "40024",
     "CAskSize1": "5",
     "CBidPrice2": "40022",
-    "CBidSize2": "43",
+    "CBidSize2": "2",
     "CAskPrice2": "40025",
     "CAskSize2": "2",
     "CBidPrice3": "40021",
     "CBidSize3": "3",
     "CAskPrice3": "40026",
-    "CAskSize3": "150",
+    "CAskSize3": "52",
     "CBidPrice4": "40020",
-    "CBidSize4": "2",
-    "CAskPrice4": "40027",
-    "CAskSize4": "69",
+    "CBidSize4": "1",
+    "CAskPrice4": "40028",
+    "CAskSize4": "10",
     "CBidPrice5": "40019",
     "CBidSize5": "1",
-    "CAskPrice5": "40028",
-    "CAskSize5": "31"
+    "CAskPrice5": "40029",
+    "CAskSize5": "11"
   },
   "related": [
     {
