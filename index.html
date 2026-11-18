@@ -4895,12 +4895,23 @@
       const imbTop = padT + ch + imbGap;
       const qx0 = q();
       const so0 = sessOHLC();
-      // 平盤（CRefPrice）優先，但軸範圍要涵蓋最新價：否則空盤時基準線會偏在圖中央、看起來像失準
+      // 基準價優先序：當盤平盤（CRefPrice）→ 同盤快取平盤 → 當盤收盤 → 最新報價。
+      // 只有前兩者是真正的「平盤」；後兩者只是讓 Y 軸有依據，標籤必須照實寫，不得冒充平盤（顧問 2026-11-18）。
       let base = n(qx0 && qx0.CRefPrice);
-      if (base == null) base = cachedRefPx();
+      let baseLabel = "平盤";
+      if (base == null) {
+        base = cachedRefPx();
+        if (base != null) baseLabel = "平盤（快取）";
+      }
       const lastPx0 = n(qx0 && qx0.CLastPrice);
-      if (base == null && so0 && so0.c != null) base = so0.c;
-      if (base == null) base = lastPx0;
+      if (base == null && so0 && so0.c != null) {
+        base = so0.c;
+        baseLabel = "本盤收盤";
+      }
+      if (base == null && lastPx0 != null) {
+        base = lastPx0;
+        baseLabel = "最新價";
+      }
       const refs = [base, lastPx0].filter((v) => v != null);
       // 單日：貼齊本場開盤～收盤（與主圖同一套時軸）；多日：日曆跨度（無資料段可拼接，只能按日曆）
       let t0, t1;
@@ -4947,12 +4958,12 @@
           ctx.stroke();
           ctx.setLineDash([]);
           ctx.strokeStyle = "#e5e7eb";
-          // 平盤標值：空盤時沒有折線與極值可讀，至少讓你看得出水平基準在哪個點位（畫在線上方右內側）
+          // 參考線標值：照實寫來源（平盤／平盤（快取）／本盤收盤／最新價），空盤也絕不把收盤價冒充平盤
           ctx.font = "10px sans-serif";
           ctx.textAlign = "right";
           ctx.textBaseline = "alphabetic";
           ctx.fillStyle = "#9ca3af";
-          ctx.fillText("平盤 " + Math.round(base), w - padR - 4, yF + 11);
+          ctx.fillText(baseLabel + " " + Math.round(base), w - padR - 4, yF + 11);
           ctx.textAlign = "left";
         }
       } else {
@@ -8041,7 +8052,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.09";
+        const VER = "4.10";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
