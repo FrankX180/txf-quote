@@ -4888,31 +4888,37 @@
       const imbH = showImb ? 52 : 0;
       const imbGap = imbH ? 6 : 0;
       const volH = showImb ? 44 : 0;
-      const padL = 48, padR = 33, padT = 10, padB = 22;
+      const padL = 48, padR = 33, padT = 10, padB = daySpan >= 2 ? 8 : 22;
       const cw = w - padL - padR;
       const ch = h - padT - padB - imbH - imbGap;
       const chP = Math.max(40, ch - volH);
       const imbTop = padT + ch + imbGap;
       const qx0 = q();
-      const so0 = sessOHLC();
       // 基準價優先序：當盤平盤（CRefPrice）→ 同盤快取平盤 → 當盤收盤 → 最新報價。
       // 只有前兩者是真正的「平盤」；後兩者只是讓 Y 軸有依據，標籤必須照實寫，不得冒充平盤（顧問 2026-11-18）。
-      let base = n(qx0 && qx0.CRefPrice);
+      // 一律先過 isFinite＋台指合理區間（pxLooksLikeTxf 10000–80000，富台換算點數也在區間內）。
+      // n() 已把非數值轉 null，但 cachedRefPx 直接回 Number(it.ref)，localStorage 殘值可能是 NaN；
+      // 更糟的是殘值 0／亂數：一旦進 refs，Math.min/max 會把 Y 軸拉到負值或拉到數萬點外（自掃 2026-11-18）。
+      const fin = (v) => (Number.isFinite(v) && pxLooksLikeTxf(v) ? v : null);
+      let base = fin(n(qx0 && qx0.CRefPrice));
       let baseLabel = "平盤";
       if (base == null) {
-        base = cachedRefPx();
+        base = fin(cachedRefPx());
         if (base != null) baseLabel = "平盤（快取）";
       }
-      const lastPx0 = n(qx0 && qx0.CLastPrice);
-      if (base == null && so0 && so0.c != null) {
-        base = so0.c;
-        baseLabel = "本盤收盤";
+      const lastPx0 = fin(n(qx0 && qx0.CLastPrice));
+      if (base == null) {
+        const so0 = sessOHLC(); // 僅在 CRefPrice／快取都缺時才算，省下每幀的陣列 filter（Rumi 2026-11-18）
+        const sc = so0 ? fin(so0.c) : null;
+        if (sc != null) { base = sc; baseLabel = "本盤收盤"; }
       }
       if (base == null && lastPx0 != null) {
         base = lastPx0;
         baseLabel = "最新價";
       }
-      const refs = [base, lastPx0].filter((v) => v != null);
+      // 只收有限數值：cachedRefPx 直接 Number(it.ref)，localStorage 殘值可能是垃圾（NaN），
+      // 一旦 NaN 進 refs，Math.min/max 全變 NaN，整張底圖會變空白線（自掃 2026-11-18）
+      const refs = [base, lastPx0].filter((v) => Number.isFinite(v));
       // 單日：貼齊本場開盤～收盤（與主圖同一套時軸）；多日：日曆跨度（無資料段可拼接，只能按日曆）
       let t0, t1;
       if (daySpan >= 2) {
@@ -4934,12 +4940,13 @@
       ctx.fillStyle = "#6b7280";
       ctx.font = "11px sans-serif";
       ctx.textAlign = "left";
+      let yBase = null; // 參考線 Y（供中央提示字避讓用）
       if (refs.length) {
         const mn = Math.floor((Math.min(...refs) - 150) / 100) * 100;
         const mx = Math.ceil((Math.max(...refs) + 150) / 100) * 100;
         const yAt = (p) => padT + (1 - (p - mn) / Math.max(100, mx - mn)) * chP;
-        let step = 100;
-        while ((mx - mn) / step > 5) step += 100;
+        // 直接算出步長，不用 while 逐次累加：垃圾價格會讓區間拉到億級，while 會把主執行緒卡死（Rumi 2026-11-18）
+        const step = Math.max(100, Math.ceil((mx - mn) / 5 / 100) * 100);
         for (let pv = mn; pv <= mx; pv += step) {
           const y = Math.round(yAt(pv)) + 0.5;
           ctx.beginPath();
@@ -4950,6 +4957,7 @@
         }
         if (base != null) {
           const yF = Math.round(yAt(base)) + 0.5;
+          yBase = yF;
           ctx.setLineDash([5, 4]);
           ctx.strokeStyle = "#9ca3af";
           ctx.beginPath();
@@ -5016,7 +5024,13 @@
       ctx.font = "13px sans-serif";
       const tw0 = label ? ctx.measureText(label).width : 0;
       const cx0 = padL + cw / 2;
-      const cy0 = padT + chP / 2;
+      // 中央提示字要避開右側參考線標籤（窄畫布上兩者會水平重疊並壓在同一行）——Rumi 2026-11-18
+      let cy0 = padT + chP / 2;
+      if (yBase != null && Math.abs(cy0 - (yBase + 11)) < 18) {
+        const up = cy0 - 30;
+        const dn = cy0 + 30;
+        cy0 = (up > padT + 14) ? up : Math.min(padT + chP - 14, dn);
+      }
       if (label) {
         ctx.fillStyle = "rgba(255,255,255,0.92)";
         ctx.fillRect(cx0 - tw0 / 2 - 8, cy0 - 11, tw0 + 16, 22);
@@ -8052,7 +8066,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.10";
+        const VER = "4.11";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
