@@ -77,7 +77,12 @@ def collect(syms, seconds=10):
                     vals = q.get("values") or {}
                     f = {QNAME[k]: v for k, v in vals.items() if k in QNAME and v not in (None, "")}
                     if sym in syms and f.get("CLastPrice") is not None:
-                        got.setdefault(sym, {}).update(f)
+                        g = got.setdefault(sym, {})
+                        g.update(f)
+                        # 成交價沒有自己的時間時，不要沿用上一筆 CTime 冒充（顧問審查 2026-11-21）：
+                        # 移除後 stamp() 回空字串，這一輪就不寫檔，等有完整時間的 frame 再更新。
+                        if not f.get("CTime"):
+                            g.pop("CTime", None)
             if len(got) == len(syms) and all(g.get("CBidPrice5") for g in got.values()):
                 break
     finally:
