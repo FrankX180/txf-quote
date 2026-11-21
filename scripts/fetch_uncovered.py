@@ -1639,6 +1639,18 @@ def update_night_only() -> bool:
         print("WARN night-only next", e)
         next_night = None
     old_next = payload.get("nextNight") or {}
+    if next_night is None and old_next:
+        # 2026-11-21：上游一時抓不到，不能把已定案的整列洗成 null（前端整列消失、
+        # 下一輪才自癒）。只有「舊值仍屬未來交易日」才保留；已過交易日的舊值照樣清掉。
+        try:
+            _od = ymd8(old_next.get("date"))
+            _otd = ymd8(old_next.get("tradeDate"))
+            _d0 = ymd8(day0.get("date"))
+            if _od and _otd and _d0 and _otd > _d0:
+                next_night = old_next
+                print("KEEP nextNight", _od, "tradeDate", _otd, "(upstream miss)")
+        except Exception as e:
+            print("WARN keep nextNight", e)
 
     def _sig(n):
         n = n or {}
