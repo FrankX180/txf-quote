@@ -109,7 +109,10 @@ def stamp(f):
     if len(t) != 6 or not t.isdigit():
         return ""
     if int(t[:2]) < 6:
-        d = (datetime(int(d[:4]), int(d[4:6]), int(d[6:8])) + timedelta(days=1)).strftime("%Y%m%d")
+        try:
+            d = (datetime(int(d[:4]), int(d[4:6]), int(d[6:8])) + timedelta(days=1)).strftime("%Y%m%d")
+        except ValueError:
+            return ""  # 13 月／2 月 30 日這類非法日期：當無效，不讓 main() 整輪炸掉
     return d + t
 
 

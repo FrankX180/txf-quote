@@ -1039,9 +1039,9 @@
           const cur = misBook[sk];
           const sMs = taifexStampMs(s.f);
           const cMs = cur && cur.f ? taifexStampMs(cur.f) : NaN;
-          // 伺服器快照沒有有效時間就當過期，不讓它覆蓋本機資料（與下方「缺快照時間就當過期」同語意）
-          if (!Number.isFinite(sMs)) return;
-          if (Number.isFinite(cMs) && cMs > sMs) return; // 本機已有更新的就不倒退
+          // 本機有有效時間時：伺服器快照沒時間或更舊→擋下，不讓它蓋掉較新的書。
+          // 兩邊都沒時間才退回採用伺服器快照（至少把五檔補起來）。
+          if (Number.isFinite(cMs) && (!Number.isFinite(sMs) || cMs > sMs)) return;
           // 伺服器快照是「上一盤收盤」：書與價的時間都用快照時間，
           // 不能讓後續 frame 的 ts 冒充（否則舊收盤書會被當成新鮮）
           // 缺快照時間就當過期：用 Date.now() 冒充會讓數天前的舊五檔通過新鮮度檢查
@@ -1568,7 +1568,7 @@
       // 只在「昨收貼著現價」時才用 diff 反推：那才是 previousClose 滾掉的樣子。
       // 否則 last 與 diff 來自不同源（MIS 舊價 + Yahoo 新 diff）時會推出鬼昨收：
       // 35,119 + 1,881 = 37,000，把整段夜盤塗成綠色（2026-11-20 事故）。
-      if (Math.abs(refN - lastN) > Math.abs(diffN) * 0.2) return q;
+      if (Math.abs(refN - lastN) > 2) return q;
       const implied = lastN - diffN;
       if (Math.abs(refN - implied) > 80) q.CRefPrice = Math.round(implied);
       return q;
@@ -8083,7 +8083,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.14";
+        const VER = "4.15";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
