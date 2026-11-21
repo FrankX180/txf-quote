@@ -147,9 +147,11 @@ def want_night_only(dt=None):
         # 凌晨仍屬前一晚夜盤（跨日），那時查「今日日盤籌碼」必然尚未公布，
         # 不能拿 day_chips_ready 當閘門，直接刷新（快路徑只打一次期交所）。
         return True
+    if wd == 5:
+        # 2026-11-21：週五夜盤 05:00 收，期交所盤後籌碼約 06:00–08:00 上架。
+        # 05:10–10:00 走快路徑只刷 night/nextNight（原本整天回 False，週五夜盤永遠缺）。
+        return 510 <= h <= 1000
     if h < 1500:
-        return False
-    if wd == 5:  # 週六 15:00 後已無夜盤（週五夜盤到週六 05:00）
         return False
     return day_chips_exist(d)
 
@@ -255,10 +257,13 @@ def night_chips_ready(dt=None):
         return True
     night = j.get("night") or {}
     nd = _ymd8(night.get("date"))
+    if d.weekday() == 5:
+        # 2026-11-21：週六「已齊」的判準是 nextNight 有週五夜盤。
+        # night 是週四夜盤（屬週五交易日），跟週六無關，拿它當已齊會讓週五夜盤永遠補不到。
+        nn = j.get("nextNight") or {}
+        nnd = _ymd8(nn.get("date"))
+        return bool(nnd) and nn.get("foreignDelta") is not None
     if not nd or nd < today:
-        # 週六早上補周五：允許 night 為昨／周五
-        if d.weekday() == 5:
-            return bool(nd) and night.get("foreignDelta") is not None
         return False
     return night.get("foreignDelta") is not None or night.get("foreign") is not None
 

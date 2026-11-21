@@ -33,7 +33,12 @@ def is_closed(now=None, holidays=None):
         now = now.replace(tzinfo=TPE)
     hm = now.hour * 100 + now.minute
     # 凌晨 00:00–05:09：屬前一營業日夜盤 → 看前一日；其餘時段看當日
-    ref = now - datetime.timedelta(days=1) if hm < 510 else now
+    # 2026-11-21 加：週六 05:10–10:00＝週五夜盤籌碼結算窗。期交所盤後三大法人
+    # 約在週六 06:00–08:00 才上架，這一段仍屬「週五夜盤」，要看前一日（週五）是否
+    # 營業；否則 fetch 整條被擋，週五夜盤籌碼永遠抓不到（要等週一早上，開盤後
+    # day0 一換就永久缺那一段）。
+    friday_night_window = now.weekday() == 5 and hm <= 1000
+    ref = now - datetime.timedelta(days=1) if (hm < 510 or friday_night_window) else now
     if ref.weekday() >= 5:
         return True
     hol = load_holidays() if holidays is None else holidays
