@@ -83,7 +83,8 @@ def collect(syms, seconds=10):
                         # 移除後 stamp() 回空字串，這一輪就不寫檔，等有完整時間的 frame 再更新。
                         if not f.get("CTime"):
                             g.pop("CTime", None)
-            if len(got) == len(syms) and all(g.get("CBidPrice5") for g in got.values()):
+            # 每個商品都要「有買五且有有效時間」才算收齊；缺時間就繼續等完整 frame（顧問審查 2026-11-21）
+            if len(got) == len(syms) and all(g.get("CBidPrice5") and stamp(g) for g in got.values()):
                 break
     finally:
         try:
