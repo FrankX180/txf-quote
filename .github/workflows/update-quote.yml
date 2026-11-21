@@ -36,6 +36,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       state: ${{ steps.check.outputs.state }}
+      # 2026-11-21：週六 05:10–10:00 夜盤籌碼結算窗。不公開這個 output，
+      # fetch job 的條件讀不到值，排程就永遠不會放行（顧問審查指出）。
+      night_window: ${{ steps.check.outputs.night_window }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
