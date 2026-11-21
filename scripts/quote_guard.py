@@ -57,6 +57,10 @@ def main():
     today = now.strftime("%Y-%m-%d")
     compact = now.strftime("%Y%m%d")
     holiday = is_holiday(today) or is_holiday(compact)
+    # 2026-11-21：週末不再被 holiday_guard 完全擋掉（週六 05:10–10:00 是補抓週五
+    # 夜盤籌碼的窗口），但行情／K 線不會更新，拿 40 分鐘新鮮度判會每場紅燈。
+    # 週末只檢查檔案存在，不比時間；真正的抓取失敗由各腳本自己的 log 負責。
+    weekend = now.weekday() >= 5
 
     fresh = 0
     checked = 0
@@ -86,11 +90,11 @@ def main():
         else:
             problems.append("%s stale %.0f min" % (name, age))
 
-    print("QUOTE-GUARD holiday=%s checked=%d fresh=%d problems=%s"
-          % (holiday, checked, fresh, problems or "-"), flush=True)
+    print("QUOTE-GUARD holiday=%s weekend=%s checked=%d fresh=%d problems=%s"
+          % (holiday, weekend, checked, fresh, problems or "-"), flush=True)
 
-    if holiday:
-        print("QUOTE-GUARD OK (holiday, time check skipped)", flush=True)
+    if holiday or weekend:
+        print("QUOTE-GUARD OK (holiday/weekend, time check skipped)", flush=True)
         return 0
     if checked == 0:
         print("QUOTE-GUARD FAIL: no timestamp could be read", flush=True)
