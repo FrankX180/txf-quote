@@ -1037,9 +1037,9 @@
           if (!s || !s.f || s.f.CBidPrice1 == null) return;
           if (s.sym && misSymFor(sk) && s.sym !== misSymFor(sk)) return; // 跨月契約丟棄
           const cur = misBook[sk];
-          const sStamp = String(s.f.CDate || "") + String(s.f.CTime || "").padStart(6, "0");
-          const cStamp = cur && cur.f ? String(cur.f.CDate || "") + String(cur.f.CTime || "").padStart(6, "0") : "";
-          if (cStamp && cStamp > sStamp) return; // 本機已有更新的就不倒退
+          const sMs = taifexStampMs(s.f);
+          const cMs = cur && cur.f ? taifexStampMs(cur.f) : NaN;
+          if (Number.isFinite(cMs) && Number.isFinite(sMs) && cMs > sMs) return; // 本機已有更新的就不倒退
           // 伺服器快照是「上一盤收盤」：書與價的時間都用快照時間，
           // 不能讓後續 frame 的 ts 冒充（否則舊收盤書會被當成新鮮）
           // 缺快照時間就當過期：用 Date.now() 冒充會讓數天前的舊五檔通過新鮮度檢查
@@ -1271,14 +1271,9 @@
       // Yahoo 價蓋回去，又變成價格倒退。
       let allowPx = fresh;
       if (!allowPx && !marketOpen()) {
-        const stamp = function (o) {
-          const d = String((o && o.CDate) || "").replace(/\D/g, "");
-          const t = String((o && o.CTime) || "").replace(/\D/g, "").padStart(6, "0");
-          return d ? d + t : "";
-        };
-        const curS = stamp(snap[sk]);
-        const newS = stamp(f);
-        allowPx = !!newS && n(f.CLastPrice) != null && (!curS || newS >= curS);
+        const curMs = taifexStampMs(snap[sk]);
+        const newMs = taifexStampMs(f);
+        allowPx = Number.isFinite(newMs) && n(f.CLastPrice) != null && (!Number.isFinite(curMs) || newMs >= curMs);
       }
       // 價／時間：只在新鮮（或休市定案快照）時覆寫。WS 斷線空窗期間絕不用舊 MIS 價蓋掉 Yahoo 的新價
       // （否則價格與書一起變舊，bookStraddles 會因同源而攔不住）。
@@ -1544,6 +1539,18 @@
       snap[sk].CLowPrice = so.l;
     }
 
+    // 期交所時間戳（CDate+CTime）→ 毫秒：夜盤 00:00-05:59 屬「次日凌晨」。
+    // 不做這個校正，11/20 23:58 會被字串比較判成比 11/21 04:59 還新；休市後就拿 23:58 的舊價
+    // 蓋掉 04:59 的收盤價，昨收再被反推成 37,000，整段夜盤走勢全綠（2026-11-20 事故）。
+    function taifexStampMs(o) {
+      const d = String((o && o.CDate) || "").replace(/\D/g, "");
+      const t = String((o && o.CTime) || "").replace(/\D/g, "").padStart(6, "0");
+      if (d.length !== 8 || t.length !== 6) return NaN;
+      const hh = +t.slice(0, 2), mi = +t.slice(2, 4), ss = +t.slice(4, 6);
+      if (!Number.isFinite(hh)) return NaN;
+      return Date.UTC(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8) + (hh < 6 ? 1 : 0), hh, mi, ss);
+    }
+
     function healRefPrice(q) {
       // 休市後奇摩 previousClose 常滾成近價，留下「昨收≈現價、漲跌仍是大點數」的矛盾
       if (!q) return q;
@@ -1552,6 +1559,10 @@
       const diffN = n(q.CDiff);
       if (lastN == null || refN == null || diffN == null) return q;
       if (Math.abs(diffN) < 200) return q;
+      // 只在「昨收貼著現價」時才用 diff 反推：那才是 previousClose 滾掉的樣子。
+      // 否則 last 與 diff 來自不同源（MIS 舊價 + Yahoo 新 diff）時會推出鬼昨收：
+      // 35,119 + 1,881 = 37,000，把整段夜盤塗成綠色（2026-11-20 事故）。
+      if (Math.abs(refN - lastN) > Math.abs(diffN) * 0.2) return q;
       const implied = lastN - diffN;
       if (Math.abs(refN - implied) > 80) q.CRefPrice = Math.round(implied);
       return q;
@@ -8066,7 +8077,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.11";
+        const VER = "4.12";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00

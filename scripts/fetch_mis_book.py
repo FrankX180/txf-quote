@@ -89,7 +89,18 @@ def collect(syms, seconds=10):
 
 
 def stamp(f):
-    return str(f.get("CDate", "")) + str(f.get("CTime", "")).zfill(6)
+    """期交所時間戳（CDate+CTime）→ 可比較字串：夜盤 00:00-05:59 屬「次日凌晨」。
+
+    不做這個校正，11/20 23:58 會被字串比較判成比 11/21 04:59 還新，
+    mis-book.json 就卡在 23:58 不再更新（2026-11-20 事故）。
+    """
+    d = str(f.get("CDate", "") or "")
+    t = str(f.get("CTime", "") or "").zfill(6)
+    if len(d) != 8 or len(t) != 6 or not d.isdigit() or not t.isdigit():
+        return ""
+    if int(t[:2]) < 6:
+        d = (datetime(int(d[:4]), int(d[4:6]), int(d[6:8])) + timedelta(days=1)).strftime("%Y%m%d")
+    return d + t
 
 
 def main():
