@@ -1544,8 +1544,12 @@
     // 蓋掉 04:59 的收盤價，昨收再被反推成 37,000，整段夜盤走勢全綠（2026-11-20 事故）。
     function taifexStampMs(o) {
       const d = String((o && o.CDate) || "").replace(/\D/g, "");
-      const t = String((o && o.CTime) || "").replace(/\D/g, "").padStart(6, "0");
-      if (d.length !== 8 || t.length !== 6) return NaN;
+      const raw = String((o && o.CTime) || "").replace(/\D/g, "");
+      // 缺時間一律視為無效：padStart 會把空字串補成 000000，變成「次日 00:00」的假時間戳，
+      // 反而讓沒有時間的舊 frame 蓋掉有效報價（顧問審查 2026-11-21）。
+      if (d.length !== 8 || !raw) return NaN;
+      const t = raw.padStart(6, "0");
+      if (t.length !== 6) return NaN;
       const hh = +t.slice(0, 2), mi = +t.slice(2, 4), ss = +t.slice(4, 6);
       if (!Number.isFinite(hh)) return NaN;
       return Date.UTC(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8) + (hh < 6 ? 1 : 0), hh, mi, ss);
@@ -8077,7 +8081,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.12";
+        const VER = "4.13";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
