@@ -59,8 +59,10 @@ def main():
     holiday = is_holiday(today) or is_holiday(compact)
     # 2026-11-21：週末不再被 holiday_guard 完全擋掉（週六 05:10–10:00 是補抓週五
     # 夜盤籌碼的窗口），但行情／K 線不會更新，拿 40 分鐘新鮮度判會每場紅燈。
-    # 週末只檢查檔案存在，不比時間；真正的抓取失敗由各腳本自己的 log 負責。
-    weekend = now.weekday() >= 5
+    # 顧問審查 R1：週六 00:00–05:09 仍屬週五夜盤、行情還會更新，那段不能豁免，
+    # 邊界對齊 when.in_session 的 510。
+    hm = now.hour * 100 + now.minute
+    weekend = now.weekday() == 6 or (now.weekday() == 5 and hm >= 510)
 
     fresh = 0
     checked = 0

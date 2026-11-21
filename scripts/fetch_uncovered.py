@@ -1619,7 +1619,7 @@ def fetch_next_night(day_hist_date: str, base_row: dict | None = None):
 
 
 def update_night_only() -> bool:
-    """夜盤時段快路徑：只刷新 night 列，不重抓整包歷史（期交所請求量壓到 1 次）。"""
+    """夜盤時段快路徑：只刷新 night／nextNight 兩列，不重抓整包歷史（每次 2 次期交所請求）。"""
     if not OUT.exists():
         return False
     try:

@@ -69,6 +69,10 @@ def want_fubon(dt=None):
     wd = d.weekday()
     if wd == 6:
         return False
+    if wd == 5 and h >= 510:
+        # 2026-11-21：週五夜盤 05:00 已收，週六 05:10 後沒有新 1 分 K。
+        # 原本只擋 wd==6，夜盤結算窗放行後會多跑 Fubon（審查 R2c）。
+        return False
     if 1350 <= h <= 1440:
         return True
     if 500 <= h <= 830:
@@ -111,6 +115,8 @@ def want_uncovered(dt=None):
     local = not os.environ.get("GITHUB_ACTIONS")
     dispatch = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
     # 週六早上：補周五夜盤
+    # 注意：雲端每輪會先被 want_night_only 攔走（510–1000 快路徑），這段實際只在
+    # local／workflow_dispatch 的整包路徑生效，兩邊窗口刻意不同（審查 R4）。
     if wd == 5:
         if not (620 <= h <= 1000) and not local and not dispatch:
             return False
@@ -168,6 +174,21 @@ def _uncovered_payload():
 
 def _ymd8(s):
     return "".join(ch for ch in str(s or "") if ch.isdigit())[:8]
+
+
+def _next_trade_day8(dt):
+    """dt 之後第一個交易日（跳週末與 holidays.json 休市日）；找不到回空字串。"""
+    try:
+        from holiday_guard import load_holidays
+        hol = load_holidays()
+    except Exception:
+        hol = set()
+    probe = dt.date() + timedelta(days=1)
+    for _ in range(12):
+        if probe.weekday() < 5 and probe.strftime("%Y%m%d") not in hol:
+            return probe.strftime("%Y%m%d")
+        probe += timedelta(days=1)
+    return ""
 
 
 def day_chips_ready(dt=None):
@@ -258,20 +279,18 @@ def night_chips_ready(dt=None):
     night = j.get("night") or {}
     nd = _ymd8(night.get("date"))
     if d.weekday() == 5:
-        # 2026-11-21：週六「已齊」的判準是 nextNight 有週五夜盤。
-        # night 是週四夜盤（屬週五交易日），跟週六無關，拿它當已齊會讓週五夜盤永遠補不到。
-        # 2026-11-21 補（顧問審查）：光看 nextNight 非空不夠——檔裡殘留上一週的舊 nextNight
-        # 也會被判成已齊，那週的週五夜盤就永遠補不到。要對日盤列（day0）比對：
-        # nextNight.date 不得早於 day0（週五夜盤的 date 就是週五本身），tradeDate 必須晚於 day0。
+        # 2026-11-21：週六「已齊」的判準是 nextNight 就是下一個交易日那一列。
+        # night 是週四夜盤（屬週五交易日），跟週六無關。
+        # 顧問二審（R3）：原本用 day0 當基準有兩個破口——(a) history 空時 fail-open；
+        # (b) day0 停在週四時，會把「tradeDate=已過去的週五」誤判成已齊。
+        # 改直接對「今天之後第一個交易日」比對，兩個破口一起關掉。
         nn = j.get("nextNight") or {}
         nnd = _ymd8(nn.get("date"))
         nntd = _ymd8(nn.get("tradeDate"))
         if not nnd or nn.get("foreignDelta") is None:
             return False
-        d0 = _ymd8(((j.get("history") or [{}])[0]).get("date"))
-        if d0:
-            return nnd >= d0 and nntd > d0
-        return True
+        need = _next_trade_day8(d)
+        return bool(need) and nntd == need
     if not nd or nd < today:
         return False
     return night.get("foreignDelta") is not None or night.get("foreign") is not None

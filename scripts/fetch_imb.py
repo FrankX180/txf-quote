@@ -20,6 +20,14 @@ def day_key(dt=None):
 def main():
     from when import forced, in_session
 
+    # 2026-11-21：週六 05:10 後沒有內外盤可補，但 day_key 已翻到週六，
+    # Worker 回空時會寫出空白 imb-YYYYMMDD 並覆寫 imb-latest（審查 R2a）。
+    if not forced():
+        _now = datetime.now(TZ)
+        if _now.weekday() == 5 and (_now.hour * 100 + _now.minute) >= 510:
+            print("SKIP imb: saturday after 05:10")
+            return
+
     # 盤中可寫；收盤窗口與強制也跑（歸檔）
     if not forced() and not in_session():
         # 收盤後仍允許：05:00-08:40、13:50-14:55

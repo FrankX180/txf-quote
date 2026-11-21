@@ -50,7 +50,9 @@ jobs:
   fetch:
     needs: guard
     # 只檔「排程」；手動 dispatch／push 一律照跑（例：收假補抓）
-    if: github.event_name != 'schedule' || needs.guard.outputs.state != 'closed'
+    # 2026-11-21：週六 05:10–10:00 夜盤籌碼結算窗（guard 的 night_window）也放行，
+    # 只為補抓週五夜盤 nextNight；其他抓取步驟各有時段閘門，不會亂跑。
+    if: github.event_name != 'schedule' || needs.guard.outputs.state != 'closed' || needs.guard.outputs.night_window == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
