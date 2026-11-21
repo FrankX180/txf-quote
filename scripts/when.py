@@ -260,9 +260,18 @@ def night_chips_ready(dt=None):
     if d.weekday() == 5:
         # 2026-11-21：週六「已齊」的判準是 nextNight 有週五夜盤。
         # night 是週四夜盤（屬週五交易日），跟週六無關，拿它當已齊會讓週五夜盤永遠補不到。
+        # 2026-11-21 補（顧問審查）：光看 nextNight 非空不夠——檔裡殘留上一週的舊 nextNight
+        # 也會被判成已齊，那週的週五夜盤就永遠補不到。要對日盤列（day0）比對：
+        # nextNight.date 不得早於 day0（週五夜盤的 date 就是週五本身），tradeDate 必須晚於 day0。
         nn = j.get("nextNight") or {}
         nnd = _ymd8(nn.get("date"))
-        return bool(nnd) and nn.get("foreignDelta") is not None
+        nntd = _ymd8(nn.get("tradeDate"))
+        if not nnd or nn.get("foreignDelta") is None:
+            return False
+        d0 = _ymd8(((j.get("history") or [{}])[0]).get("date"))
+        if d0:
+            return nnd >= d0 and nntd > d0
+        return True
     if not nd or nd < today:
         return False
     return night.get("foreignDelta") is not None or night.get("foreign") is not None
