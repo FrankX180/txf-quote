@@ -1,7 +1,9 @@
 """Build ./public for Cloudflare Workers Static Assets.
 
-Copies index.html and data/ into public/, plus _headers for cache policy.
-Idempotent: wipes public/ first. Never touches git-tracked files.
+Whitelist only: index.html + data/*.json (top level). Never copies subdirectories
+such as data/Backup, which exist locally and must not be published.
+
+Atomic: builds into public.tmp, then swaps into public/.
 """
 from pathlib import Path
 import shutil
@@ -9,6 +11,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 PUB = ROOT / "public"
+TMP = ROOT / "public.tmp"
 
 HEADERS = """\
 /
@@ -20,27 +23,35 @@ HEADERS = """\
 
 
 def main() -> int:
-    if PUB.exists():
-        shutil.rmtree(PUB)
-    PUB.mkdir(parents=True)
-
     idx = ROOT / "index.html"
     if not idx.exists():
         print("FAIL index.html missing")
         return 1
-    shutil.copy2(idx, PUB / "index.html")
-
     src = ROOT / "data"
     if not src.exists():
         print("FAIL data/ missing")
         return 1
-    shutil.copytree(src, PUB / "data")
 
-    (PUB / "_headers").write_text(HEADERS, encoding="utf-8")
+    jsons = sorted(p for p in src.glob("*.json") if p.is_file())
+    if not any(p.name == "snapshot.json" for p in jsons):
+        print("FAIL data/snapshot.json missing")
+        return 1
 
-    n = sum(1 for _ in (PUB / "data").rglob("*") if _.is_file())
+    if TMP.exists():
+        shutil.rmtree(TMP)
+    (TMP / "data").mkdir(parents=True)
+
+    shutil.copy2(idx, TMP / "index.html")
+    for p in jsons:
+        shutil.copy2(p, TMP / "data" / p.name)
+    (TMP / "_headers").write_text(HEADERS, encoding="utf-8")
+
+    if PUB.exists():
+        shutil.rmtree(PUB)
+    TMP.rename(PUB)
+
     size = sum(p.stat().st_size for p in PUB.rglob("*") if p.is_file())
-    print("OK public/ files=%d data=%d MB=%.2f" % (len(list(PUB.rglob("*"))), n, size / 1048576))
+    print("OK public/ data=%d MB=%.2f" % (len(jsons), size / 1048576))
     return 0
 
 

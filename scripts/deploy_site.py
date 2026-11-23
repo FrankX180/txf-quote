@@ -25,6 +25,9 @@ def main() -> int:
     if not (ROOT / "public" / "index.html").exists():
         print("FAIL public/index.html missing; run scripts/build_site.py first")
         return 1
+    if not (ROOT / "public" / "data" / "snapshot.json").exists():
+        print("FAIL public/data/snapshot.json missing; rebuild public/")
+        return 1
 
     env = dict(os.environ)
     env["CLOUDFLARE_ACCOUNT_ID"] = dw.AID

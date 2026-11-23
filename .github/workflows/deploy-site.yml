@@ -1,0 +1,39 @@
+name: deploy-site
+
+# 前端（index.html）或站台建置設定變動時，直接部署 Cloudflare Workers Static Assets。
+# 資料（data/*.json）的部署由各資料 workflow 的 deploy job 負責，這裡不重複。
+# concurrency group 與那些 deploy job 共用，確保任何時刻只有一個部署在跑。
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - "index.html"
+      - "wrangler.site.toml"
+      - "scripts/build_site.py"
+      - "scripts/deploy_site.py"
+      - ".github/workflows/deploy-site.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # build 不帶金鑰：只有 deploy 這一步拿得到 secret
+      - name: Build public/
+        run: python scripts/build_site.py
+      - name: Deploy static site (Cloudflare Workers Assets)
+        env:
+          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+        run: python scripts/deploy_site.py
