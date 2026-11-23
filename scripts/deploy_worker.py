@@ -69,6 +69,11 @@ def _secret_lookup(names):
 
 def cf_key():
     global CF_MODE
+    # scoped token 優先：CI 一律只給 CLOUDFLARE_API_TOKEN，不給 Global Key
+    tok = (os.environ.get("CLOUDFLARE_API_TOKEN") or "").strip()
+    if tok:
+        CF_MODE = "token"
+        return tok
     key = (
         os.environ.get("CLOUDFLARE_API_KEY")
         or os.environ.get("CF_API_KEY")
@@ -77,10 +82,6 @@ def cf_key():
     if key:
         CF_MODE = "key"
         return key
-    tok = (os.environ.get("CLOUDFLARE_API_TOKEN") or "").strip()
-    if tok:
-        CF_MODE = "token"
-        return tok
     name, val = _secret_lookup([
         "CLOUDFLARE_API_KEY", "CLOUDFLARE API KEY", "CLOUDFLARE_API_TOKEN",
     ])

@@ -71,7 +71,7 @@ jobs:
           FUBON_API_KEY: ${{ secrets.FUBON_API_KEY }}
           FUBON_CERT_B64: ${{ secrets.FUBON_CERT_B64 }}
           FUBON_CERT_PASS: ${{ secrets.FUBON_CERT_PASS }}
-          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: python scripts/fubon_imb_fill.py --ensure-token
       - name: Backfill imb3 from ticks (only on push / manual)
         # 2026-11-02：Worker 的 syncImb3 只能從部署後開始累計，上線當天基準不完整。
@@ -83,7 +83,7 @@ jobs:
           FUBON_API_KEY: ${{ secrets.FUBON_API_KEY }}
           FUBON_CERT_B64: ${{ secrets.FUBON_CERT_B64 }}
           FUBON_CERT_PASS: ${{ secrets.FUBON_CERT_PASS }}
-          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: python scripts/imb3_backfill.py
       - name: Fill imb gaps from Fubon trades
         env:
@@ -91,5 +91,5 @@ jobs:
           FUBON_API_KEY: ${{ secrets.FUBON_API_KEY }}
           FUBON_CERT_B64: ${{ secrets.FUBON_CERT_B64 }}
           FUBON_CERT_PASS: ${{ secrets.FUBON_CERT_PASS }}
-          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: python scripts/fubon_imb_fill.py

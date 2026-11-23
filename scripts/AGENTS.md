@@ -20,12 +20,12 @@ GitHub Actions／本機抓行情與部署 Worker。台北時段閘門在 `when.p
 | `fetch_tmf_retail.py` | 微型臺指散戶多空 |
 | `fetch_twn_hist.py` | 富台 SGX:TWN1! 1 分 K（TradingView WebSocket）→ `data/twn-hist.json`，與舊檔合併保留 14 天；由 `twn-hist.yml` 每 5 分跑、**不套休市閘門**（台灣連假 SGX 照常交易，不存就是走勢缺口） |
 | `fetch_imb.py` | Worker D1 內外盤差 → `imb-*.json` |
-| `deploy_worker.py` | 上傳 `yahoo-quote.js`、綁 D1／自訂網域／cron。金鑰優先讀環境變數 `CLOUDFLARE_API_KEY`（CI 用），fallback 本機 secrets 檔 |
+| `deploy_worker.py` | 上傳 `yahoo-quote.js`、綁 D1／自訂網域／cron。金鑰優先讀環境變數 `CLOUDFLARE_API_TOKEN`（scoped token，CI 用），fallback 本機 secrets 檔
 
 ## For AI Agents
 
 - 改 `fetch_minute.py` 回移必須與前端／Worker 對齊（最多 2 天）
-- 部署：push 後由 `.github/workflows/deploy-worker.yml` **雲端自動部署**（secret `CLOUDFLARE_API_KEY`）；本機可選 `python scripts/deploy_worker.py`。高風險：覆蓋正式 Worker／D1／cron，不要「順便驗證」
+- 部署：push 後由 `.github/workflows/deploy-worker.yml` **雲端自動部署**（secret `CLOUDFLARE_API_TOKEN`）；本機可選 `python scripts/deploy_worker.py`。高風險：覆蓋正式 Worker／D1／cron，不要「順便驗證」
 - CF key：`E:\_PluginTools\Memory\secrets\LLM_API_KEY.MD`
 - 奇摩只用 `tw.stock.yahoo.com/_td-stock/api/resource/...`，禁 `query1.finance.yahoo.com`；snapshot OHLC 禁寫奇摩混盤開高低
 - `fetch_uncovered.py` ~1800 行，不要憑檔頭重寫 main；散戶 `-(外資+投信+自營)`；大台等值 `TX+MTX/4+TMF/20`
