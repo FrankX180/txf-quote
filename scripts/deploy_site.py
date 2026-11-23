@@ -44,8 +44,9 @@ def main() -> int:
             env["CLOUDFLARE_EMAIL"] = dw.EMAIL
 
     npx = shutil.which("npx") or shutil.which("npx.cmd") or "npx"
+    # 固定版本：CI 每次都是乾淨環境，跑 @latest 會有未來 breaking 的風險
     cmd = [
-        npx, "--yes", "wrangler@latest", "deploy",
+        npx, "--yes", "wrangler@4.166.0", "deploy",
         "--config", str(CFG),
     ]
     print("deploy txf-site ...")
