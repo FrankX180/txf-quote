@@ -3,6 +3,8 @@ __pycache__/
 *.pyc
 99_TempScripts/
 Backup/
+# Workers Static Assets 建置產物（由 scripts/build_site.py 產生）
+public/
 _commit_msg_*.txt
 _diag_*.txt
 # 本機 log：內含富邦/Fugle auth token、帳號名與行情請求全文，絕不可進公開 repo

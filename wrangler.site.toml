@@ -1,0 +1,12 @@
+name = "txf-site"
+compatibility_date = "2026-11-23"
+workers_dev = true
+
+# 純靜態：index.html + data/*.json（由 scripts/build_site.py 產生）
+[assets]
+directory = "./public"
+not_found_handling = "none"
+run_worker_first = false
+
+[observability]
+enabled = true

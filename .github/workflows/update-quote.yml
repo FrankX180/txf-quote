@@ -111,8 +111,10 @@ jobs:
                   data/kline-daily.json data/vix.json data/imb-*.json data/imb-latest.json data/mis-book.json
           if git diff --cached --quiet; then
             echo "no change"
+            echo "DATA_CHANGED=0" >> "$GITHUB_ENV"
             exit 0
           fi
+          echo "DATA_CHANGED=1" >> "$GITHUB_ENV"
           git commit -m "行情快照 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
           # 與本機／其他 job 搶寫時：rebase 後保留「本次抓到的 data」再推
@@ -141,3 +143,13 @@ jobs:
           done
           echo "push failed after retries" >&2
           exit 1
+      # 2026-11-23：靜態站改由 Cloudflare Workers Static Assets（txf-site）供應，
+      # 不再依賴 GitHub Pages 的 100 GB/月軟限。data 有變更才重新部署。
+      # Workers 的靜態資產請求免費且無上限；部署走同一把 repo secret。
+      - name: Deploy static site (Cloudflare Workers Assets)
+        if: env.DATA_CHANGED == '1'
+        env:
+          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+        run: |
+          python scripts/build_site.py
+          python scripts/deploy_site.py
