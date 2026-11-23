@@ -60,7 +60,7 @@
 |-----------|---------|
 | `00_DevLog/` | 工作日誌 `YYYYMM/YYYYMMDD.md`（見 `00_DevLog/AGENTS.md`） |
 | `01_Docs/` | 規格 SSOT（見 `01_Docs/AGENTS.md`） |
-| `data/` | Actions 寫入的 JSON，進 Pages（見 `data/AGENTS.md`） |
+| `data/` | Actions 寫入的 JSON，進 git 後自動部署到 Workers（見 `data/AGENTS.md`） |
 | `scripts/` | 抓檔／部署（見 `scripts/AGENTS.md`） |
 | `worker/` | Cloudflare Worker（見 `worker/AGENTS.md`） |
 | `.github/` | `update-quote.yml`（每 5 分抓檔，休市日由 guard job 跳過）＋ `twn-hist.yml`（每 5 分存 SGX 富台 1 分 K 到 `data/twn-hist.json`，不套休市閘門）＋ `refresh-holidays.yml`（每月更新休市日）＋ `typhoon-check.yml`（營業日 09:20/09:50/10:30 以鴻海期 WDHF&＋台積電期 WCDF& 是否成交偵測颱風假，寫 holidays.json `adhoc`）＋ `deploy-worker.yml`（push worker 即雲端部署）＋ `deploy-site.yml`（`index.html`／`wrangler.site.toml`／建置腳本改動即部署 `txf-site`）＋ `fubon-imb.yml`（每 5 分用富邦逐筆補 D1 內外盤缺口；只補不覆寫 Yahoo；secrets 無交易密碼） |
