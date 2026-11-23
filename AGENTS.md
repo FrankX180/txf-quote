@@ -23,7 +23,7 @@
 
 ## Purpose
 
-公開單頁**大台（TXF）**近月看盤站。前端 `index.html` 上 GitHub Pages；即時報價／1 分 K 走 Cloudflare Worker `wtx.blok.trading`（舊別名 `wtx.19850926.xyz`）；靜態 JSON 由 Actions 每 5 分寫入 `data/`。
+公開單頁**大台（TXF）**近月看盤站。前端 `index.html` 由 Cloudflare Workers Static Assets（worker `txf-site`）供應（2026-11-23 起；舊 GitHub Pages 只剩 301 入口）；即時報價／1 分 K 走 Cloudflare Worker `wtx.blok.trading`（舊別名 `wtx.19850926.xyz`）；靜態 JSON 由 Actions 每 5 分寫入 `data/` 並自動重新部署。
 
 **2026-10-29 曾短暫改小台 MXF，同日已 revert 回大台 TXF**（小台內外盤資料不完整、夜盤無分時源）。目前資料源：
 
@@ -37,7 +37,8 @@
 
 **全站雲端自足（硬原則）**：運行與部署都不依賴任何本機檔案／服務。
 
-- Pages：`https://frankx180.github.io/txf-quote/`
+- 正式站：`https://txf.blok.trading/`（Workers Static Assets，靜態請求免費且無流量上限）
+- 舊入口：`https://frankx180.github.io/txf-quote/`（GitHub Pages 301 → 正式站）
 - Repo：`https://github.com/FrankX180/txf-quote`
 - Worker：`https://wtx.blok.trading/`（舊 `https://wtx.19850926.xyz/`）
 
@@ -46,6 +47,9 @@
 | File | Description |
 |------|-------------|
 | `index.html` | 唯一前端（報價、五檔、走勢、K、法人表）。頁腳 VER 與 `purgeOldMinCache` 的 VER **必須同號** |
+| `wrangler.site.toml` | `txf-site`（Workers Static Assets）設定；`[assets]` 指向 `./public` |
+| `scripts/build_site.py` | 產生 `public/`：只收 `index.html` ＋頂層 `data/*.json`（白名單，不碰 `data/Backup`）＋`_headers`；先建 `public.tmp` 再 rename |
+| `scripts/deploy_site.py` | 本機／CI 部署 `txf-site`（金鑰只注入子進程、不印出；逾時 600 秒） |
 | `README.md` | 極短入口；說明書在 `01_Docs/` |
 | `jian.md` | 備忘：改碼要推 GitHub 並升版 |
 | `.gitignore` | 忽略 `99_TempScripts/`、`Backup/`、pyc |
@@ -59,7 +63,7 @@
 | `data/` | Actions 寫入的 JSON，進 Pages（見 `data/AGENTS.md`） |
 | `scripts/` | 抓檔／部署（見 `scripts/AGENTS.md`） |
 | `worker/` | Cloudflare Worker（見 `worker/AGENTS.md`） |
-| `.github/` | `update-quote.yml`（每 5 分抓檔，休市日由 guard job 跳過）＋ `twn-hist.yml`（每 5 分存 SGX 富台 1 分 K 到 `data/twn-hist.json`，不套休市閘門）＋ `refresh-holidays.yml`（每月更新休市日）＋ `typhoon-check.yml`（營業日 09:20/09:50/10:30 以鴻海期 WDHF&＋台積電期 WCDF& 是否成交偵測颱風假，寫 holidays.json `adhoc`）＋ `deploy-worker.yml`（push worker 即雲端部署）＋ `fubon-imb.yml`（每 5 分用富邦逐筆補 D1 內外盤缺口；只補不覆寫 Yahoo；secrets 無交易密碼） |
+| `.github/` | `update-quote.yml`（每 5 分抓檔，休市日由 guard job 跳過）＋ `twn-hist.yml`（每 5 分存 SGX 富台 1 分 K 到 `data/twn-hist.json`，不套休市閘門）＋ `refresh-holidays.yml`（每月更新休市日）＋ `typhoon-check.yml`（營業日 09:20/09:50/10:30 以鴻海期 WDHF&＋台積電期 WCDF& 是否成交偵測颱風假，寫 holidays.json `adhoc`）＋ `deploy-worker.yml`（push worker 即雲端部署）＋ `deploy-site.yml`（`index.html`／`wrangler.site.toml`／建置腳本改動即部署 `txf-site`）＋ `fubon-imb.yml`（每 5 分用富邦逐筆補 D1 內外盤缺口；只補不覆寫 Yahoo；secrets 無交易密碼） |
 | `90_Tools/` | 空殼 |
 | `98_Archive/` | 舊日誌 digest；`_local_deprecated/` 放已除役的本機專用腳本（daemon／relay） |
 | `99_TempScripts/` | 探測腳本，gitignore |
@@ -81,7 +85,7 @@
 3. 不要把盤中 5 秒全量價 commit 進 GitHub。
 4. 根目錄不發明 02–09 業務夾：這是單頁＋Actions，不是 pipeline。
 5. **休市日 SSOT**：`data/holidays.json`（`scripts/fetch_holidays.py` 抓證交所「市場開休市日期」產生，Actions 每月自動更新）。颱風假等臨時休市由 `scripts/typhoon_check.py` 寫入 `adhoc` 並併入 `holidays`（月更會保留）。前端（`loadHolidays`）、GitHub Actions（`scripts/holiday_guard.py`）、Worker（`ensureHolidays`）**都讀同一份，不得各自硬編**。假日只檔日盤與當晚夜盤；**凌晨 00:00–05:09 仍屬前一營業日夜盤，不可檔**。
-6. **雲端自足（硬）**：本站一切**運行**必須在雲端（GitHub Actions／Cloudflare Worker／Pages）自力完成，**嚴禁**任何環節依賴本機（本機 daemon、本機 PG、本機 relay、絕對路徑）。已除役者見 `98_Archive/_local_deprecated/`，不得復用；Worker **部署**亦走 `deploy-worker.yml`。動手前先自問：**「老公電腦關機，這條還跑得動嗎？」**
+6. **雲端自足（硬）**：本站一切**運行**必須在雲端（GitHub Actions／Cloudflare Worker／Workers Static Assets）自力完成，**嚴禁**任何環節依賴本機（本機 daemon、本機 PG、本機 relay、絕對路徑）。已除役者見 `98_Archive/_local_deprecated/`，不得復用；Worker **部署**亦走 `deploy-worker.yml`。動手前先自問：**「老公電腦關機，這條還跑得動嗎？」**
 
 ### Testing Requirements
 
@@ -90,7 +94,7 @@
 
 ### Common Patterns
 
-- 前端 `gh(path)` 相對路徑吃 Pages 的 `data/`
+- 前端 `gh(path)` 相對路徑吃本站的 `data/`（現為 Workers Static Assets 提供）
 - `LIVE = "https://wtx.blok.trading/"`
 - `session` 日／夜；`daySpan` 0＝當日走勢
 
