@@ -1,6 +1,7 @@
 # Deploy worker/yahoo-quote.js + bind D1 database txf-imb
 # 可本機跑，也可由 GitHub Actions 跑（雲端部署，不需任何本機檔案）：
-#   金鑰優先序＝環境變數 CLOUDFLARE_API_KEY → 本機 secrets 檔。
+#   憑證優先序＝環境變數 CLOUDFLARE_API_TOKEN（Bearer）→ CLOUDFLARE_API_KEY（X-Auth-Key）→ 本機 secrets 檔。
+#   CI 一律用 scoped API Token（repo secret CLOUDFLARE_API_TOKEN），不再用 Global API Key。
 #   WORKER 走相對路徑（不綁任何一台機器）。
 from pathlib import Path
 import json

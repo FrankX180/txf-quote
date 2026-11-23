@@ -1,8 +1,9 @@
 name: deploy-worker
 
 # 雲端部署 Cloudflare Worker（不需任何本機檔案、不需本機憑證）。
-# 憑證：repo secret `CLOUDFLARE_API_KEY` = Cloudflare **Global API Key**
-#       （deploy_worker.py 用 X-Auth-Key 驗證，故要 Global Key，不是 scoped API Token）。
+# 憑證：repo secret `CLOUDFLARE_API_TOKEN` = Cloudflare **scoped API Token**
+#       （權限：Workers Scripts Write + Account Settings Read + D1 Read/Write）。
+#       2026-11-23 以前用 Global API Key，已換掉。
 # 只在 worker/yahoo-quote.js 變動時自動部署；亦可 workflow_dispatch 手動觸發。
 on:
   workflow_dispatch:
@@ -25,7 +26,7 @@ jobs:
           python-version: "3.12"
       - name: Check secret
         env:
-          CFKEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+          CFKEY: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           if [ -z "$CFKEY" ]; then
             echo "::error::repo secret CLOUDFLARE_API_KEY 未設定，無法雲端部署 Worker（設定後重跑本 workflow）"
@@ -33,5 +34,5 @@ jobs:
           fi
       - name: Deploy Worker (yahoo-quote.js + D1 + cron)
         env:
-          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: python scripts/deploy_worker.py

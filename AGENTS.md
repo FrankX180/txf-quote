@@ -77,7 +77,7 @@
    - 升頁腳 VER **與** `txfMinVer`（同號，例如 2.13），**且與程式改動放在同一個 commit**（2026-10-29 曾先推未升號版本、再另起 chore 升版，origin/master 短暫存在版號與內容不符的中間版本）  
    - `git commit` + **push `origin/master`**  
    - 靜態站（`txf-site`）：`data/*.json` 有變更時 `update-quote.yml` 會自動 `build_site.py` + `deploy_site.py`；`index.html` 改動也會在下一次資料變更時一併帶上去，要立即生效可跑 `workflow_dispatch` 或本機 `python scripts/build_site.py && python scripts/deploy_site.py`  
-   - 改 Worker：push 後由 `.github/workflows/deploy-worker.yml` **雲端自動部署**（repo secret `CLOUDFLARE_API_KEY`）；本機可選跑 `scripts/deploy_worker.py`  
+   - 改 Worker：push 後由 `.github/workflows/deploy-worker.yml` **雲端自動部署**（repo secret `CLOUDFLARE_API_TOKEN`，scoped token）；本機可選跑 `scripts/deploy_worker.py`  
    - 遠端常有行情快照：用 cherry-pick 接到最新 `origin/master` 再推，不要跟 `data/*.json` rebase 打架  
    - SSOT：`01_Docs/發佈鐵律.md`  
    - **本機改完 ≠ 線上。右下角版號沒變＝沒吃到。**
