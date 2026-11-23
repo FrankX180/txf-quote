@@ -38,8 +38,10 @@ jobs:
           git add data/holidays.json
           if git diff --cached --quiet; then
             echo "no change"
+            echo "DATA_CHANGED=0" >> "$GITHUB_ENV"
             exit 0
           fi
+          echo "DATA_CHANGED=1" >> "$GITHUB_ENV"
           git commit -m "chore(holidays): 更新市場休市日 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           branch="${GITHUB_REF_NAME:-master}"
           for i in 1 2 3 4 5; do
@@ -53,3 +55,11 @@ jobs:
           done
           echo "push failed after retries" >&2
           exit 1
+      # 2026-11-23：休市日有變更才重新部署 Cloudflare Workers Static Assets（txf-site）
+      - name: Deploy static site (Cloudflare Workers Assets)
+        if: env.DATA_CHANGED == '1'
+        env:
+          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+        run: |
+          python scripts/build_site.py
+          python scripts/deploy_site.py
