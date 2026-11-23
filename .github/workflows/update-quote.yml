@@ -151,5 +151,7 @@ jobs:
         env:
           CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
         run: |
+          # 先取最新 master：避免別的 workflow 剛寫的資料被這份舊 checkout 蓋回去
+          git pull --rebase origin "${GITHUB_REF_NAME:-master}" || true
           python scripts/build_site.py
           python scripts/deploy_site.py
