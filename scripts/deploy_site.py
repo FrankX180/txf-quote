@@ -50,7 +50,11 @@ def main() -> int:
         "--config", str(CFG),
     ]
     print("deploy txf-site ...")
-    r = subprocess.run(cmd, cwd=str(ROOT), env=env)
+    try:
+        r = subprocess.run(cmd, cwd=str(ROOT), env=env, timeout=600)
+    except subprocess.TimeoutExpired:
+        print("FAIL wrangler timeout after 600s (network/npx hang)")
+        return 3
     if r.returncode != 0:
         print("FAIL wrangler exit", r.returncode)
         return r.returncode
