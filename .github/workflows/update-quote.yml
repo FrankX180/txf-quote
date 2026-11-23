@@ -52,6 +52,8 @@ jobs:
         run: python scripts/holiday_guard.py
   fetch:
     needs: guard
+    outputs:
+      data_changed: ${{ steps.commit.outputs.data_changed }}
     # 只檔「排程」；手動 dispatch／push 一律照跑（例：收假補抓）
     # 2026-11-21：週六 05:10–10:00 夜盤籌碼結算窗（guard 的 night_window）也放行，
     # 只為補抓週五夜盤 nextNight；其他抓取步驟各有時段閘門，不會亂跑。
@@ -102,6 +104,7 @@ jobs:
         # 使用者只會看到站上數字慢慢變舊（2026-11-10 審查 S12#7）。休市日由腳本自行豁免。
         run: python scripts/quote_guard.py
       - name: Commit snapshot
+        id: commit
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -111,10 +114,10 @@ jobs:
                   data/kline-daily.json data/vix.json data/imb-*.json data/imb-latest.json data/mis-book.json
           if git diff --cached --quiet; then
             echo "no change"
-            echo "DATA_CHANGED=0" >> "$GITHUB_ENV"
+            echo "data_changed=0" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "DATA_CHANGED=1" >> "$GITHUB_ENV"
+          echo "data_changed=1" >> "$GITHUB_OUTPUT"
           git commit -m "行情快照 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
           # 與本機／其他 job 搶寫時：rebase 後保留「本次抓到的 data」再推
@@ -143,15 +146,26 @@ jobs:
           done
           echo "push failed after retries" >&2
           exit 1
-      # 2026-11-23：靜態站改由 Cloudflare Workers Static Assets（txf-site）供應，
-      # 不再依賴 GitHub Pages 的 100 GB/月軟限。data 有變更才重新部署。
-      # Workers 的靜態資產請求免費且無上限；部署走同一把 repo secret。
+
+  # 2026-11-23：靜態站部署獨立成 job。四個寫 data 的 workflow 共用同一個
+  # concurrency group（site-deploy），任何時刻只會有一個部署在跑，避免舊 checkout 覆蓋新資料。
+  # 每次都在最新 master 重新 checkout + build，所以不需要 pull --rebase。
+  deploy:
+    needs: fetch
+    if: needs.fetch.outputs.data_changed == '1'
+    concurrency:
+      group: site-deploy
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # build 不帶金鑰：只有 deploy 這一步拿得到 secret
+      - name: Build public/
+        run: python scripts/build_site.py
       - name: Deploy static site (Cloudflare Workers Assets)
-        if: env.DATA_CHANGED == '1'
         env:
           CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
-        run: |
-          # 先取最新 master：避免別的 workflow 剛寫的資料被這份舊 checkout 蓋回去
-          git pull --rebase origin "${GITHUB_REF_NAME:-master}" || true
-          python scripts/build_site.py
-          python scripts/deploy_site.py
+        run: python scripts/deploy_site.py

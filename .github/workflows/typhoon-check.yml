@@ -15,6 +15,8 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    outputs:
+      data_changed: ${{ steps.commit.outputs.data_changed }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -23,6 +25,7 @@ jobs:
       - name: Detect ad-hoc closure (WDHF& / WCDF&)
         run: python scripts/typhoon_check.py
       - name: Commit holidays
+        id: commit
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -30,10 +33,10 @@ jobs:
           git add data/holidays.json
           if git diff --cached --quiet; then
             echo "no change"
-            echo "DATA_CHANGED=0" >> "$GITHUB_ENV"
+            echo "data_changed=0" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "DATA_CHANGED=1" >> "$GITHUB_ENV"
+          echo "data_changed=1" >> "$GITHUB_OUTPUT"
           git commit -m "臨時休市偵測 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           branch="${GITHUB_REF_NAME:-master}"
           for i in 1 2 3 4 5 6; do
@@ -45,13 +48,23 @@ jobs:
             sleep $((i * 2))
           done
           exit 1
-      # 2026-11-23：休市日有變更才重新部署 Cloudflare Workers Static Assets（txf-site）
+
+  # 2026-11-23：靜態站部署獨立成 job（四個寫 data 的 workflow 共用 site-deploy 併發群組）
+  deploy:
+    needs: check
+    if: needs.check.outputs.data_changed == '1'
+    concurrency:
+      group: site-deploy
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build public/
+        run: python scripts/build_site.py
       - name: Deploy static site (Cloudflare Workers Assets)
-        if: env.DATA_CHANGED == '1'
         env:
           CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
-        run: |
-          # 先取最新 master：避免別的 workflow 剛寫的資料被這份舊 checkout 蓋回去
-          git pull --rebase origin "${GITHUB_REF_NAME:-master}" || true
-          python scripts/build_site.py
-          python scripts/deploy_site.py
+        run: python scripts/deploy_site.py
