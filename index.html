@@ -2249,15 +2249,25 @@
       if (pick) return [];
       return keys;
     }
+    // 2026-11-24 老公：按一次「顯示更多」就多 50 天，可一路按到全部
+    const OI_HIST_STEP = 50;
+    function oiHistBase() { return window.innerWidth >= 1100 ? 22 : 10; }
     function oiHistView(rows, panel) {
       const all = rows || [];
-      const open = (oiHistOpen[panel] == null) ? (window.innerWidth >= 1100) : !!oiHistOpen[panel];
-      const maxShow = 22; // 展開時的資料筆數上限（一筆＝一天，含該日的夜盤／日盤子列）
       const total = all.length;
-      const canMore = total > 10;
-      if (open) return { rows: all.slice(0, maxShow), open: true, canMore: canMore, total: total, shown: Math.min(maxShow, total) };
-      if (!canMore) return { rows: all, open: false, canMore: false, total: total, shown: total };
-      return { rows: all.slice(0, 10), open: false, canMore: true, total: total, shown: 10 };
+      const base = oiHistBase();
+      let shown = oiHistOpen[panel];
+      if (shown == null || typeof shown !== "number") shown = base;
+      shown = Math.max(base, Math.min(shown, Math.max(total, base)));
+      return {
+        rows: all.slice(0, shown),
+        open: shown > base,
+        canMore: total > base,
+        total: total,
+        shown: Math.min(shown, total),
+        base: base,
+        step: OI_HIST_STEP
+      };
     }
     function oiPaintCumLines() {
       document.querySelectorAll(".oi-table-wrap.has-cum").forEach((wrap) => {
@@ -2353,10 +2363,10 @@
       });
       html += `</table></div>`;
       if (view.canMore) {
-        const moreLabel = view.open
-          ? (view.shown < view.total ? `收合（顯示10列）｜共 ${view.total} 列，僅列近 ${view.shown} 列` : "收合（顯示10列）")
-          : "▼ 展開更多";
-        html += `<button type="button" class="oi-more" data-oi-more="${panel}">${moreLabel}</button>`;
+        const moreLabel = view.shown >= view.total
+          ? `收合（顯示 ${view.base} 列）`
+          : `▼ 顯示更多 +${view.step}（目前 ${view.shown} / 共 ${view.total} 列）`;
+        html += `<button type="button" class="oi-more" data-oi-more="${panel}" data-oi-shown="${view.shown}" data-oi-total="${view.total}">${moreLabel}</button>`;
       }
       let note2 = note;
       if (cumOn) {
@@ -7696,7 +7706,9 @@
           const panel = more.getAttribute("data-oi-more");
           if (panel && Object.prototype.hasOwnProperty.call(oiHistOpen, panel)) {
             // 寬螢幕預設展開時狀態是 null，直接 !null 得 true 會讓第一次點擊無效（要點兩下才收）。
-            oiHistOpen[panel] = !(oiHistOpen[panel] == null ? window.innerWidth >= 1100 : oiHistOpen[panel]);
+            const shownN = Number(more.getAttribute("data-oi-shown")) || 0;
+            const totalN = Number(more.getAttribute("data-oi-total")) || 0;
+            oiHistOpen[panel] = (totalN > 0 && shownN >= totalN) ? ((window.innerWidth >= 1100) ? 22 : 10) : shownN + 50;
             renderOi();
           }
           return;
@@ -8131,7 +8143,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.22";
+        const VER = "4.23";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
