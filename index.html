@@ -553,6 +553,22 @@
       flex: 1;
       text-align: right;
     }
+    /* 寬螢幕：法人未平倉表格移到走勢圖右側（左圖右表，2026-11-24 老公要求） */
+    @media (min-width: 1100px) {
+      body { width: auto; max-width: 1340px; }
+      .wrap {
+        max-width: 1340px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 420px;
+        column-gap: 14px;
+        row-gap: 0;
+        align-items: start;
+      }
+      .wrap > .card { grid-column: 1; }
+      .wrap > .card:first-child { grid-column: 1 / -1; }
+      .wrap > .card:has(.side-oi) { grid-column: 2; }
+      .wrap > .foot { grid-column: 1 / -1; }
+    }
   </style>
 </head>
 <body>
@@ -8084,7 +8100,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.16";
+        const VER = "4.17";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
