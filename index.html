@@ -2252,7 +2252,7 @@
     function oiHistView(rows, panel) {
       const all = rows || [];
       const open = (oiHistOpen[panel] == null) ? (window.innerWidth >= 1100) : !!oiHistOpen[panel];
-      const maxShow = 20; // 展開時的資料筆數上限（一筆＝一天，含該日的夜盤／日盤子列）；實際日期隨資料變動
+      const maxShow = 22; // 展開時的資料筆數上限（一筆＝一天，含該日的夜盤／日盤子列）
       const total = all.length;
       const canMore = total > 10;
       if (open) return { rows: all.slice(0, maxShow), open: true, canMore: canMore, total: total, shown: Math.min(maxShow, total) };
@@ -8131,7 +8131,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.21";
+        const VER = "4.22";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
