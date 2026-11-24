@@ -467,10 +467,11 @@
     }
     table.q td.lab { color: #6b7280; }
     .ob { width: 100%; border-collapse: collapse; font-size: 15px; margin-top: 0; table-layout: fixed; font-weight: 700; }
-    .ob col.c-qty { width: 18px; }
+    .ob col.c-qty { width: 56px; }
     .ob col.c-bar { width: auto; }
     .ob col.c-px { width: 58px; }
     .ob td { padding: 2px 3px; font-variant-numeric: tabular-nums; }
+    .ob td.qty { white-space: nowrap; }
     .ob .bid { color: var(--up); }
     .ob .ask { color: var(--dn); }
     .ob .lab.bid { color: var(--up); text-align: left; }
@@ -8083,7 +8084,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.15";
+        const VER = "4.16";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
