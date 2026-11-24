@@ -719,7 +719,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">3.96</div>
+      <div class="ver foot-right" id="verFoot">4.21</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -2252,11 +2252,12 @@
     function oiHistView(rows, panel) {
       const all = rows || [];
       const open = (oiHistOpen[panel] == null) ? (window.innerWidth >= 1100) : !!oiHistOpen[panel];
-      const maxShow = 20; // 2026-11-24 老公：展開列數減一個月（約 20 個交易日，顯示到 10/28）
-      const canMore = all.length > 10;
-      if (open) return { rows: all.slice(0, maxShow), open: true, canMore: canMore };
-      if (!canMore) return { rows: all, open: false, canMore: false };
-      return { rows: all.slice(0, 10), open: false, canMore: true };
+      const maxShow = 20; // 展開時的資料筆數上限（一筆＝一天，含該日的夜盤／日盤子列）；實際日期隨資料變動
+      const total = all.length;
+      const canMore = total > 10;
+      if (open) return { rows: all.slice(0, maxShow), open: true, canMore: canMore, total: total, shown: Math.min(maxShow, total) };
+      if (!canMore) return { rows: all, open: false, canMore: false, total: total, shown: total };
+      return { rows: all.slice(0, 10), open: false, canMore: true, total: total, shown: 10 };
     }
     function oiPaintCumLines() {
       document.querySelectorAll(".oi-table-wrap.has-cum").forEach((wrap) => {
@@ -2352,7 +2353,10 @@
       });
       html += `</table></div>`;
       if (view.canMore) {
-        html += `<button type="button" class="oi-more" data-oi-more="${panel}">${view.open ? "收合（顯示10列）" : "▼ 展開更多"}</button>`;
+        const moreLabel = view.open
+          ? (view.shown < view.total ? `收合（顯示10列）｜共 ${view.total} 列，僅列近 ${view.shown} 列` : "收合（顯示10列）")
+          : "▼ 展開更多";
+        html += `<button type="button" class="oi-more" data-oi-more="${panel}">${moreLabel}</button>`;
       }
       let note2 = note;
       if (cumOn) {
@@ -7691,7 +7695,8 @@
         if (more) {
           const panel = more.getAttribute("data-oi-more");
           if (panel && Object.prototype.hasOwnProperty.call(oiHistOpen, panel)) {
-            oiHistOpen[panel] = !oiHistOpen[panel];
+            // 寬螢幕預設展開時狀態是 null，直接 !null 得 true 會讓第一次點擊無效（要點兩下才收）。
+            oiHistOpen[panel] = !(oiHistOpen[panel] == null ? window.innerWidth >= 1100 : oiHistOpen[panel]);
             renderOi();
           }
           return;
@@ -8126,7 +8131,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.20";
+        const VER = "4.21";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
