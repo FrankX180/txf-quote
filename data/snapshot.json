@@ -1,5 +1,5 @@
 {
-  "fetchedAt": "2026-11-24 12:06:36",
+  "fetchedAt": "2026-11-24 12:16:35",
   "source": "yahoo tw.stock StockServices.stockList WTX& WCDF& WCCF&",
   "session": "day",
   "night": {
@@ -42,7 +42,7 @@
     "outMarket": "51296",
     "marketStatus": "open",
     "CBidPrice1": "40324",
-    "CBidSize1": "4975",
+    "CBidSize1": "5157",
     "CAskPrice1": "40324",
     "CAskSize1": "2",
     "CBidPrice2": "40323",
@@ -53,12 +53,12 @@
     "CBidSize3": "8",
     "CAskPrice3": "40321",
     "CAskSize3": "2",
-    "CBidPrice4": "40320",
-    "CBidSize4": "6",
+    "CBidPrice4": "40321",
+    "CBidSize4": "1",
     "CAskPrice4": "40322",
     "CAskSize4": "3",
-    "CBidPrice5": "40319",
-    "CBidSize5": "4",
+    "CBidPrice5": "40320",
+    "CBidSize5": "6",
     "CAskPrice5": "40323",
     "CAskSize5": "4"
   },
