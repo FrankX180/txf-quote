@@ -6716,6 +6716,51 @@
       };
     }
     // 依 kInd 建立／移除主圖指標，並確保 X 軸可顯示未來刻度
+    // 均線扣抵標記（2026-11-24 老公要求：K 線圖上標出各條均線「扣抵」的那一根，紫色＝短均線、橘色＝長均線）
+    klinecharts.registerIndicator({
+      name: "MA_DEDUCT",
+      shortName: "均線扣抵",
+      series: "price",
+      precision: 0,
+      calcParams: [9, 36],
+      figures: [],
+      calc: function (list) {
+        return (list || []).map(function (d) { return { lo: d.low }; });
+      },
+      draw: function (p) {
+        try {
+          const res = p.indicator.result || [];
+          const L = res.length;
+          if (!L) return true;
+          const ctx = p.ctx, xAxis = p.xAxis, yAxis = p.yAxis;
+          const params = (p.indicator.calcParams || []).map(Number);
+          const colors = ["#935EBD", "#FF9600", "#E11D48"];
+          const bar = (p.barSpace && p.barSpace.bar) || 8;
+          const s = Math.max(3, Math.min(6, bar * 0.35));
+          ctx.save();
+          for (let i = 0; i < params.length; i++) {
+            const per = params[i];
+            if (!per || per <= 0) continue;
+            const idx = L - 1 - per;
+            if (idx < 0 || idx >= L) continue;
+            const row = res[idx];
+            if (!row || row.lo == null) continue;
+            const x = xAxis.convertToPixel(idx);
+            const y = yAxis.convertToPixel(row.lo);
+            const top = y + 4;
+            ctx.beginPath();
+            ctx.moveTo(x, top + s);
+            ctx.lineTo(x - s, top);
+            ctx.lineTo(x + s, top);
+            ctx.closePath();
+            ctx.fillStyle = colors[i % colors.length];
+            ctx.fill();
+          }
+          ctx.restore();
+        } catch (e) {}
+        return true;
+      }
+    });
     function syncKInd() {
       if (!kchart || typeof klinecharts === "undefined") return;
       ensureKIndIndicators();
@@ -6728,11 +6773,14 @@
         // MA
         if (kInd.ma && !kMaShown) {
           kchart.createIndicator({ name: "MA", calcParams: [kInd.p1, kInd.p2], precision: 0, styles: kMaStyles() }, true, { id: "candle_pane" });
+          kchart.createIndicator({ name: "MA_DEDUCT", calcParams: [kInd.p1, kInd.p2] }, true, { id: "candle_pane" });
           kMaShown = true;
         } else if (kInd.ma) {
           kchart.overrideIndicator({ name: "MA", calcParams: [kInd.p1, kInd.p2], styles: kMaStyles() }, "candle_pane");
+          kchart.overrideIndicator({ name: "MA_DEDUCT", calcParams: [kInd.p1, kInd.p2] }, "candle_pane");
         } else if (kMaShown) {
           kchart.removeIndicator("candle_pane", "MA");
+          kchart.removeIndicator("candle_pane", "MA_DEDUCT");
           kMaShown = false;
         }
         // 翻亞當／均線延伸
@@ -8145,7 +8193,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.24";
+        const VER = "4.25";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
