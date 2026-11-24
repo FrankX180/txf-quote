@@ -373,7 +373,7 @@
     .range-ma-pop.kind-pop { top: 6px; bottom: auto; left: 6px; min-width: 176px; }
     #khost { width: 100%; height: 320px; display: none; position: relative; }
     #deductLayer { position: absolute; left: 0; top: 0; right: 0; bottom: 0; pointer-events: none; z-index: 6; }
-    .deduct-tri { position: absolute; width: 0; height: 0; transform: translateX(-50%); display: block; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 8px solid #935EBD; }
+    .deduct-tri { position: absolute; width: 0; height: 0; transform: translateX(-50%); display: block; border-left: 7px solid transparent; border-right: 7px solid transparent; border-top: 11px solid #935EBD; }
     /* fallback；實際高度由 syncSideLayout 依走勢圖+五檔實測覆寫 */
     #khost.k-expand { height: 529px; }
     .range-ma-gear {
@@ -5107,6 +5107,18 @@
       ctx.textBaseline = "alphabetic";
     }
 
+    // 主圖 pane 底部（相對 khost）：取高度介於 khost 35%~85% 的那一層 div
+    function kMainPaneBottom(kh, kb) {
+      const divs = kh.querySelectorAll("div");
+      for (let i = 0; i < divs.length; i++) {
+        const r = divs[i].getBoundingClientRect();
+        if (r.height > kb.height * 0.35 && r.height < kb.height * 0.85 && r.width > kb.width * 0.6) {
+          return r.bottom - kb.top;
+        }
+      }
+      return kb.height - 130;
+    }
+
     // 均線扣抵三角形（2026-11-24）：不依賴 indicator 的 draw，直接用 DOM 疊層畫在 K 線圖上
     let _deductAt = 0;
     function syncDeductMarks(force) {
@@ -5123,6 +5135,8 @@
       const L = data.length;
       const pers = [kInd.p1, kInd.p2];
       const colors = ["#935EBD", "#FF9600"];
+      const kb = kh.getBoundingClientRect();
+      const triTop = Math.round(kMainPaneBottom(kh, kb) - 14);
       let html = "";
       for (let i = 0; i < pers.length; i++) {
         const per = Number(pers[i]) || 0;
@@ -5134,7 +5148,7 @@
         let pt = null;
         try { pt = kchart.convertToPixel({ dataIndex: idx, value: row.low }, { paneId: "candle_pane" }); } catch (e) { pt = null; }
         if (!pt || pt.x == null) continue;
-        html += '<i class="deduct-tri" style="left:' + Math.round(pt.x) + 'px;top:' + Math.round(pt.y + 6) + 'px;border-top-color:' + colors[i % colors.length] + '"></i>';
+        html += '<i class="deduct-tri" style="left:' + Math.round(pt.x) + 'px;top:' + triTop + 'px;border-top-color:' + colors[i % colors.length] + '"></i>';
       }
       layer.innerHTML = html;
     }
@@ -8226,7 +8240,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.29";
+        const VER = "4.30";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
