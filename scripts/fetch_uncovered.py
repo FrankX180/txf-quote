@@ -86,9 +86,10 @@ TAIFEX_FUT_VIEW = "https://www.taifex.com.tw/cht/3/futDailyMarketView"
 
 
 def get_text(url: str, timeout: int = 30) -> str:
-    req = urllib.request.Request(url, headers=HDR)
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read().decode("utf-8", "replace")
+    # 2026-11-24：網路層集中到 taifex_net.py（端點行為變動只改那一支）
+    from taifex_net import get_text as _gt
+
+    return _gt(url, timeout=timeout)
 
 
 def get_json(url: str, timeout: int = 30):
@@ -116,25 +117,10 @@ def retail_from_inst(foreign, trust, dealer):
 
 
 def taifex_post_text(url: str, data: dict, referer: str, timeout: int = 90) -> str:
-    body = urllib.parse.urlencode(data).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=body,
-        headers={
-            **HDR,
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Origin": "https://www.taifex.com.tw",
-            "Referer": referer,
-        },
-    )
-    with urllib.request.urlopen(req, timeout=timeout, context=SSL_CTX) as r:
-        raw = r.read()
-    for enc in ("cp950", "big5", "utf-8"):
-        try:
-            return raw.decode(enc)
-        except Exception:
-            continue
-    return raw.decode("utf-8", "replace")
+    # 2026-11-24：網路層集中到 taifex_net.py（端點行為變動只改那一支）
+    from taifex_net import post_text as _pt
+
+    return _pt(url, data, referer=referer, timeout=timeout)
 
 
 def parse_taifex_inst_csv(text: str):

@@ -128,31 +128,14 @@ def fetch_range_maps(start, end, proxies=None):
 
 
 def taifex_post(url, data, referer, proxy=None, timeout=90):
-    """抓期交所。刻意 fail-closed：憑證驗證失敗就讓它失敗，不自動降級。
+    """抓期交所。網路層已集中到 taifex_net.py（2026-11-24）。
 
-    2026-11-06：本來寫成「嚴格失敗就換 CERT_NONE 重抓一次」，但那正好是
-    中間人攻擊的觸發路徑（拒絕正確憑證 → 自動關掉驗證 → 偽造資料照樣寫入
-    data/tmf_retail.json 並 commit 上 Pages）。改為只留嚴格驗證。
+    2026-11-06 的「不降級成 CERT_NONE」規則已搬進 taifex_net；
+    端點 URL、headers、編碼、proxy 也只改那一支，這裡保留同名 wrapper。
     """
-    body = urllib.parse.urlencode(data).encode("utf-8")
-    req = urllib.request.Request(url, data=body, headers={**HDR, "Referer": referer})
-    if proxy:
-        opener = urllib.request.build_opener(
-            urllib.request.ProxyHandler({"http": proxy, "https": proxy}),
-            urllib.request.HTTPSHandler(context=ssl_context),
-        )
-        with opener.open(req, timeout=timeout) as r:
-            raw = r.read()
-    else:
-        with urllib.request.urlopen(req, timeout=timeout, context=ssl_context) as r:
-            raw = r.read()
-    for enc in ("cp950", "big5", "utf-8"):
-        try:
-            return raw.decode(enc)
-        except Exception:
-            continue
-    return raw.decode("utf-8", "replace")
+    from taifex_net import post_text
 
+    return post_text(url, data, referer=referer, proxy=proxy, timeout=timeout)
 def fetch_openapi_latest():
     """官方 OpenAPI 僅最新一交易日；回 series 一列。"""
     hdr = {"User-Agent": HDR["User-Agent"], "Accept": "application/json"}
