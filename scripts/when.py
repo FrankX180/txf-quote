@@ -121,8 +121,8 @@ def want_uncovered(dt=None):
         if not (620 <= h <= 1000) and not local and not dispatch:
             return False
         return not night_chips_ready(d)
-    # 14:30 起高頻抓；15:30 止（15:00 前一旦三大商品籌碼齊全立刻定案，定案後不再重抓）
-    in_day = 1430 <= h <= 1530
+    # 14:35 起到 17:00（官網實際公布時間在 14:40–15:10 之間跳動；2 分鐘 cron 會被 GitHub 合併成 5 分鐘）
+    in_day = 1435 <= h <= 1700
     in_night = 620 <= h <= 1000
     if in_day:
         return not day_chips_ready(d)
