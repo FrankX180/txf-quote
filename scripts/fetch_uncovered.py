@@ -187,6 +187,106 @@ def parse_taifex_inst_csv(text: str):
     return out
 
 
+def parse_taifex_inst_html(html: str, d8: str) -> dict:
+    """2026-11-24：futContractsDateDown 已回 HTML 空頁（590 bytes），改解析 GET 頁面表格。
+
+    15 欄｜序號、商品、身份、買口、買額、賣口、賣額、未沖銷淨口、未沖銷淨額、買量、買量額、賣量、賣量額、成交量淨口、成交量淨額
+    13 欄｜身份、買口、買額、賣口、賣額、未沖銷淨口、未沖銷淨額、買量、買量額、賣量、賣量額、成交量淨口、成交量淨額
+    13 欄列沒有商品名，沿用上一個 15 欄列；非 TX/MTX/TMF 商品的列必須清空 cur，
+    否則電子、金融、股票期貨的列會被誤歸到臺股期貨（實測 11/23 foreign 多算 −25,865.25、trust 多算 +6,388.8）。
+    口徑：取「成交量淨額」（cells[13] / cells[11]），與 repo 現有 foreign/trust/dealer 一致。
+    三類（外資、投信、自營）缺任一則不輸出該日，避免缺列被當 0 寫入。
+    """
+    import re as _re
+
+    code_map = {"臺股期貨": "TX", "小型臺指期貨": "MTX", "微型臺指期貨": "TMF"}
+    need = ("foreign", "trust", "dealer")
+    bags = {}
+    cur = None
+    for tr in _re.findall(r"<tr[^>]*>(.*?)</tr>", html, _re.S | _re.I):
+        cells = [
+            _re.sub(r"<[^>]+>", "", c).replace("&nbsp;", " ").strip()
+            for c in _re.findall(r"<td[^>]*>(.*?)</td>", tr, _re.S | _re.I)
+        ]
+        if len(cells) >= 15:
+            if cells[1] not in TAIFEX_PRODS:
+                cur = None
+                continue
+            cur = cells[1]
+            who = cells[2]
+            netv = cells[13]
+        elif len(cells) == 13:
+            if cur is None:
+                continue
+            who = cells[0]
+            netv = cells[11]
+        else:
+            continue
+        key = TAIFEX_WHO.get(who)
+        if not key:
+            continue
+        try:
+            net = float(str(netv).replace(",", "") or 0)
+        except ValueError:
+            continue
+        slot = bags.setdefault(
+            d8, {"foreign": 0.0, "trust": 0.0, "dealer": 0.0, "_saw": set(), "_prods": set()}
+        )
+        slot[key] = float(slot.get(key) or 0) + net / float(TAIFEX_PRODS[cur])
+        slot["_saw"].add(key)
+        code = code_map.get(cur)
+        if code:
+            slot["_prods"].add(code)
+    out = {}
+    for d, slot in bags.items():
+        if not set(need) <= slot.get("_saw", set()):
+            continue
+        f = round(float(slot["foreign"]), 2)
+        t = round(float(slot["trust"]), 2)
+        de = round(float(slot["dealer"]), 2)
+        out[d] = {
+            "foreign": f,
+            "trust": t,
+            "dealer": de,
+            "retail": retail_from_inst(f, t, de),
+            "instProds": sorted(slot.get("_prods") or []),
+        }
+    return out
+
+
+def fetch_taifex_inst_page(d8: str) -> dict:
+    from urllib.parse import quote
+
+    d = d8[:4] + "/" + d8[4:6] + "/" + d8[6:]
+    url = (
+        "https://www.taifex.com.tw/cht/3/futContractsDate"
+        "?queryType=1&goDay=&doQuery=1&dateaddcnt=&commodityId=&queryDate=" + quote(d)
+    )
+    return parse_taifex_inst_html(get_text(url), d8)
+
+
+def fetch_taifex_inst_page_hist(days: int = 3) -> dict:
+    """逐日抓 GET 頁面（POST CSV 掛掉時的備援）；歷史仍由 repo 長檔維持。"""
+    out = {}
+    end = datetime.now(TZ).date()
+    got = 0
+    for i in range(0, 10):
+        if got >= days:
+            break
+        d = end - timedelta(days=i)
+        if d.weekday() >= 5:
+            continue
+        d8 = d.strftime("%Y%m%d")
+        try:
+            one = fetch_taifex_inst_page(d8)
+        except Exception:
+            continue
+        if one:
+            out.update(one)
+            got += 1
+    return out
+
+
 def fetch_taifex_inst_hist(n: int = TAIFEX_WIN):
     """抓近 n 個日曆窗（約 2n 天）期交所三大法人未平倉，含今日若已上架。"""
     end = datetime.now(TZ).date()
@@ -200,6 +300,9 @@ def fetch_taifex_inst_hist(n: int = TAIFEX_WIN):
         TAIFEX_INST_VIEW,
     )
     m = parse_taifex_inst_csv(text)
+    if not m:
+        # 2026-11-24：futContractsDateDown 已回 HTML 空頁（590 bytes）拿不到 CSV，fallback 抓 GET 頁面
+        m = fetch_taifex_inst_page_hist(3)
     dates = sorted(m.keys(), reverse=True)[:n]
     return [(d, m[d]) for d in dates]
 
