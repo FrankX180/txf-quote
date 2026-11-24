@@ -6723,7 +6723,7 @@
       series: "price",
       precision: 0,
       calcParams: [9, 36],
-      figures: [{ key: "lo", title: "", type: "line", styles: { color: "rgba(0,0,0,0)", size: 0 } }],
+      figures: [{ key: "lo", title: "", type: "line", styles: function () { return { color: "rgba(0,0,0,0)" }; } }],
       calc: function (list) {
         return (list || []).map(function (d) { return { lo: d.low }; });
       },
@@ -8193,7 +8193,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.26";
+        const VER = "4.27";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
