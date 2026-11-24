@@ -566,14 +566,16 @@
       }
       .wrap > .card { grid-column: 1; }
       .wrap > .card:first-child { grid-column: 1 / -1; }
-      .wrap > .card:has(.side-oi) { grid-column: 2; }
+      .wrap > .card:has(.side-oi) { grid-column: 2; } /* fallback：不支援 :has 的舊核心 */
+      .wrap > .oi-card { grid-column: 2; } /* 主規則：不依賴 :has */
+      .wrap > .quote-card { grid-column: 1 / -1; } /* 主規則：不依賴 :first-child */
       .wrap > .foot { grid-column: 1 / -1; }
     }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="card">
+    <div class="card quote-card">
       <div class="hero" id="hero">
         <div class="hero-head">
           <div class="title-row">
@@ -683,7 +685,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card oi-card">
       <div class="side-oi">
         <div class="oi" id="oi-box">
           <div class="oi-tabs" id="oi-tabs">
@@ -8100,7 +8102,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.17";
+        const VER = "4.18";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
