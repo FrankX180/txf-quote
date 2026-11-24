@@ -2252,7 +2252,7 @@
     function oiHistView(rows, panel) {
       const all = rows || [];
       const open = (oiHistOpen[panel] == null) ? (window.innerWidth >= 1100) : !!oiHistOpen[panel];
-      const maxShow = 40;
+      const maxShow = 20; // 2026-11-24 老公：展開列數減一個月（約 20 個交易日，顯示到 10/28）
       const canMore = all.length > 10;
       if (open) return { rows: all.slice(0, maxShow), open: true, canMore: canMore };
       if (!canMore) return { rows: all, open: false, canMore: false };
@@ -8126,7 +8126,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.19";
+        const VER = "4.20";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
