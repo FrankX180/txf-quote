@@ -565,10 +565,20 @@
         align-items: start;
       }
       .wrap > .card { grid-column: 1; }
-      .wrap > .card:first-child { grid-column: 1 / -1; }
-      .wrap > .card:has(.side-oi) { grid-column: 2; } /* fallback：不支援 :has 的舊核心 */
-      .wrap > .oi-card { grid-column: 2; } /* 主規則：不依賴 :has */
-      .wrap > .quote-card { grid-column: 1 / -1; } /* 主規則：不依賴 :first-child */
+      /* 報價卡只佔左欄（迷你K 與走勢圖同寬）；右欄跨兩列，整欄都是法人表格 */
+      .wrap > .card:first-child { grid-column: 1; }
+      .wrap > .card:has(.side-oi),
+      .wrap > .oi-card {
+        grid-column: 2;
+        grid-row: 1 / span 2;
+        align-self: start;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .wrap > .card:has(.side-oi) > .side-oi,
+      .wrap > .oi-card > .side-oi { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+      .wrap > .quote-card { grid-column: 1; }
       .wrap > .foot { grid-column: 1 / -1; }
     }
   </style>
@@ -810,7 +820,7 @@
     let oiNetFlow = false;
     let oiCloseDelta = "pts"; // pts=漲跌點數｜pct=漲跌幅%
     let oiPick = { oi: null, big: null }; // 舊橫向柱已廢，固定 null
-    let oiHistOpen = { oi: false, big: false };
+    let oiHistOpen = { oi: null, big: null }; // null＝依視窗寬度決定（寬螢幕預設展開）
     // 2026-11-09 老公指定：樹狀合計列可點擊收合（預設展開），狀態記在記憶體，重繪不丟
     let oiTreeClosed = {};
     try { oiSimple = localStorage.getItem("txfOiSimple") === "1"; } catch (e) {}
@@ -1935,6 +1945,7 @@
       renderOi();
       drawMiniK();
       draw();
+      syncOiHeight();
     }
 
     function signed(v) {
@@ -2240,7 +2251,7 @@
     }
     function oiHistView(rows, panel) {
       const all = rows || [];
-      const open = !!oiHistOpen[panel];
+      const open = (oiHistOpen[panel] == null) ? (window.innerWidth >= 1100) : !!oiHistOpen[panel];
       const maxShow = 40;
       const canMore = all.length > 10;
       if (open) return { rows: all.slice(0, maxShow), open: true, canMore: canMore };
@@ -8063,11 +8074,24 @@
       } else stopPoll();
     });
 
+    // 寬螢幕：右欄（法人未平倉）高度對齊左欄（報價卡＋走勢圖卡），避免右欄下方大空白
+    function syncOiHeight() {
+      const q = document.querySelector(".quote-card");
+      const b = document.querySelector(".card.board");
+      const oi = document.querySelector(".oi-card");
+      if (!q || !b || !oi) return;
+      if (window.innerWidth < 1100) { oi.style.height = ""; return; }
+      const r1 = q.getBoundingClientRect();
+      const r2 = b.getBoundingClientRect();
+      oi.style.height = Math.max(0, Math.round(r2.bottom - r1.top)) + "px";
+    }
+
     window.addEventListener("resize", () => {
       if (miniChart && miniChart.resize) miniChart.resize();
       miniFit36();
       if (kchart && kchart.resize) kchart.resize();
       draw();
+      syncOiHeight();
     });
     bindLineHold();
     (function bindImbSideToggle() {
@@ -8102,7 +8126,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.18";
+        const VER = "4.19";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
