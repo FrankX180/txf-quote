@@ -1,5 +1,5 @@
 {
- "fetchedAt": "2026-11-27 15:42:03",
+ "fetchedAt": "2026-11-27 15:52:57",
  "source": "TAIFEX MIS ws",
  "day": {
   "sym": "TXFL6-F",
@@ -29,36 +29,36 @@
    "CAskPrice4": "39368.00",
    "CBidPrice5": "39350.00"
   },
-  "ts": 1795765323117
+  "ts": 1795765977040
  },
  "night": {
   "sym": "TXFL6-M",
   "f": {
-   "CAskPrice5": "38903.00",
-   "CBidSize1": "2",
-   "CAskSize1": "2",
-   "CBidSize2": "1",
+   "CAskPrice5": "38924.00",
+   "CBidSize1": "3",
+   "CAskSize1": "1",
+   "CBidSize2": "3",
    "CAskSize2": "1",
    "CBidSize3": "2",
-   "CAskSize3": "3",
-   "CBidSize4": "4",
-   "CAskSize4": "1",
-   "CBidSize5": "4",
+   "CAskSize3": "4",
+   "CBidSize4": "2",
+   "CAskSize4": "3",
+   "CBidSize5": "3",
    "CAskSize5": "3",
-   "CLastPrice": "38894.00",
-   "CTotalVolume": "3493",
-   "CTime": "154202",
+   "CLastPrice": "38917.00",
+   "CTotalVolume": "4376",
+   "CTime": "155253",
    "CDate": "20261127",
-   "CBidPrice1": "38890.00",
-   "CAskPrice1": "38898.00",
-   "CBidPrice2": "38889.00",
-   "CAskPrice2": "38899.00",
-   "CBidPrice3": "38888.00",
-   "CAskPrice3": "38900.00",
-   "CBidPrice4": "38887.00",
-   "CAskPrice4": "38901.00",
-   "CBidPrice5": "38886.00"
+   "CBidPrice1": "38911.00",
+   "CAskPrice1": "38920.00",
+   "CBidPrice2": "38910.00",
+   "CAskPrice2": "38921.00",
+   "CBidPrice3": "38909.00",
+   "CAskPrice3": "38922.00",
+   "CBidPrice4": "38908.00",
+   "CAskPrice4": "38923.00",
+   "CBidPrice5": "38907.00"
   },
-  "ts": 1795765323117
+  "ts": 1795765977040
  }
 }
