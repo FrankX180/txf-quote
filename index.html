@@ -725,7 +725,7 @@
     </div>
     <div class="foot">
       <div class="ver foot-left" id="traffic" title="點一下切換：在線 → 本月 → 累計">在線—，今天—/峰值—</div>
-      <div class="ver foot-right" id="verFoot">4.21</div>
+      <div class="ver foot-right" id="verFoot">—</div>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/klinecharts@9/dist/umd/klinecharts.min.js"></script>
@@ -8242,10 +8242,10 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.31";
+        const VER = "4.32";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
-        if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
+        if (localStorage.getItem("txfMinVer") !== VER) { // 版號變更即清 1 分 K 快取（4.00 起）
           localStorage.removeItem("txfMin");
           localStorage.removeItem("txf1m");
           localStorage.setItem("txfMinVer", VER);
