@@ -155,6 +155,8 @@
     /* 2026-11-09 老公指定：合計列可點擊收合子列（預設展開） */
     .oi tr.oi-tree-parent td {
       cursor: pointer;
+      /* 2026-11-27 老公指定：紅框那列（當日合計列）改粉紅底色，與子列米黃區隔 */
+      background: #FFE6F0;
     }
     .oi tr td .oi-tree-tog {
       display: inline-block;
@@ -8240,7 +8242,7 @@
     markChips();
     (function purgeOldMinCache() {
       try {
-        const VER = "4.30";
+        const VER = "4.31";
         const f = document.getElementById("verFoot");
         if (f) f.textContent = VER; // footer 版本與 VER 同源（禁止靜態漂移）
         if (localStorage.getItem("txfMinVer") !== VER) { // 4.00
